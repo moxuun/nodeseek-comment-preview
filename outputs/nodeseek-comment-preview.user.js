@@ -30,6 +30,10 @@
     postTitle: 'h1.post-title, .post-title, h1',
   });
 
+  const ANSI_FG_HEX = ['#111827', '#dc2626', '#16a34a', '#ca8a04', '#2563eb', '#c026d3', '#0891b2', '#f8fafc'];
+  const ANSI_BG_HEX = ['#111827', '#ef4444', '#22c55e', '#facc15', '#3b82f6', '#d946ef', '#06b6d4', '#f8fafc'];
+  const ANSI_BRIGHT_HEX = ['#6b7280', '#f87171', '#4ade80', '#fde047', '#60a5fa', '#f0abfc', '#67e8f9', '#fff'];
+
   const state = {
     post: null,
     modal: null,
@@ -309,6 +313,10 @@
     };
   }
 
+  function ansiRulesFor(prefix, property, hexes) {
+    return ANSI_COLORS.map((name, index) => `.xns-preview-content .xns-ansi-${prefix}-${name} { ${property}:${hexes[index]}; }`).join(' ');
+  }
+
   function installStyle() {
     if (document.getElementById(STYLE_ID)) return;
     const style = document.createElement('style');
@@ -353,10 +361,10 @@
       .xns-preview-content .xns-code-copy-btn { position:absolute; top:8px; right:8px; z-index:2; padding:2px 8px; border:0; border-radius:3px; color:#fff; background:#4caf50; cursor:pointer; font:12px/1.2 system-ui,sans-serif; opacity:.85; }
       .xns-preview-content .xns-code-copy-btn:hover, .xns-preview-content .xns-code-copy-btn:focus-visible { opacity:1; outline:none; }
       .xns-preview-content .xns-code-copy-btn.xns-copy-failed { background:#dc2626; }
-      .xns-preview-content .xns-ansi-fg-black { color:#111827; } .xns-preview-content .xns-ansi-fg-red { color:#dc2626; } .xns-preview-content .xns-ansi-fg-green { color:#16a34a; } .xns-preview-content .xns-ansi-fg-yellow { color:#ca8a04; } .xns-preview-content .xns-ansi-fg-blue { color:#2563eb; } .xns-preview-content .xns-ansi-fg-magenta { color:#c026d3; } .xns-preview-content .xns-ansi-fg-cyan { color:#0891b2; } .xns-preview-content .xns-ansi-fg-white { color:#f8fafc; }
-      .xns-preview-content .xns-ansi-fg-bright-black { color:#6b7280; } .xns-preview-content .xns-ansi-fg-bright-red { color:#f87171; } .xns-preview-content .xns-ansi-fg-bright-green { color:#4ade80; } .xns-preview-content .xns-ansi-fg-bright-yellow { color:#fde047; } .xns-preview-content .xns-ansi-fg-bright-blue { color:#60a5fa; } .xns-preview-content .xns-ansi-fg-bright-magenta { color:#f0abfc; } .xns-preview-content .xns-ansi-fg-bright-cyan { color:#67e8f9; } .xns-preview-content .xns-ansi-fg-bright-white { color:#fff; }
-      .xns-preview-content .xns-ansi-bg-black { background:#111827; } .xns-preview-content .xns-ansi-bg-red { background:#ef4444; } .xns-preview-content .xns-ansi-bg-green { background:#22c55e; } .xns-preview-content .xns-ansi-bg-yellow { background:#facc15; } .xns-preview-content .xns-ansi-bg-blue { background:#3b82f6; } .xns-preview-content .xns-ansi-bg-magenta { background:#d946ef; } .xns-preview-content .xns-ansi-bg-cyan { background:#06b6d4; } .xns-preview-content .xns-ansi-bg-white { background:#f8fafc; }
-      .xns-preview-content .xns-ansi-bg-bright-black { background:#6b7280; } .xns-preview-content .xns-ansi-bg-bright-red { background:#f87171; } .xns-preview-content .xns-ansi-bg-bright-green { background:#4ade80; } .xns-preview-content .xns-ansi-bg-bright-yellow { background:#fde047; } .xns-preview-content .xns-ansi-bg-bright-blue { background:#60a5fa; } .xns-preview-content .xns-ansi-bg-bright-magenta { background:#f0abfc; } .xns-preview-content .xns-ansi-bg-bright-cyan { background:#67e8f9; } .xns-preview-content .xns-ansi-bg-bright-white { background:#fff; }
+      ${ansiRulesFor('fg', 'color', ANSI_FG_HEX)}
+      ${ansiRulesFor('fg-bright', 'color', ANSI_BRIGHT_HEX)}
+      ${ansiRulesFor('bg', 'background', ANSI_BG_HEX)}
+      ${ansiRulesFor('bg-bright', 'background', ANSI_BRIGHT_HEX)}
       .xns-preview-content .xns-ansi-bold { font-weight:700; } .xns-preview-content .xns-ansi-dim { opacity:.72; } .xns-preview-content .xns-ansi-italic { font-style:italic; } .xns-preview-content .xns-ansi-underline { text-decoration:underline; } .xns-preview-content .xns-ansi-strike { text-decoration:line-through; } .xns-preview-content .xns-ansi-hidden { visibility:hidden; } .xns-preview-content .xns-ansi-inverse { filter:invert(1); }
       .xns-preview-content .xns-markdown-tabs { margin:8px 0; overflow:hidden; border:1px solid rgba(100,116,139,.24); border-radius:7px; background:#f8fafc; }
       .xns-preview-content .xns-markdown-tabs-nav { display:flex; align-items:center; flex-wrap:wrap; gap:4px; padding:5px 6px; border-bottom:1px solid rgba(100,116,139,.2); background:rgba(148,163,184,.1); }
@@ -973,6 +981,14 @@
     return fallbackCopyText(text) ? Promise.resolve() : Promise.reject(new Error('copy failed'));
   }
 
+  function installPreviewFeatures(root) {
+    installPreviewMagicTabs(root);
+    installPreviewMarkdownTabs(root);
+    installPreviewAnsiBlocks(root);
+    installPreviewImageFallback(root);
+    installPreviewCodeBlocks(root);
+  }
+
   function installPreviewCodeBlocks(root) {
     qsa(root, '.xns-preview-content pre').forEach((pre) => {
       if (pre.dataset.xnsCodeBound === 'true') return;
@@ -1395,7 +1411,8 @@
     return getCommentItems(root).map((item, index) => getCommentRecord(item, info.postId, page, index, false, { keepCommentMenu: true, state })).filter(Boolean);
   }
 
-  async function loadPreviewRecords(info, firstDocument, options = {}) {
+  // 并发拉取同帖的所有分页（含分页器里动态发现的新页码）
+  async function fetchPostPages(info, firstDocument, options = {}) {
     const noStore = options.noStore !== false;
     const pageDocs = new Map([[info.page, firstDocument]]);
     const failedPages = [];
@@ -1410,11 +1427,11 @@
     const pending = Array.from(pages).sort((a, b) => a - b);
     const worker = async () => {
       while (pending.length) {
+        if (options.isAborted?.()) return;
         const page = pending.shift();
         if (page === undefined || pageDocs.has(page)) continue;
-        const pageUrl = new URL(`/post-${info.postId}-${page}`, window.location.origin);
         try {
-          const { html } = await fetchHtml(pageUrl, { noStore });
+          const { html } = await fetchHtml(new URL(`/post-${info.postId}-${page}`, window.location.origin), { noStore });
           const parsed = parseHtml(html);
           pageDocs.set(page, parsed);
           getPageNumbers(parsed, info.postId).forEach((foundPage) => {
@@ -1430,7 +1447,11 @@
     };
     const workerCount = Math.min(PAGE_CONCURRENCY, Math.max(1, pending.length));
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    return { pageDocs, failedPages };
+  }
 
+  async function loadPreviewRecords(info, firstDocument, options = {}) {
+    const { pageDocs, failedPages } = await fetchPostPages(info, firstDocument, options);
     const allRecords = [];
     pageDocs.forEach((root, page) => {
       allRecords.push(...collectPageRecords(info, root, page));
@@ -1442,18 +1463,16 @@
     return { records: Array.from(unique.values()), loadedPages: pageDocs.size, failedPages };
   }
 
-  function preparePreviewRecord(record, depth) {
+  function prepareCommentRecord(record, depth) {
     stripRenderArtifacts(record.node);
     record.node.setAttribute('data-xns-floor', String(record.floor));
-    record.node.setAttribute('data-xns-remote', 'true');
-    record.node.setAttribute('data-xns-source-page', String(record.page));
+    if (!record.current) {
+      record.node.setAttribute('data-xns-remote', 'true');
+      record.node.setAttribute('data-xns-source-page', String(record.page));
+    }
     record.node.classList.add(depth === 0 ? 'xns-comment-root' : 'xns-comment-child');
     if (depth > 0 && record.parent) record.node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
     ensurePreviewMenu(record.node, { includeFavorite: false, counts: record.counts || undefined });
-  }
-
-  function appendPreviewRecord(record, container, depth) {
-    appendNestedRecord(record, container, depth, preparePreviewRecord);
   }
 
   function appendNestedRecord(record, container, depth, prepareRecord) {
@@ -1502,7 +1521,7 @@
     qs(section, ':scope > .xns-preview-empty')?.remove();
     qsa(section, ':scope > .xns-page-loading, :scope > .xns-page-failed').forEach((node) => node.remove());
     if (records.length) {
-      buildReplyTree(records).forEach((record) => appendPreviewRecord(record, thread, 0));
+      buildReplyTree(records).forEach((record) => appendNestedRecord(record, thread, 0, prepareCommentRecord));
       // “打开原楼层”只用于跨页评论；当前页评论在预览里已有原文，不重复放来源链接。
       records.forEach((record) => {
         if (record.page !== info.page) addRemoteNote(record, info.postId);
@@ -1771,19 +1790,11 @@
       modal.title.textContent = preview.title || 'NodeSeek 帖子预览';
       clearElement(modal.body);
       modal.body.appendChild(preview.content);
-      installPreviewMagicTabs(modal.body);
-      installPreviewMarkdownTabs(modal.body);
-      installPreviewAnsiBlocks(modal.body);
-      installPreviewImageFallback(modal.body);
-      installPreviewCodeBlocks(modal.body);
+      installPreviewFeatures(modal.body);
       if (!preserveContent && preview.hydrate) {
         await preview.hydrate;
         if (state.modal !== modal || modal.loadGeneration !== generation) return;
-        installPreviewMagicTabs(modal.body);
-        installPreviewMarkdownTabs(modal.body);
-        installPreviewAnsiBlocks(modal.body);
-        installPreviewImageFallback(modal.body);
-        installPreviewCodeBlocks(modal.body);
+        installPreviewFeatures(modal.body);
       }
       if (preserveContent) stabilizePreviewScroll(modal, scrollSnapshot, generation);
     } catch (error) {
@@ -2012,43 +2023,14 @@
     }
 
     async loadPages(generation, options = {}) {
-      const noStore = options.noStore !== false;
-      this.pageDocs.clear();
-      this.failedPages = [];
       this.records = [];
-      this.pageDocs.set(this.info.page, document);
-
-      const pages = new Set([this.info.page]);
-      getPageNumbers(document, this.info.postId).forEach((page) => {
-        if (page <= MAX_PAGE) pages.add(page);
+      this.failedPages = [];
+      const { pageDocs, failedPages } = await fetchPostPages(this.info, document, {
+        noStore: options.noStore !== false,
+        isAborted: () => generation !== this.generation,
       });
-      for (let page = 1; page <= Math.min(MAX_PAGE, Math.max(...pages)); page += 1) pages.add(page);
-      pages.delete(this.info.page);
-
-      const pending = Array.from(pages).sort((a, b) => a - b);
-      const worker = async () => {
-        while (pending.length) {
-          if (generation !== this.generation) return;
-          const page = pending.shift();
-          if (page === undefined || this.pageDocs.has(page)) continue;
-          const url = new URL(`/post-${this.info.postId}-${page}`, window.location.origin);
-          try {
-            const { html } = await fetchHtml(url, { noStore });
-            const parsed = parseHtml(html);
-            this.pageDocs.set(page, parsed);
-            getPageNumbers(parsed, this.info.postId).forEach((foundPage) => {
-              if (foundPage <= MAX_PAGE && !pages.has(foundPage) && foundPage !== this.info.page) {
-                pages.add(foundPage);
-                pending.push(foundPage);
-              }
-            });
-          } catch {
-            this.failedPages.push(page);
-          }
-        }
-      };
-      const workerCount = Math.min(PAGE_CONCURRENCY, Math.max(1, pending.length));
-      await Promise.all(Array.from({ length: workerCount }, () => worker()));
+      this.pageDocs = pageDocs;
+      this.failedPages = failedPages;
 
       const allRecords = [];
       this.pageDocs.forEach((root, page) => {
@@ -2097,23 +2079,10 @@
       this.list?.closest(SELECTORS.commentContainer)?.insertAdjacentElement('beforebegin', this.statusNode);
     }
 
-    prepareRecord(record, depth) {
-      stripRenderArtifacts(record.node);
-      record.node.setAttribute('data-xns-floor', String(record.floor));
-      record.node.classList.add(depth === 0 ? 'xns-comment-root' : 'xns-comment-child');
-      if (!record.current) {
-        record.node.setAttribute('data-xns-remote', 'true');
-        record.node.setAttribute('data-xns-source-page', String(record.page));
-      }
-      if (depth > 0 && record.parent) record.node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
-      ensurePreviewMenu(record.node, { includeFavorite: false, counts: record.counts || undefined });
-    }
-
     render() {
       if (!this.list || state.mode !== 'thread') return;
       this.restoreOriginal();
-      const prepare = this.prepareRecord.bind(this);
-      buildReplyTree(this.records).forEach((record) => appendNestedRecord(record, this.list, 0, prepare));
+      buildReplyTree(this.records).forEach((record) => appendNestedRecord(record, this.list, 0, prepareCommentRecord));
       this.records.filter((record) => record.node.hasAttribute('data-xns-remote')).forEach((record) => addRemoteNote(record, this.info.postId));
       const loadedPages = this.pageDocs.size;
       const status = this.failedPages.length
