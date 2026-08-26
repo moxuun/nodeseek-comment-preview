@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.4.8
-// @description  楼中楼、原版评论布局、快速首屏、更窄灰色边缘、帖子回复、图片灯箱和 V2Next 式预览刷新/滚动控制。
+// @version      0.4.9
+// @description  楼中楼、原版评论布局、快速首屏、代码块复制、更窄灰色边缘、帖子回复、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
@@ -307,6 +307,12 @@
       .xns-modal-body { overflow:auto; padding:clamp(10px,2vw,18px); }
       .xns-modal-body img { max-width:100%; height:auto; }
       .xns-preview-content { font-size:14px; line-height:1.45; }
+      .xns-preview-content pre { box-sizing:border-box; max-width:100%; overflow:auto; white-space:pre; }
+      .xns-preview-content pre.xns-code-block { position:relative !important; padding-top:30px; font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace; }
+      .xns-preview-content pre.xns-code-block code { font:inherit; }
+      .xns-preview-content .xns-code-copy-btn { position:absolute; top:8px; right:8px; z-index:2; padding:2px 8px; border:0; border-radius:3px; color:#fff; background:#4caf50; cursor:pointer; font:12px/1.2 system-ui,sans-serif; opacity:.85; }
+      .xns-preview-content .xns-code-copy-btn:hover, .xns-preview-content .xns-code-copy-btn:focus-visible { opacity:1; outline:none; }
+      .xns-preview-content .xns-code-copy-btn.xns-copy-failed { background:#dc2626; }
       .xns-preview-content h1, .xns-preview-content h2, .xns-preview-content h3, .xns-preview-content p { line-height:1.45; }
       .xns-preview-content h1, .xns-preview-content h2, .xns-preview-content h3 { margin-top:0; }
       .xns-preview-content p { margin:3px 0 6px; }
@@ -360,6 +366,7 @@
       @media (prefers-color-scheme: dark) {
         .xns-modal { color:#e5e7eb; background:#18202b; }
         .xns-modal-header a, .xns-modal-header .xns-modal-reply, .xns-modal-close, .xns-preview-post, .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
+        .xns-preview-content pre.xns-code-block { color:#e5e7eb; background:#0b1220; }
         .xns-toolbar-status, .xns-loading, .xns-status, .xns-remote-note { color:#9ca3af; }
       }
       @media (max-width:800px) { .xns-preview-scroll-btns { right:6px; } .xns-scroll-btn { width:30px !important; min-width:30px !important; max-width:30px !important; height:30px !important; min-height:30px !important; max-height:30px !important; flex-basis:30px; } .xns-preview-thread .xns-remote-note { max-width:62%; } }
@@ -622,6 +629,71 @@
         const message = createElement('span', 'xns-image-error', '图片加载失败：图片站拒绝了当前嵌入来源。仍可点击“打开原图”尝试查看。');
         image.insertAdjacentElement('afterend', message);
       }, { once: true });
+    });
+  }
+
+  function fallbackCopyText(text) {
+    const textarea = createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-10000px';
+    textarea.style.left = '-10000px';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    let copied = false;
+    try {
+      copied = document.execCommand('copy');
+    } catch {
+      copied = false;
+    }
+    textarea.remove();
+    return copied;
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard?.writeText) {
+      return navigator.clipboard.writeText(text).catch(() => {
+        if (!fallbackCopyText(text)) throw new Error('copy failed');
+      });
+    }
+    return fallbackCopyText(text) ? Promise.resolve() : Promise.reject(new Error('copy failed'));
+  }
+
+  function installPreviewCodeBlocks(root) {
+    qsa(root, '.xns-preview-content pre').forEach((pre) => {
+      if (pre.dataset.xnsCodeBound === 'true') return;
+      const code = qs(pre, ':scope > code') || qs(pre, 'code');
+      if (!code) return;
+
+      pre.dataset.xnsCodeBound = 'true';
+      pre.classList.add('xns-code-block');
+      const button = createElement('button', 'xns-code-copy-btn', '复制');
+      button.type = 'button';
+      button.setAttribute('aria-label', '复制代码');
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const text = code.innerText ?? code.textContent ?? '';
+        button.disabled = true;
+        void copyText(text).then(() => {
+          button.textContent = '已复制';
+          button.classList.remove('xns-copy-failed');
+        }).catch(() => {
+          button.textContent = '复制失败';
+          button.classList.add('xns-copy-failed');
+        }).finally(() => {
+          window.setTimeout(() => {
+            if (!button.isConnected) return;
+            button.disabled = false;
+            button.textContent = '复制';
+            button.classList.remove('xns-copy-failed');
+          }, 2_000);
+        });
+      });
+      pre.appendChild(button);
     });
   }
 
@@ -1125,7 +1197,9 @@
       clearElement(modal.body);
       modal.body.appendChild(preview.content);
       installPreviewImageFallback(modal.body);
+      installPreviewCodeBlocks(modal.body);
       if (preview.hydrate) await preview.hydrate;
+      installPreviewCodeBlocks(modal.body);
       if (preserveContent && state.modal === modal && modal.loadGeneration === generation) {
         const maxScrollTop = Math.max(0, modal.body.scrollHeight - modal.body.clientHeight);
         modal.body.scrollTop = Math.min(previousScrollTop, maxScrollTop);
