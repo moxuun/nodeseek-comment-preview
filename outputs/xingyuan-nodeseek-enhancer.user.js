@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.3.8
-// @description  楼中楼、原版评论布局、紧凑预览、评论元信息整理和弹窗顶部/底部快捷跳转。
+// @version      0.3.9
+// @description  楼中楼、原版评论布局、紧凑预览、图片灯箱和弹窗顶部/底部快捷跳转。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
@@ -32,6 +32,7 @@
   const state = {
     post: null,
     modal: null,
+    lightbox: null,
     mode: DEFAULT_MODE,
   };
 
@@ -278,10 +279,10 @@
       .xns-post-toolbar button[aria-pressed="true"] { color:#2563eb; border-color:#3b82f6; background:rgba(59,130,246,.1); }
       .xns-toolbar-status { margin-left:auto; color:#64748b; font-size:12px; }
       .xns-modal { position:relative; }
-      .xns-preview-scroll-btns { position:absolute; right:10px; bottom:10px; display:flex; flex-direction:column; gap:6px; z-index:3; transition:opacity .3s ease; }
-      .xns-scroll-btn { width:30px; height:30px; padding:0; border:0; border-radius:50%; color:#fff; background:rgba(46,164,79,.8); display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,.2); opacity:.8; transition:all .2s ease; }
+      .xns-preview-scroll-btns { position:absolute; right:clamp(28px,3vw,40px); bottom:12px; display:flex; flex-direction:column; gap:5px; z-index:3; transition:opacity .3s ease; pointer-events:none; }
+      .xns-scroll-btn { width:26px; height:26px; padding:0; border:0; border-radius:50%; color:#fff; background:rgba(46,164,79,.8); display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,.2); opacity:.8; transition:all .2s ease; pointer-events:auto; }
       .xns-scroll-btn:hover, .xns-scroll-btn:focus-visible { background:rgba(46,164,79,1); opacity:1; transform:scale(1.05); outline:none; }
-      .xns-scroll-btn svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+      .xns-scroll-btn svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
       .xns-scroll-btn.hidden { opacity:0; pointer-events:none; }
       .xns-loading, .xns-status { margin:10px 0; padding:7px 10px; border:1px solid rgba(100,116,139,.2); border-radius:7px; color:#64748b; background:rgba(148,163,184,.08); font:13px/1.4 system-ui,sans-serif; }
       .xns-comment-root[data-xns-floor], .xns-comment-child[data-xns-floor] { position:relative; }
@@ -340,13 +341,23 @@
       .xns-preview-composer button:hover, .xns-preview-composer button:focus-visible, .xns-preview-composer a:hover, .xns-preview-composer a:focus-visible { border-color:#3b82f6; outline:none; }
       .xns-preview-composer-status { color:#64748b; font-size:12px; }
       .xns-image-error { display:block; margin-top:5px; color:#b91c1c; font:12px/1.4 system-ui,sans-serif; }
+      .xns-preview-content img { cursor:zoom-in; }
+      .xns-lightbox { position:fixed; z-index:2147483500; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; background:rgba(2,6,23,.88); }
+      .xns-lightbox-stage { position:relative; display:flex; align-items:center; justify-content:center; width:100%; height:100%; overflow:hidden; cursor:grab; }
+      .xns-lightbox-stage.xns-dragging { cursor:grabbing; }
+      .xns-lightbox-image { max-width:calc(100vw - 48px); max-height:calc(100vh - 48px); object-fit:contain; user-select:none; -webkit-user-drag:none; transform-origin:center; cursor:grab; }
+      .xns-lightbox-stage.xns-dragging .xns-lightbox-image { cursor:grabbing; }
+      .xns-lightbox-close, .xns-lightbox-open { position:absolute; z-index:1; padding:6px 10px; border:1px solid rgba(255,255,255,.35); border-radius:6px; color:#fff; background:rgba(15,23,42,.58); cursor:pointer; text-decoration:none; font:13px/1.2 system-ui,sans-serif; }
+      .xns-lightbox-close { top:10px; right:10px; font-size:20px; line-height:1; }
+      .xns-lightbox-open { left:10px; bottom:10px; }
+      .xns-lightbox-close:hover, .xns-lightbox-open:hover, .xns-lightbox-close:focus-visible, .xns-lightbox-open:focus-visible { background:rgba(15,23,42,.9); outline:none; }
       @media (prefers-color-scheme: dark) {
         .xns-modal { color:#e5e7eb; background:#18202b; }
         .xns-modal-header a, .xns-modal-close, .xns-preview-post, .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
         .xns-toolbar-status, .xns-loading, .xns-status, .xns-remote-note { color:#9ca3af; }
       }
-      @media (max-width:800px) { .xns-preview-scroll-btns { right:8px; bottom:8px; } .xns-scroll-btn { width:28px; height:28px; } .xns-preview-thread .xns-remote-note { max-width:62%; } }
-      @media (max-width:640px) { .xns-overlay { padding:5px; } .xns-modal { max-height:96vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-thread .xns-remote-note { top:5px; right:7px; max-width:70%; } .xns-toolbar-status { width:100%; margin-left:0; } }
+      @media (max-width:800px) { .xns-preview-scroll-btns { right:24px; bottom:8px; } .xns-scroll-btn { width:24px; height:24px; } .xns-preview-thread .xns-remote-note { max-width:62%; } }
+      @media (max-width:640px) { .xns-overlay { padding:5px; } .xns-modal { max-height:96vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-thread .xns-remote-note { top:5px; right:7px; max-width:70%; } .xns-preview-scroll-btns { right:20px; bottom:7px; } .xns-scroll-btn { width:23px; height:23px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; margin-left:0; } }
     `;
     (document.head || document.documentElement || document.body)?.appendChild(style);
   }
