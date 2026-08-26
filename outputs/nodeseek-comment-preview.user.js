@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         星渊 NodeSeek 楼中楼与预览
+// @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.6
+// @version      0.5.7
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -1263,9 +1263,17 @@
           mode: 'new-comment',
           postId: Number(actionContext.postId),
         }, { context: actionContext });
-        status.textContent = '回复已发送。';
+        status.textContent = '回复已发送，正在更新楼中楼…';
         textarea.readOnly = true;
         submit.remove();
+        if (actionContext.modal && state.modal === actionContext.modal) {
+          await loadPreviewModal(actionContext.modal, '正在更新回复…', { preserveContent: true });
+        } else if (state.post) {
+          const post = state.post;
+          if (post.composer === composer) post.composer = null;
+          composer.remove();
+          await post.reloadPages();
+        }
       } catch (error) {
         status.textContent = `发送失败：${error.message || '网络错误'}`;
         submit.disabled = false;
@@ -1919,12 +1927,12 @@
       if (status) status.textContent = this.records.length ? `${this.records.length} 条评论` : '读取中…';
     }
 
-    async reloadPages() {
+    async reloadPages(options = {}) {
       if (!this.list) return;
       const generation = ++this.generation;
       this.showLoading('正在读取评论分页…');
       try {
-        await this.loadPages(generation);
+        await this.loadPages(generation, options);
         if (generation !== this.generation) return;
         this.render();
       } catch (error) {
@@ -1939,7 +1947,8 @@
       }
     }
 
-    async loadPages(generation) {
+    async loadPages(generation, options = {}) {
+      const noStore = options.noStore !== false;
       this.pageDocs.clear();
       this.failedPages = [];
       this.records = [];
@@ -1960,7 +1969,7 @@
           if (page === undefined || this.pageDocs.has(page)) continue;
           const url = new URL(`/post-${this.info.postId}-${page}`, window.location.origin);
           try {
-            const { html } = await fetchHtml(url);
+            const { html } = await fetchHtml(url, { noStore });
             const parsed = parseHtml(html);
             this.pageDocs.set(page, parsed);
             getPageNumbers(parsed, this.info.postId).forEach((foundPage) => {

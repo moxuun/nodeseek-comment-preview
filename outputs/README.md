@@ -1,4 +1,4 @@
-# 星渊 NodeSeek 楼中楼与预览
+# nodeseek楼中楼预览
 
 只保留楼中楼、原版布局、紧凑首页预览和预览内阅读跳转四个紧密相关的功能：
 
@@ -20,7 +20,7 @@ Ctrl/Command 点击、鼠标中键和右键菜单保持 NodeSeek 原生行为。
 ## 安装
 
 1. 安装 Tampermonkey 或 Violentmonkey。
-2. 打开 `xingyuan-nodeseek-enhancer.user.js` 并安装。
+2. 打开 `nodeseek-comment-preview.user.js` 并安装。
 3. 刷新 NodeSeek 页面。
 
 脚本使用 `@grant none`，不加载远程模块，不执行远程代码。
@@ -38,7 +38,7 @@ Ctrl/Command 点击、鼠标中键和右键菜单保持 NodeSeek 原生行为。
 
 如果楼中楼读取失败，可以点击 `原版`，脚本会恢复当前页面原始评论。Cloudflare、网络超时或登录状态可能导致跨页读取失败。
 
-如果首页点击仍然跳转，请先确认旧版本脚本已卸载或更新到 `0.5.5`，然后强制刷新页面。
+如果首页点击仍然跳转，请先确认旧版本脚本已卸载或更新到 `0.5.6`，然后强制刷新页面。
 
 预览图片会使用 NodeSeek 来源嵌入，避免被图片站误判为直链；如果图片站仍拒绝嵌入，弹窗会显示失败提示。
 
@@ -56,6 +56,10 @@ Ctrl/Command 点击、鼠标中键和右键菜单保持 NodeSeek 原生行为。
 
 0.5.5 修复预览页回复编辑器只能共存一个且总是追加到弹窗底部的问题；现在每个楼层拥有独立回复编辑器，直接显示在对应楼层操作栏下方，帖子级“回复帖子”仍单独管理。
 
+0.5.6 修复回复成功后跨页评论仍命中旧缓存的问题；预览打开、预览刷新和帖子页分页刷新都会强制读取最新同帖 HTML，回复发送成功后自动重新整理楼中楼。
+
+0.5.7 将油猴脚本名称改为 `nodeseek楼中楼预览`。
+
 ## 安全边界
 
 - 只读取当前 NodeSeek 帖子页面的同源 HTML。
@@ -66,5 +70,5 @@ Ctrl/Command 点击、鼠标中键和右键菜单保持 NodeSeek 原生行为。
 ## 检查
 
 ```powershell
-node --check .\xingyuan-nodeseek-enhancer.user.js
+node --check .\nodeseek-comment-preview.user.js
 ```
