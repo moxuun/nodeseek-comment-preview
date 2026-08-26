@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.4.3
-// @description  楼中楼、原版评论布局、紧凑预览、全高弹窗、图片灯箱和 V2Next 式预览刷新/滚动控制。
+// @version      0.4.4
+// @description  楼中楼、原版评论布局、快速首屏、全高弹窗、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
@@ -18,6 +18,7 @@
   const REQUEST_TIMEOUT = 8_000;
   const MAX_RESPONSE_BYTES = 2_000_000;
   const MAX_PAGE = 12;
+  const PAGE_CONCURRENCY = 4;
   const STYLE_ID = `${PREFIX}-style`;
   const DEFAULT_MODE = 'thread';
 
@@ -235,15 +236,16 @@
     return pages;
   }
 
-  async function fetchHtml(url) {
+  async function fetchHtml(url, options = {}) {
     if (!isAllowedPostRequest(url)) throw new Error('只允许读取同一站点的帖子页面');
+    const noStore = options.noStore === true;
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
     try {
       const response = await fetch(url.href, {
         method: 'GET',
         credentials: 'same-origin',
-        cache: 'no-store',
+        cache: noStore ? 'no-store' : 'default',
         redirect: 'error',
         referrerPolicy: 'same-origin',
         headers: { Accept: 'text/html,application/xhtml+xml' },
@@ -318,7 +320,7 @@
       .xns-preview-comments { margin-top:10px; padding-top:8px; border-top:1px solid rgba(100,116,139,.2); }
       .xns-preview-comments > h3 { margin:0 0 7px; font-size:15px; line-height:1.3; }
       .xns-preview-thread { margin:0; padding:0; list-style:none; }
-      .xns-preview-thread > .content-item { margin:4px 0; padding:6px 8px; border:1px solid rgba(100,116,139,.2); border-radius:6px; background:#f8fafc; }
+      .xns-preview-thread > .content-item { margin:4px 0; padding:6px 8px; border:1px solid rgba(100,116,139,.2); border-radius:6px; background:#f8fafc; content-visibility:auto; contain-intrinsic-size:150px; }
       .xns-preview-thread .xns-comment-child { margin-top:3px !important; padding-left:8px !important; }
       .xns-preview-thread .nsk-content-meta-info { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; margin:0 0 2px; color:#64748b; font-size:12px; line-height:1.25; }
       .xns-preview-content .nsk-content-meta-info .content-info, .xns-preview-content .nsk-content-meta-info .date-created { display:inline-flex; align-items:center; flex-wrap:wrap; gap:5px; margin:0 !important; line-height:1.25; }
@@ -925,7 +927,12 @@
     }
   }
 
-  async function loadPreviewRecords(info, firstDocument) {
+  function collectPageRecords(info, root, page) {
+    return getCommentItems(root).map((item, index) => getCommentRecord(item, info.postId, page, index, false, { keepCommentMenu: true })).filter(Boolean);
+  }
+
+  async function loadPreviewRecords(info, firstDocument, options = {}) {
+    const noStore = options.noStore === true;
     const pageDocs = new Map([[info.page, firstDocument]]);
     const failedPages = [];
     const pages = new Set([info.page]);
@@ -943,7 +950,7 @@
         if (page === undefined || pageDocs.has(page)) continue;
         const pageUrl = new URL(`/post-${info.postId}-${page}`, window.location.origin);
         try {
-          const { html } = await fetchHtml(pageUrl);
+          const { html } = await fetchHtml(pageUrl, { noStore });
           const parsed = parseHtml(html);
           pageDocs.set(page, parsed);
           getPageNumbers(parsed, info.postId).forEach((foundPage) => {
@@ -957,14 +964,12 @@
         }
       }
     };
-    await Promise.all([worker(), worker()]);
+    const workerCount = Math.min(PAGE_CONCURRENCY, Math.max(1, pending.length));
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
     const allRecords = [];
     pageDocs.forEach((root, page) => {
-      getCommentItems(root).forEach((item, index) => {
-        const record = getCommentRecord(item, info.postId, page, index, false, { keepCommentMenu: true });
-        if (record) allRecords.push(record);
-      });
+      allRecords.push(...collectPageRecords(info, root, page));
     });
     const unique = new Map();
     allRecords.forEach((record) => {
@@ -1012,7 +1017,29 @@
     return node;
   }
 
-  async function buildPreviewContent(url, parsed) {
+  function renderPreviewRecords(section, info, records, options = {}) {
+    const heading = qs(section, ':scope > h3');
+    const thread = qs(section, ':scope > .xns-preview-thread');
+    if (!heading || !thread) return;
+    heading.textContent = `楼中楼预览 · ${records.length} 条回复`;
+    clearElement(thread);
+    qs(section, ':scope > .xns-preview-empty')?.remove();
+    qsa(section, ':scope > .xns-page-loading, :scope > .xns-page-failed').forEach((node) => node.remove());
+    if (records.length) {
+      buildReplyTree(records).forEach((record) => appendPreviewRecord(record, thread, 0));
+      records.forEach((record) => addRemoteNote(record, info.postId));
+    } else {
+      section.appendChild(createElement('p', 'xns-status xns-preview-empty', '没有读取到评论。'));
+    }
+    if (options.loading) {
+      section.appendChild(createElement('p', 'xns-status xns-page-loading', '正在加载其他分页…'));
+    }
+    if (options.failedPages?.length) {
+      section.appendChild(createElement('p', 'xns-status xns-page-failed', `已读取 ${options.loadedPages} 页，${options.failedPages.length} 页读取失败。`));
+    }
+  }
+
+  function buildPreviewContent(url, parsed, options = {}) {
     const wrapper = createElement('div', 'xns-preview-content');
     const title = qs(parsed, SELECTORS.postTitle)?.textContent?.trim() || '';
     const info = getPostInfo(url.href);
@@ -1025,24 +1052,21 @@
       if (importedContent) wrapper.appendChild(importedContent);
       else wrapper.appendChild(createElement('p', 'xns-status', '没有找到帖子正文。'));
     }
-    if (!info) return { title, content: wrapper };
-    const preview = await loadPreviewRecords(info, parsed);
-    if (!preview.records.length) {
-      wrapper.appendChild(createElement('p', 'xns-status', '没有读取到评论。'));
-      return { title, content: wrapper };
-    }
-
+    if (!info) return { title, content: wrapper, hydrate: null };
+    const currentRecords = collectPageRecords(info, parsed, info.page);
+    const knownPages = getPageNumbers(parsed, info.postId);
+    const hasRemotePages = Array.from(knownPages).some((page) => page !== info.page);
     const section = createElement('section', 'xns-preview-comments');
-    section.appendChild(createElement('h3', '', `楼中楼预览 · ${preview.records.length} 条回复`));
+    section.appendChild(createElement('h3', '', '楼中楼预览'));
     const thread = createElement('ul', 'xns-preview-thread');
-    buildReplyTree(preview.records).forEach((record) => appendPreviewRecord(record, thread, 0));
-    preview.records.forEach((record) => addRemoteNote(record, info.postId));
     section.appendChild(thread);
-    if (preview.failedPages.length) {
-      section.appendChild(createElement('p', 'xns-status', `已读取 ${preview.loadedPages} 页，${preview.failedPages.length} 页读取失败。`));
-    }
+    renderPreviewRecords(section, info, currentRecords, { loading: hasRemotePages });
     wrapper.appendChild(section);
-    return { title, content: wrapper };
+    const hydrate = loadPreviewRecords(info, parsed, { noStore: options.noStore === true }).then((preview) => {
+      if (section.isConnected) renderPreviewRecords(section, info, preview.records, preview);
+      return preview;
+    });
+    return { title, content: wrapper, hydrate };
   }
 
   function showPreviewLoadError(modal, error) {
@@ -1085,14 +1109,15 @@
       modal.body.appendChild(createElement('p', 'xns-loading', loadingText));
     }
     try {
-      const { html } = await fetchHtml(modal.url);
-      const preview = await buildPreviewContent(modal.url, parseHtml(html));
+      const { html } = await fetchHtml(modal.url, { noStore: preserveContent });
+      const preview = buildPreviewContent(modal.url, parseHtml(html), { noStore: preserveContent });
       if (state.modal !== modal || modal.loadGeneration !== generation) return;
       modal.title.textContent = preview.title || 'NodeSeek 帖子预览';
       clearElement(modal.body);
       modal.body.appendChild(preview.content);
       installPreviewImageFallback(modal.body);
-      if (preserveContent) {
+      if (preview.hydrate) await preview.hydrate;
+      if (preserveContent && state.modal === modal && modal.loadGeneration === generation) {
         const maxScrollTop = Math.max(0, modal.body.scrollHeight - modal.body.clientHeight);
         modal.body.scrollTop = Math.min(previousScrollTop, maxScrollTop);
       }
