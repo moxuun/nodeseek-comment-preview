@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.4.0
-// @description  楼中楼、原版评论布局、紧凑预览、图片灯箱和预览刷新/滚动控制。
+// @version      0.4.1
+// @description  楼中楼、原版评论布局、紧凑预览、图片灯箱和右侧预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
@@ -279,8 +279,8 @@
       .xns-post-toolbar button[aria-pressed="true"] { color:#2563eb; border-color:#3b82f6; background:rgba(59,130,246,.1); }
       .xns-toolbar-status { margin-left:auto; color:#64748b; font-size:12px; }
       .xns-modal { position:relative; }
-      .xns-preview-scroll-btns { position:absolute; top:50%; right:clamp(28px,3vw,40px); bottom:auto; display:flex; flex-direction:column; gap:7px; z-index:3; transform:translateY(-50%); transition:opacity .3s ease; pointer-events:none; }
-      .xns-scroll-btn { box-sizing:border-box !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:26px !important; min-height:26px !important; max-height:26px !important; flex:0 0 26px; padding:0 !important; border:0; border-radius:50%; color:#fff; background:rgba(46,164,79,.8); display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,.2); opacity:.8; line-height:1; transition:all .2s ease; pointer-events:auto; }
+      .xns-preview-scroll-btns { position:absolute; top:50%; right:8px; bottom:auto; display:flex; flex-direction:column; gap:6px; z-index:3; transform:translateY(-50%); transition:opacity .3s ease; pointer-events:none; }
+      .xns-scroll-btn { box-sizing:border-box !important; width:34px !important; min-width:34px !important; max-width:34px !important; height:34px !important; min-height:34px !important; max-height:34px !important; flex:0 0 34px; padding:0 !important; border:0; border-radius:50%; color:#fff; background:rgba(46,164,79,.8); display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,.2); opacity:.8; line-height:1; transition:all .2s ease; pointer-events:auto; }
       .xns-scroll-btn:hover, .xns-scroll-btn:focus-visible { background:rgba(46,164,79,1); opacity:1; transform:scale(1.05); outline:none; }
       .xns-scroll-btn svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
       .xns-scroll-btn.hidden { opacity:0; pointer-events:none; }
@@ -357,8 +357,8 @@
         .xns-modal-header a, .xns-modal-close, .xns-preview-post, .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
         .xns-toolbar-status, .xns-loading, .xns-status, .xns-remote-note { color:#9ca3af; }
       }
-      @media (max-width:800px) { .xns-preview-scroll-btns { right:24px; } .xns-scroll-btn { width:24px !important; min-width:24px !important; max-width:24px !important; height:24px !important; min-height:24px !important; max-height:24px !important; flex-basis:24px; } .xns-preview-thread .xns-remote-note { max-width:62%; } }
-      @media (max-width:640px) { .xns-overlay { padding:5px; } .xns-modal { max-height:96vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-thread .xns-remote-note { top:5px; right:7px; max-width:70%; } .xns-preview-scroll-btns { right:20px; } .xns-scroll-btn { width:23px !important; min-width:23px !important; max-width:23px !important; height:23px !important; min-height:23px !important; max-height:23px !important; flex-basis:23px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; margin-left:0; } }
+      @media (max-width:800px) { .xns-preview-scroll-btns { right:6px; } .xns-scroll-btn { width:30px !important; min-width:30px !important; max-width:30px !important; height:30px !important; min-height:30px !important; max-height:30px !important; flex-basis:30px; } .xns-preview-thread .xns-remote-note { max-width:62%; } }
+      @media (max-width:640px) { .xns-overlay { padding:5px; } .xns-modal { max-height:96vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-thread .xns-remote-note { top:5px; right:7px; max-width:70%; } .xns-preview-scroll-btns { right:5px; } .xns-scroll-btn { width:28px !important; min-width:28px !important; max-width:28px !important; height:28px !important; min-height:28px !important; max-height:28px !important; flex-basis:28px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; margin-left:0; } }
     `;
     (document.head || document.documentElement || document.body)?.appendChild(style);
   }
@@ -377,8 +377,25 @@
     return svg;
   }
 
+  function createRefreshArrow() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M20 11a8 8 0 1 1-2.34-5.66');
+    const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    polyline.setAttribute('points', '20 4 20 11 13 11');
+    svg.append(path, polyline);
+    return svg;
+  }
+
   function installPreviewScrollButtons(dialog, body) {
     const group = createElement('div', 'xns-preview-scroll-btns');
+    const refresh = createElement('button', 'xns-scroll-btn xns-refresh-post');
+    refresh.type = 'button';
+    refresh.title = '刷新帖子';
+    refresh.setAttribute('aria-label', '刷新帖子');
+    refresh.appendChild(createRefreshArrow());
     const top = createElement('button', 'xns-scroll-btn xns-to-top');
     top.type = 'button';
     top.title = '回到顶部';
@@ -395,7 +412,8 @@
     };
     top.addEventListener('click', () => scrollTo('top'));
     bottom.addEventListener('click', () => scrollTo('bottom'));
-    group.append(top, bottom);
+    refresh.addEventListener('click', () => { void refreshPreviewModal(); });
+    group.append(refresh, bottom, top);
     dialog.appendChild(group);
 
     const update = () => {
@@ -1025,6 +1043,53 @@
     return { title, content: wrapper };
   }
 
+  function showPreviewLoadError(modal, error) {
+    clearElement(modal.body);
+    modal.body.appendChild(createElement('p', 'xns-status', `预览加载失败：${error?.message || '网络错误'}`));
+    if (modal.fallbackLink) {
+      const link = createElement('a', '', '在原页面打开');
+      link.href = modal.fallbackLink.href;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      modal.body.appendChild(link);
+    }
+  }
+
+  async function loadPreviewModal(modal, loadingText) {
+    if (!modal || modal.loading) return;
+    modal.loading = true;
+    const generation = (modal.loadGeneration || 0) + 1;
+    modal.loadGeneration = generation;
+    const refresh = qs(modal.dialog, '.xns-refresh-post');
+    refresh?.classList.add('xns-action-pending');
+    refresh?.setAttribute('aria-busy', 'true');
+    closeImageLightbox();
+    modal.body.scrollTop = 0;
+    clearElement(modal.body);
+    modal.body.appendChild(createElement('p', 'xns-loading', loadingText));
+    try {
+      const { html } = await fetchHtml(modal.url);
+      const preview = await buildPreviewContent(modal.url, parseHtml(html));
+      if (state.modal !== modal || modal.loadGeneration !== generation) return;
+      modal.title.textContent = preview.title || 'NodeSeek 帖子预览';
+      clearElement(modal.body);
+      modal.body.appendChild(preview.content);
+      installPreviewImageFallback(modal.body);
+    } catch (error) {
+      if (state.modal === modal && modal.loadGeneration === generation) showPreviewLoadError(modal, error);
+    } finally {
+      modal.loading = false;
+      refresh?.classList.remove('xns-action-pending');
+      refresh?.removeAttribute('aria-busy');
+    }
+  }
+
+  function refreshPreviewModal() {
+    const modal = state.modal;
+    if (!modal || modal.loading) return;
+    void loadPreviewModal(modal, '正在刷新帖子…');
+  }
+
   function openPreviewModal(url, fallbackLink) {
     closeModal();
     const overlay = createElement('div', 'xns-overlay');
@@ -1050,28 +1115,9 @@
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
     document.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, url, postId: getPostInfo(url.href)?.postId || '', composer: null, scrollCleanup };
+    state.modal = { overlay, dialog, body, title, url, fallbackLink, postId: getPostInfo(url.href)?.postId || '', composer: null, scrollCleanup, loading: false, loadGeneration: 0 };
     overlay.focus();
-
-    fetchHtml(url)
-      .then(({ html }) => buildPreviewContent(url, parseHtml(html)))
-      .then((preview) => {
-        title.textContent = preview.title || 'NodeSeek 帖子预览';
-        clearElement(body);
-        body.appendChild(preview.content);
-        installPreviewImageFallback(body);
-      })
-      .catch((error) => {
-        clearElement(body);
-        body.appendChild(createElement('p', 'xns-status', `预览加载失败：${error.message || '网络错误'}`));
-        if (fallbackLink) {
-          const link = createElement('a', '', '在原页面打开');
-          link.href = fallbackLink.href;
-          link.target = '_blank';
-          link.rel = 'noopener noreferrer';
-          body.appendChild(link);
-        }
-      });
+    void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }
 
   function scrollToFloor(floor) {
