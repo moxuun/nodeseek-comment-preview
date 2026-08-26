@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.4.9
-// @description  楼中楼、原版评论布局、快速首屏、代码块复制、更窄灰色边缘、帖子回复、图片灯箱和 V2Next 式预览刷新/滚动控制。
+// @version      0.5.0
+// @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
@@ -313,6 +313,18 @@
       .xns-preview-content .xns-code-copy-btn { position:absolute; top:8px; right:8px; z-index:2; padding:2px 8px; border:0; border-radius:3px; color:#fff; background:#4caf50; cursor:pointer; font:12px/1.2 system-ui,sans-serif; opacity:.85; }
       .xns-preview-content .xns-code-copy-btn:hover, .xns-preview-content .xns-code-copy-btn:focus-visible { opacity:1; outline:none; }
       .xns-preview-content .xns-code-copy-btn.xns-copy-failed { background:#dc2626; }
+      .xns-preview-content .xns-ansi-fg-black { color:#111827; } .xns-preview-content .xns-ansi-fg-red { color:#dc2626; } .xns-preview-content .xns-ansi-fg-green { color:#16a34a; } .xns-preview-content .xns-ansi-fg-yellow { color:#ca8a04; } .xns-preview-content .xns-ansi-fg-blue { color:#2563eb; } .xns-preview-content .xns-ansi-fg-magenta { color:#c026d3; } .xns-preview-content .xns-ansi-fg-cyan { color:#0891b2; } .xns-preview-content .xns-ansi-fg-white { color:#f8fafc; }
+      .xns-preview-content .xns-ansi-fg-bright-black { color:#6b7280; } .xns-preview-content .xns-ansi-fg-bright-red { color:#f87171; } .xns-preview-content .xns-ansi-fg-bright-green { color:#4ade80; } .xns-preview-content .xns-ansi-fg-bright-yellow { color:#fde047; } .xns-preview-content .xns-ansi-fg-bright-blue { color:#60a5fa; } .xns-preview-content .xns-ansi-fg-bright-magenta { color:#f0abfc; } .xns-preview-content .xns-ansi-fg-bright-cyan { color:#67e8f9; } .xns-preview-content .xns-ansi-fg-bright-white { color:#fff; }
+      .xns-preview-content .xns-ansi-bg-black { background:#111827; } .xns-preview-content .xns-ansi-bg-red { background:#ef4444; } .xns-preview-content .xns-ansi-bg-green { background:#22c55e; } .xns-preview-content .xns-ansi-bg-yellow { background:#facc15; } .xns-preview-content .xns-ansi-bg-blue { background:#3b82f6; } .xns-preview-content .xns-ansi-bg-magenta { background:#d946ef; } .xns-preview-content .xns-ansi-bg-cyan { background:#06b6d4; } .xns-preview-content .xns-ansi-bg-white { background:#f8fafc; }
+      .xns-preview-content .xns-ansi-bg-bright-black { background:#6b7280; } .xns-preview-content .xns-ansi-bg-bright-red { background:#f87171; } .xns-preview-content .xns-ansi-bg-bright-green { background:#4ade80; } .xns-preview-content .xns-ansi-bg-bright-yellow { background:#fde047; } .xns-preview-content .xns-ansi-bg-bright-blue { background:#60a5fa; } .xns-preview-content .xns-ansi-bg-bright-magenta { background:#f0abfc; } .xns-preview-content .xns-ansi-bg-bright-cyan { background:#67e8f9; } .xns-preview-content .xns-ansi-bg-bright-white { background:#fff; }
+      .xns-preview-content .xns-ansi-bold { font-weight:700; } .xns-preview-content .xns-ansi-dim { opacity:.72; } .xns-preview-content .xns-ansi-italic { font-style:italic; } .xns-preview-content .xns-ansi-underline { text-decoration:underline; } .xns-preview-content .xns-ansi-strike { text-decoration:line-through; } .xns-preview-content .xns-ansi-hidden { visibility:hidden; } .xns-preview-content .xns-ansi-inverse { filter:invert(1); }
+      .xns-preview-content .xns-markdown-tabs { margin:8px 0; overflow:hidden; border:1px solid rgba(100,116,139,.24); border-radius:7px; background:#f8fafc; }
+      .xns-preview-content .xns-markdown-tabs-nav { display:flex; align-items:center; flex-wrap:wrap; gap:4px; padding:5px 6px; border-bottom:1px solid rgba(100,116,139,.2); background:rgba(148,163,184,.1); }
+      .xns-preview-content .xns-markdown-tab { padding:5px 9px; border:1px solid transparent; border-radius:5px; color:#64748b; background:transparent; cursor:pointer; font:13px/1.25 system-ui,sans-serif; }
+      .xns-preview-content .xns-markdown-tab:hover, .xns-preview-content .xns-markdown-tab:focus-visible { color:#2563eb; outline:none; }
+      .xns-preview-content .xns-markdown-tab.is-active { border-color:rgba(59,130,246,.28); color:#1d4ed8; background:#fff; box-shadow:0 1px 2px rgba(15,23,42,.08); }
+      .xns-preview-content .xns-markdown-tab-panel { display:none; padding:8px 10px; }
+      .xns-preview-content .xns-markdown-tab-panel.is-active { display:block; }
       .xns-preview-content h1, .xns-preview-content h2, .xns-preview-content h3, .xns-preview-content p { line-height:1.45; }
       .xns-preview-content h1, .xns-preview-content h2, .xns-preview-content h3 { margin-top:0; }
       .xns-preview-content p { margin:3px 0 6px; }
@@ -367,6 +379,8 @@
         .xns-modal { color:#e5e7eb; background:#18202b; }
         .xns-modal-header a, .xns-modal-header .xns-modal-reply, .xns-modal-close, .xns-preview-post, .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
         .xns-preview-content pre.xns-code-block { color:#e5e7eb; background:#0b1220; }
+        .xns-preview-content .xns-ansi-fg-black { color:#e5e7eb; } .xns-preview-content .xns-ansi-fg-white { color:#111827; }
+        .xns-preview-content .xns-markdown-tabs { background:#111827; } .xns-preview-content .xns-markdown-tabs-nav { background:rgba(15,23,42,.65); } .xns-preview-content .xns-markdown-tab.is-active { color:#93c5fd; background:#18202b; }
         .xns-toolbar-status, .xns-loading, .xns-status, .xns-remote-note { color:#9ca3af; }
       }
       @media (max-width:800px) { .xns-preview-scroll-btns { right:6px; } .xns-scroll-btn { width:30px !important; min-width:30px !important; max-width:30px !important; height:30px !important; min-height:30px !important; max-height:30px !important; flex-basis:30px; } .xns-preview-thread .xns-remote-note { max-width:62%; } }
