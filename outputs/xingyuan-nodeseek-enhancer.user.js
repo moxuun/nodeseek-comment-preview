@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 增强
 // @namespace    https://www.nodeseek.com/
-// @version      0.1.0
+// @version      0.1.1
 // @description  为 NodeSeek 提供楼中楼、跨页评论、列表预览、图片灯箱和主题适配。
 // @author       Codex
 // @license      MIT
@@ -15,7 +15,7 @@
   'use strict';
 
   const SCRIPT_NAME = '星渊 NodeSeek 增强';
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
   const PREFIX = 'xns';
   const STORAGE_KEY = `${PREFIX}:settings:v1`;
   const STYLE_ID = `${PREFIX}-style`;
@@ -588,6 +588,8 @@
       saveSettings();
       panel.remove();
       state.settingsPanel = null;
+      state.globalReady = false;
+      document.getElementById(`${PREFIX}-ui`)?.remove();
       ensureGlobalUi();
       state.post?.refreshFromSettings();
       refreshListExcerptVisibility();
@@ -620,6 +622,7 @@
     if (overlay?.isConnected) overlay.remove();
     if (state.modal?.overlay === overlay) state.modal = null;
     if (state.lightbox?.overlay === overlay) state.lightbox = null;
+    removeBodyScrollLock();
   }
 
   function makeCloseButton(label, onClick, className = 'xns-modal-close') {
@@ -668,8 +671,11 @@
 
   function getPageNumbers(root, postId) {
     const result = new Set();
+    const baseUrl = typeof root?.baseURI === 'string' && root.baseURI.startsWith('http')
+      ? root.baseURI
+      : window.location.href;
     qsa(root, 'a[href]').forEach((link) => {
-      const url = parseSameOriginUrl(link.getAttribute('href') || '', root.baseURI || window.location.href);
+      const url = parseSameOriginUrl(link.getAttribute('href') || '', baseUrl);
       const info = url ? getPostInfo(url.href) : null;
       if (info?.postId === String(postId) && info.page <= MAX_PAGE) result.add(info.page);
     });
@@ -1016,7 +1022,7 @@
   function handleImageClick(event) {
     if (!state.settings.imageLightbox || event.defaultPrevented) return;
     const image = event.target.closest?.('img');
-    if (!isLightboxImage(image) || event.target.closest('.xns-ui')) return;
+    if (!isLightboxImage(image) || event.target.closest('.xns-lightbox-overlay')) return;
     event.preventDefault();
     event.stopPropagation();
     openLightbox(image);
@@ -1109,23 +1115,28 @@
       pages.delete(this.info.page);
 
       const pending = Array.from(pages).sort((a, b) => a - b);
-      for (const page of pending) {
-        if (generation !== this.loadGeneration) return;
-        const url = new URL(`/post-${this.info.postId}-${page}`, window.location.origin);
-        try {
-          const { html } = await fetchHtml(url);
-          const parsed = parseHtml(html);
-          this.pageDocs.set(page, parsed);
-          getPageNumbers(parsed, this.info.postId).forEach((foundPage) => {
-            if (foundPage <= state.settings.maxPages && !pages.has(foundPage) && foundPage !== this.info.page) {
-              pages.add(foundPage);
-              pending.push(foundPage);
-            }
-          });
-        } catch {
-          this.failedPages.push(page);
+      const worker = async () => {
+        while (pending.length) {
+          if (generation !== this.loadGeneration) return;
+          const page = pending.shift();
+          if (page === undefined || this.pageDocs.has(page)) continue;
+          const url = new URL(`/post-${this.info.postId}-${page}`, window.location.origin);
+          try {
+            const { html } = await fetchHtml(url);
+            const parsed = parseHtml(html);
+            this.pageDocs.set(page, parsed);
+            getPageNumbers(parsed, this.info.postId).forEach((foundPage) => {
+              if (foundPage <= state.settings.maxPages && !pages.has(foundPage) && foundPage !== this.info.page) {
+                pages.add(foundPage);
+                pending.push(foundPage);
+              }
+            });
+          } catch {
+            this.failedPages.push(page);
+          }
         }
-      }
+      };
+      await Promise.all([worker(), worker()]);
 
       const records = [];
       this.pageDocs.forEach((root, page) => {
@@ -1172,7 +1183,7 @@
         record.parent = null;
         record.children = [];
         const target = record.reply?.targetFloor ? byFloor.get(record.reply.targetFloor) : null;
-        if (target && target.floor !== record.floor) {
+        if (target && target.floor !== record.floor && !record.pinned) {
           record.parent = target;
           target.children.push(record);
         }
@@ -1208,6 +1219,10 @@
     appendRecord(record, container, depth) {
       stripRenderArtifacts(record.node);
       record.node.setAttribute('data-xns-floor', String(record.floor));
+      if (!record.current) {
+        record.node.setAttribute('data-xns-remote', 'true');
+        record.node.setAttribute('data-xns-source-page', String(record.page));
+      }
       record.node.classList.add(depth === 0 ? 'xns-comment-root' : 'xns-comment-child');
       if (depth > 0 && record.parent) record.node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
       container.appendChild(record.node);
@@ -1252,9 +1267,9 @@
   }
 
   function beginPostMask() {
-    if (!pageInfo || !state.settings.nestedReplies || !document.documentElement) return;
-    document.documentElement.classList.add(BOOT_CLASS);
-    insertStyle(`html.${BOOT_CLASS} .comment-container { visibility: hidden !important; }`, BOOT_STYLE_ID);
+    // 不隐藏原始评论。跨页整理是增强层，网络慢或失败时用户仍应能正常阅读和操作。
+    if (!pageInfo || !document.documentElement) return;
+    document.documentElement.classList.remove(BOOT_CLASS);
   }
 
   function revealPost() {
