@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.4.1
-// @description  楼中楼、原版评论布局、紧凑预览、图片灯箱和右侧预览刷新/滚动控制。
+// @version      0.4.2
+// @description  楼中楼、原版评论布局、紧凑预览、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
@@ -285,6 +285,8 @@
       .xns-scroll-btn svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
       .xns-scroll-btn.hidden { opacity:0; pointer-events:none; }
       .xns-scroll-btn.xns-action-pending { opacity:.45; pointer-events:none; }
+      @keyframes xns-spin { to { transform:rotate(360deg); } }
+      .xns-refresh-post.xns-action-pending svg { animation:xns-spin .9s linear infinite; }
       .xns-loading, .xns-status { margin:10px 0; padding:7px 10px; border:1px solid rgba(100,116,139,.2); border-radius:7px; color:#64748b; background:rgba(148,163,184,.08); font:13px/1.4 system-ui,sans-serif; }
       .xns-comment-root[data-xns-floor], .xns-comment-child[data-xns-floor] { position:relative; }
       .xns-comment-child { margin-top:7px !important; margin-left:clamp(8px,2vw,28px) !important; padding-left:clamp(8px,1.5vw,18px) !important; border-left:2px solid rgba(59,130,246,.35); }
@@ -413,7 +415,7 @@
     top.addEventListener('click', () => scrollTo('top'));
     bottom.addEventListener('click', () => scrollTo('bottom'));
     refresh.addEventListener('click', () => { void refreshPreviewModal(); });
-    group.append(refresh, bottom, top);
+    group.append(refresh, top, bottom);
     dialog.appendChild(group);
 
     const update = () => {
@@ -1055,8 +1057,21 @@
     }
   }
 
-  async function loadPreviewModal(modal, loadingText) {
+  function showPreviewRefreshError(modal, error) {
+    const previous = qs(modal.body, '.xns-refresh-status');
+    previous?.remove();
+    const status = createElement('p', 'xns-status xns-refresh-status', `刷新失败，保留当前内容：${error?.message || '网络错误'}`);
+    status.classList.add('xns-refresh-failed');
+    modal.body.prepend(status);
+    window.setTimeout(() => {
+      if (status.isConnected) status.remove();
+    }, 4_000);
+  }
+
+  async function loadPreviewModal(modal, loadingText, options = {}) {
     if (!modal || modal.loading) return;
+    const preserveContent = Boolean(options.preserveContent);
+    const previousScrollTop = preserveContent ? modal.body.scrollTop : 0;
     modal.loading = true;
     const generation = (modal.loadGeneration || 0) + 1;
     modal.loadGeneration = generation;
@@ -1064,9 +1079,11 @@
     refresh?.classList.add('xns-action-pending');
     refresh?.setAttribute('aria-busy', 'true');
     closeImageLightbox();
-    modal.body.scrollTop = 0;
-    clearElement(modal.body);
-    modal.body.appendChild(createElement('p', 'xns-loading', loadingText));
+    if (!preserveContent) {
+      modal.body.scrollTop = 0;
+      clearElement(modal.body);
+      modal.body.appendChild(createElement('p', 'xns-loading', loadingText));
+    }
     try {
       const { html } = await fetchHtml(modal.url);
       const preview = await buildPreviewContent(modal.url, parseHtml(html));
@@ -1075,8 +1092,15 @@
       clearElement(modal.body);
       modal.body.appendChild(preview.content);
       installPreviewImageFallback(modal.body);
+      if (preserveContent) {
+        const maxScrollTop = Math.max(0, modal.body.scrollHeight - modal.body.clientHeight);
+        modal.body.scrollTop = Math.min(previousScrollTop, maxScrollTop);
+      }
     } catch (error) {
-      if (state.modal === modal && modal.loadGeneration === generation) showPreviewLoadError(modal, error);
+      if (state.modal === modal && modal.loadGeneration === generation) {
+        if (preserveContent) showPreviewRefreshError(modal, error);
+        else showPreviewLoadError(modal, error);
+      }
     } finally {
       modal.loading = false;
       refresh?.classList.remove('xns-action-pending');
@@ -1087,7 +1111,7 @@
   function refreshPreviewModal() {
     const modal = state.modal;
     if (!modal || modal.loading) return;
-    void loadPreviewModal(modal, '正在刷新帖子…');
+    void loadPreviewModal(modal, '正在刷新帖子…', { preserveContent: true });
   }
 
   function openPreviewModal(url, fallbackLink) {
