@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.1
+// @version      0.5.2
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -474,6 +474,7 @@
 
   function closeModal() {
     closeImageLightbox();
+    state.modal?.refreshScrollCleanup?.();
     state.modal?.scrollCleanup?.();
     state.modal?.overlay?.remove();
     state.modal = null;
@@ -1037,6 +1038,14 @@
       }
       if (!item.hasAttribute('role')) item.setAttribute('role', 'button');
       if (!item.hasAttribute('tabindex')) item.tabIndex = 0;
+      if (item.dataset.xnsKeyBound !== 'true') {
+        item.dataset.xnsKeyBound = 'true';
+        item.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          item.click();
+        });
+      }
     });
     return menu;
   }
@@ -1738,7 +1747,8 @@
           }
         }
       };
-      await Promise.all([worker(), worker()]);
+      const workerCount = Math.min(PAGE_CONCURRENCY, Math.max(1, pending.length));
+      await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
       const allRecords = [];
       this.pageDocs.forEach((root, page) => {
