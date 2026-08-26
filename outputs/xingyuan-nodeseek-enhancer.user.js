@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.3.6
-// @description  楼中楼、原版评论布局、预览主帖/楼层操作栏和弹窗顶部/底部快捷跳转。
+// @version      0.3.7
+// @description  楼中楼、原版评论布局、紧凑预览主帖/楼层操作栏和弹窗顶部/底部快捷跳转。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
@@ -292,21 +292,38 @@
       .xns-modal-title { flex:1; min-width:0; overflow:hidden; margin:0; font-size:17px; text-overflow:ellipsis; white-space:nowrap; }
       .xns-modal-header a, .xns-modal-close { padding:5px 8px; border:1px solid rgba(100,116,139,.25); border-radius:6px; color:inherit; background:#f8fafc; cursor:pointer; text-decoration:none; font:12px/1.2 system-ui,sans-serif; }
       .xns-modal-close { font-size:18px; }
-      .xns-modal-body { overflow:auto; padding:clamp(14px,3vw,26px); }
+      .xns-modal-body { overflow:auto; padding:clamp(10px,2vw,18px); }
       .xns-modal-body img { max-width:100%; height:auto; }
-      .xns-preview-comments { margin-top:20px; padding-top:12px; border-top:1px solid rgba(100,116,139,.2); }
+      .xns-preview-content { font-size:14px; line-height:1.45; }
+      .xns-preview-content h1, .xns-preview-content h2, .xns-preview-content h3, .xns-preview-content p { line-height:1.45; }
+      .xns-preview-content h1, .xns-preview-content h2, .xns-preview-content h3 { margin-top:0; }
+      .xns-preview-content p { margin:3px 0 6px; }
+      .xns-preview-post { margin:0 0 10px; padding:8px 10px; border:1px solid rgba(100,116,139,.2); border-radius:7px; background:#f8fafc; }
+      .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { margin:0 0 4px; font-size:20px; line-height:1.3; }
+      .xns-preview-post h2 { margin:5px 0 3px; font-size:17px; }
+      .xns-preview-post .nsk-content-meta-info { display:flex; align-items:center; flex-wrap:wrap; gap:4px 9px; margin:0 0 4px; color:#64748b; font-size:12px; line-height:1.25; }
+      .xns-preview-post .post-content, .xns-preview-post article.post-content { margin:0; line-height:1.5; }
+      .xns-preview-post .post-content p, .xns-preview-post article.post-content p { margin:2px 0 5px; }
+      .xns-preview-post .post-content > :first-child, .xns-preview-post article.post-content > :first-child { margin-top:0; }
+      .xns-preview-post .post-content > :last-child, .xns-preview-post article.post-content > :last-child { margin-bottom:0; }
+      .xns-preview-comments { margin-top:10px; padding-top:8px; border-top:1px solid rgba(100,116,139,.2); }
+      .xns-preview-comments > h3 { margin:0 0 7px; font-size:15px; line-height:1.3; }
       .xns-preview-thread { margin:0; padding:0; list-style:none; }
-      .xns-preview-post { margin:0 0 14px; padding:10px 12px; border:1px solid rgba(100,116,139,.2); border-radius:7px; background:#f8fafc; }
-      .xns-preview-thread > .content-item { margin:8px 0; padding:8px 10px; border:1px solid rgba(100,116,139,.2); border-radius:7px; background:#f8fafc; }
-      .xns-preview-thread .xns-comment-child { margin-top:7px !important; padding-left:12px !important; }
-      .xns-preview-thread .comment-menu, .xns-preview-menu { display:flex; align-items:center; flex-wrap:wrap; gap:14px; margin-top:8px; color:#8b95a1; font:13px/1.25 system-ui,sans-serif; }
+      .xns-preview-thread > .content-item { margin:4px 0; padding:6px 8px; border:1px solid rgba(100,116,139,.2); border-radius:6px; background:#f8fafc; }
+      .xns-preview-thread .xns-comment-child { margin-top:3px !important; padding-left:8px !important; }
+      .xns-preview-thread .nsk-content-meta-info { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; margin:0 0 2px; color:#64748b; font-size:12px; line-height:1.25; }
+      .xns-preview-thread .post-content, .xns-preview-thread article.post-content { margin:0; line-height:1.45; }
+      .xns-preview-thread .post-content p, .xns-preview-thread article.post-content p { margin:2px 0 4px; }
+      .xns-preview-thread .post-content > :first-child, .xns-preview-thread article.post-content > :first-child { margin-top:0; }
+      .xns-preview-thread .post-content > :last-child, .xns-preview-thread article.post-content > :last-child { margin-bottom:0; }
+      .xns-preview-thread .comment-menu, .xns-preview-menu { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-top:4px; color:#8b95a1; font:12px/1.2 system-ui,sans-serif; }
       .xns-preview-thread .comment-menu > .menu-item, .xns-preview-menu > .menu-item { display:inline-flex; align-items:center; gap:4px; padding:2px 0; border:0; color:inherit; background:transparent; cursor:pointer; text-decoration:none; }
       .xns-preview-thread .comment-menu > .menu-item:hover, .xns-preview-thread .comment-menu > .menu-item:focus-visible, .xns-preview-menu > .menu-item:hover, .xns-preview-menu > .menu-item:focus-visible { color:#2563eb; outline:none; }
       .xns-preview-thread .comment-menu > .menu-item.xns-action-pending, .xns-preview-menu > .menu-item.xns-action-pending { opacity:.55; pointer-events:none; }
       .xns-preview-thread .comment-menu > .menu-item.xns-action-failed, .xns-preview-menu > .menu-item.xns-action-failed { color:#b91c1c; }
       .xns-action-state { font-size:11px; }
-      .xns-preview-composer { margin-top:14px; padding-top:12px; border-top:1px solid rgba(100,116,139,.2); }
-      .xns-preview-composer-title { margin:0 0 8px; font-size:14px; }
+      .xns-preview-composer { margin-top:10px; padding-top:8px; border-top:1px solid rgba(100,116,139,.2); }
+      .xns-preview-composer-title { margin:0 0 6px; font-size:14px; }
       .xns-preview-composer textarea { display:block; box-sizing:border-box; width:100%; min-height:100px; resize:vertical; padding:8px; border:1px solid rgba(100,116,139,.35); border-radius:6px; color:inherit; background:transparent; font:14px/1.5 system-ui,sans-serif; }
       .xns-preview-composer-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:8px; }
       .xns-preview-composer button, .xns-preview-composer a { padding:5px 10px; border:1px solid rgba(100,116,139,.3); border-radius:6px; color:inherit; background:transparent; cursor:pointer; text-decoration:none; font:13px/1.2 system-ui,sans-serif; }
@@ -319,7 +336,7 @@
         .xns-toolbar-status, .xns-loading, .xns-status, .xns-remote-note { color:#9ca3af; }
       }
       @media (max-width:800px) { .xns-preview-scroll-btns { right:10px; bottom:20px; } .xns-scroll-btn { width:35px; height:35px; } }
-      @media (max-width:640px) { .xns-overlay { padding:8px; } .xns-modal { max-height:94vh; } .xns-modal-body { padding:13px; } .xns-toolbar-status { width:100%; margin-left:0; } }
+      @media (max-width:640px) { .xns-overlay { padding:6px; } .xns-modal { max-height:96vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-toolbar-status { width:100%; margin-left:0; } }
     `;
     (document.head || document.documentElement || document.body)?.appendChild(style);
   }
