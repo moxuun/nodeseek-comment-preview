@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.5
+// @version      0.5.6
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -1335,7 +1335,7 @@
   }
 
   async function loadPreviewRecords(info, firstDocument, options = {}) {
-    const noStore = options.noStore === true;
+    const noStore = options.noStore !== false;
     const pageDocs = new Map([[info.page, firstDocument]]);
     const failedPages = [];
     const pages = new Set([info.page]);
@@ -1687,9 +1687,10 @@
       modal.body.appendChild(createElement('p', 'xns-loading', loadingText));
     }
     try {
-      const { html } = await fetchHtml(modal.url, { noStore: preserveContent });
+      // 预览必须拿到最新分页，否则新回复可能只会在手动打开最后一页时出现。
+      const { html } = await fetchHtml(modal.url, { noStore: true });
       const preview = buildPreviewContent(modal.url, parseHtml(html), {
-        noStore: preserveContent,
+        noStore: true,
         renderDetached: preserveContent,
       });
       if (preserveContent && preview.hydrate) await preview.hydrate;
