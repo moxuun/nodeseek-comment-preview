@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.7
+// @version      0.5.8
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -1442,7 +1442,10 @@
     qsa(section, ':scope > .xns-page-loading, :scope > .xns-page-failed').forEach((node) => node.remove());
     if (records.length) {
       buildReplyTree(records).forEach((record) => appendPreviewRecord(record, thread, 0));
-      records.forEach((record) => addRemoteNote(record, info.postId));
+      // “打开原楼层”只用于跨页评论；当前页评论在预览里已有原文，不重复放来源链接。
+      records.forEach((record) => {
+        if (record.page !== info.page) addRemoteNote(record, info.postId);
+      });
     } else {
       section.appendChild(createElement('p', 'xns-status xns-preview-empty', '没有读取到评论。'));
     }
@@ -1988,6 +1991,16 @@
 
       const allRecords = [];
       this.pageDocs.forEach((root, page) => {
+        if (root === document && this.originalChildren.length) {
+          // 楼中楼渲染会把当前页评论重排进嵌套回复列表；必须从初始扁平快照收集，
+          // 否则在线程模式下 reload 会漏掉被嵌套的楼层。
+          this.originalChildren.forEach((item, index) => {
+            if (item.nodeType !== Node.ELEMENT_NODE) return;
+            const record = getCommentRecord(item, this.info.postId, page, index, true, { keepCommentMenu: true });
+            if (record) allRecords.push(record);
+          });
+          return;
+        }
         getCommentItems(root).forEach((item, index) => {
           const record = getCommentRecord(item, this.info.postId, page, index, root === document, { keepCommentMenu: true });
           if (record) allRecords.push(record);
