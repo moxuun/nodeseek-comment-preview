@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.3.2
-// @description  只保留楼中楼、原版评论布局和首页帖子预览。
+// @version      0.3.3
+// @description  楼中楼、原版评论布局和带评论操作栏的首页帖子预览。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
@@ -136,15 +136,15 @@
     }
   }
 
-  function sanitizeImportedNode(sourceNode) {
+  function sanitizeImportedNode(sourceNode, options = {}) {
     if (!sourceNode) return null;
     const imported = document.importNode(sourceNode, true);
     const dangerous = 'script,style,link,meta,base,iframe,object,embed,form,input,textarea,select,option,button';
     qsa(imported, dangerous).forEach((node) => node.remove());
     if (imported.matches?.(dangerous)) imported.remove();
 
-    // 跨页评论是只读克隆，不能保留依赖当前 Vue 状态的原生菜单。
-    qsa(imported, '.comment-menu, .comment-actions').forEach((node) => node.remove());
+    // 跨页帖子评论默认是只读克隆；预览弹窗会显式接管菜单点击。
+    if (!options.keepCommentMenu) qsa(imported, '.comment-menu, .comment-actions').forEach((node) => node.remove());
     qsa(imported, '[id]').forEach((node) => node.removeAttribute('id'));
 
     const all = [imported, ...qsa(imported, '*')].filter((node) => node.nodeType === Node.ELEMENT_NODE);
@@ -168,7 +168,7 @@
       if (node.localName === 'img') {
         node.setAttribute('loading', 'lazy');
         node.setAttribute('decoding', 'async');
-        // 部分图片站会把 no-referrer 判定为直链访问，改为带站点来源的嵌入请求。
+        // 部分图片站会把不带来源的请求判定为直链访问，改为带站点来源的嵌入请求。
         node.setAttribute('referrerpolicy', 'origin');
       }
     });
@@ -197,10 +197,10 @@
     return Boolean(qs(item, '.nsk-content-meta-info .hot-badge, .nsk-content-meta-info .pined-comment-badge, .nsk-content-meta-info [title="置顶"], .nsk-content-meta-info [title*="HOT"], .nsk-content-meta-info [class*="hot"]'));
   }
 
-  function getCommentRecord(item, postId, page, index, current) {
+  function getCommentRecord(item, postId, page, index, current, options = {}) {
     const floor = getFloor(item);
     if (floor === null) return null;
-    const node = current ? item : sanitizeImportedNode(item);
+    const node = current ? item : sanitizeImportedNode(item, options);
     if (!node) return null;
     return {
       floor,
@@ -292,6 +292,20 @@
       .xns-preview-thread { margin:0; padding:0; list-style:none; }
       .xns-preview-thread > .content-item { margin:8px 0; padding:8px 10px; border:1px solid rgba(100,116,139,.2); border-radius:7px; background:#f8fafc; }
       .xns-preview-thread .xns-comment-child { margin-top:7px !important; padding-left:12px !important; }
+      .xns-preview-thread .comment-menu, .xns-preview-menu { display:flex; align-items:center; flex-wrap:wrap; gap:14px; margin-top:8px; color:#8b95a1; font:13px/1.25 system-ui,sans-serif; }
+      .xns-preview-thread .comment-menu > .menu-item, .xns-preview-menu > .menu-item { display:inline-flex; align-items:center; gap:4px; padding:2px 0; border:0; color:inherit; background:transparent; cursor:pointer; text-decoration:none; }
+      .xns-preview-thread .comment-menu > .menu-item:hover, .xns-preview-thread .comment-menu > .menu-item:focus-visible, .xns-preview-menu > .menu-item:hover, .xns-preview-menu > .menu-item:focus-visible { color:#2563eb; outline:none; }
+      .xns-preview-thread .comment-menu > .menu-item.xns-action-pending, .xns-preview-menu > .menu-item.xns-action-pending { opacity:.55; pointer-events:none; }
+      .xns-preview-thread .comment-menu > .menu-item.xns-action-failed, .xns-preview-menu > .menu-item.xns-action-failed { color:#b91c1c; }
+      .xns-action-state { font-size:11px; }
+      .xns-preview-composer { margin-top:14px; padding-top:12px; border-top:1px solid rgba(100,116,139,.2); }
+      .xns-preview-composer-title { margin:0 0 8px; font-size:14px; }
+      .xns-preview-composer textarea { display:block; box-sizing:border-box; width:100%; min-height:100px; resize:vertical; padding:8px; border:1px solid rgba(100,116,139,.35); border-radius:6px; color:inherit; background:transparent; font:14px/1.5 system-ui,sans-serif; }
+      .xns-preview-composer-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:8px; }
+      .xns-preview-composer button, .xns-preview-composer a { padding:5px 10px; border:1px solid rgba(100,116,139,.3); border-radius:6px; color:inherit; background:transparent; cursor:pointer; text-decoration:none; font:13px/1.2 system-ui,sans-serif; }
+      .xns-preview-composer button:hover, .xns-preview-composer button:focus-visible, .xns-preview-composer a:hover, .xns-preview-composer a:focus-visible { border-color:#3b82f6; outline:none; }
+      .xns-preview-composer-status { color:#64748b; font-size:12px; }
+      .xns-image-error { display:block; margin-top:5px; color:#b91c1c; font:12px/1.4 system-ui,sans-serif; }
       @media (prefers-color-scheme: dark) {
         .xns-modal { color:#e5e7eb; background:#18202b; }
         .xns-modal-header a, .xns-modal-close, .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
@@ -341,6 +355,18 @@
     });
   }
 
+  function installPreviewImageFallback(root) {
+    qsa(root, 'img').forEach((image) => {
+      if (image.dataset.xnsImageBound === 'true') return;
+      image.dataset.xnsImageBound = 'true';
+      image.addEventListener('error', () => {
+        if (image.nextElementSibling?.matches('.xns-image-error')) return;
+        const message = createElement('span', 'xns-image-error', '图片加载失败：图片站拒绝了当前嵌入来源。');
+        image.insertAdjacentElement('afterend', message);
+      }, { once: true });
+    });
+  }
+
   async function loadPreviewRecords(info, firstDocument) {
     const pageDocs = new Map([[info.page, firstDocument]]);
     const failedPages = [];
@@ -378,7 +404,7 @@
     const allRecords = [];
     pageDocs.forEach((root, page) => {
       getCommentItems(root).forEach((item, index) => {
-        const record = getCommentRecord(item, info.postId, page, index, false);
+        const record = getCommentRecord(item, info.postId, page, index, false, { keepCommentMenu: true });
         if (record) allRecords.push(record);
       });
     });
@@ -396,6 +422,7 @@
     record.node.setAttribute('data-xns-source-page', String(record.page));
     record.node.classList.add(depth === 0 ? 'xns-comment-root' : 'xns-comment-child');
     if (depth > 0 && record.parent) record.node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
+    ensurePreviewMenu(record.node);
   }
 
   function appendPreviewRecord(record, container, depth) {
@@ -469,6 +496,7 @@
         title.textContent = preview.title || 'NodeSeek 帖子预览';
         clearElement(body);
         body.appendChild(preview.content);
+        installPreviewImageFallback(body);
       })
       .catch((error) => {
         clearElement(body);
