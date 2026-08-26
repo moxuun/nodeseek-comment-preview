@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 增强
 // @namespace    https://www.nodeseek.com/
-// @version      0.1.1
-// @description  为 NodeSeek 提供楼中楼、跨页评论、列表预览、图片灯箱和主题适配。
+// @version      0.2.0
+// @description  将 V2EX Next 的核心阅读体验迁移到 NodeSeek：楼中楼、跨页评论、评论排序、帖子弹窗、图片灯箱和 Base64 工具。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
@@ -15,7 +15,7 @@
   'use strict';
 
   const SCRIPT_NAME = '星渊 NodeSeek 增强';
-  const VERSION = '0.1.1';
+  const VERSION = '0.2.0';
   const PREFIX = 'xns';
   const STORAGE_KEY = `${PREFIX}:settings:v1`;
   const STYLE_ID = `${PREFIX}-style`;
@@ -24,14 +24,21 @@
   const MAX_PAGE = 12;
   const MAX_RESPONSE_BYTES = 2_000_000;
   const REQUEST_TIMEOUT = 8_000;
-  const DEFAULT_VISIBLE_REPLIES = 3;
+  const DEFAULT_VISIBLE_REPLIES = 15;
+  const DEFAULT_MAX_DEPTH = 15;
 
   const DEFAULT_SETTINGS = Object.freeze({
     nestedReplies: true,
     listModal: true,
-    listExcerpt: true,
     imageLightbox: true,
+    base64: true,
+    contentAutoCollapse: true,
+    showToolbar: true,
+    commentMode: 'thread',
+    postWidth: '',
     visibleReplies: DEFAULT_VISIBLE_REPLIES,
+    maxDepth: DEFAULT_MAX_DEPTH,
+    topReplyMinLikes: 3,
     maxPages: MAX_PAGE,
   });
 
@@ -69,9 +76,15 @@
         if (parsed && typeof parsed === 'object') {
           if (typeof parsed.nestedReplies === 'boolean') settings.nestedReplies = parsed.nestedReplies;
           if (typeof parsed.listModal === 'boolean') settings.listModal = parsed.listModal;
-          if (typeof parsed.listExcerpt === 'boolean') settings.listExcerpt = parsed.listExcerpt;
           if (typeof parsed.imageLightbox === 'boolean') settings.imageLightbox = parsed.imageLightbox;
-          settings.visibleReplies = clampInt(parsed.visibleReplies, 1, 10, DEFAULT_VISIBLE_REPLIES);
+          if (typeof parsed.base64 === 'boolean') settings.base64 = parsed.base64;
+          if (typeof parsed.contentAutoCollapse === 'boolean') settings.contentAutoCollapse = parsed.contentAutoCollapse;
+          if (typeof parsed.showToolbar === 'boolean') settings.showToolbar = parsed.showToolbar;
+          if (['thread', 'original', 'likes', 'onlyOp'].includes(parsed.commentMode)) settings.commentMode = parsed.commentMode;
+          if (typeof parsed.postWidth === 'string' && /^$|^\d+(?:\.\d+)?(?:px|rem|em|vw|vh|%)$/.test(parsed.postWidth)) settings.postWidth = parsed.postWidth;
+          settings.visibleReplies = clampInt(parsed.visibleReplies, 1, 50, DEFAULT_VISIBLE_REPLIES);
+          settings.maxDepth = clampInt(parsed.maxDepth, 1, 50, DEFAULT_MAX_DEPTH);
+          settings.topReplyMinLikes = clampInt(parsed.topReplyMinLikes, 0, 999_999, 3);
           settings.maxPages = clampInt(parsed.maxPages, 1, MAX_PAGE, MAX_PAGE);
         }
       }
