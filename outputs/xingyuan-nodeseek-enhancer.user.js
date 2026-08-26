@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.3.3
-// @description  楼中楼、原版评论布局和带评论操作栏的首页帖子预览。
+// @version      0.3.4
+// @description  楼中楼、原版评论布局、评论操作栏和页面顶部/底部快捷跳转。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
@@ -111,7 +111,7 @@
   }
 
   function getAuthorName(item) {
-    const profile = qs(item, ':scope > .nsk-content-meta-info a.author-name, :scope > .nsk-content-meta-info a[href^="/space/"]');
+    const profile = qs(item, ':scope > .nsk-content-meta-info a.author-name, :scope > .nsk-content-meta-info a[href^="/space/"], :scope > .nsk-content-meta-info a[href*="/space/"]');
     const profileName = profile?.textContent?.trim();
     if (profileName) return profileName.slice(0, 80);
     const avatarAlt = qs(item, ':scope > .nsk-content-meta-info img[alt]')?.getAttribute('alt')?.trim();
@@ -237,7 +237,7 @@
       const response = await fetch(url.href, {
         method: 'GET',
         credentials: 'same-origin',
-        cache: 'force-cache',
+        cache: 'no-store',
         redirect: 'error',
         referrerPolicy: 'same-origin',
         headers: { Accept: 'text/html,application/xhtml+xml' },
@@ -272,6 +272,11 @@
       .xns-post-toolbar button:hover, .xns-post-toolbar button:focus-visible { border-color:#3b82f6; outline:none; }
       .xns-post-toolbar button[aria-pressed="true"] { color:#2563eb; border-color:#3b82f6; background:rgba(59,130,246,.1); }
       .xns-toolbar-status { margin-left:auto; color:#64748b; font-size:12px; }
+      .xns-scroll-btns { position:fixed; right:20px; bottom:50px; display:flex; flex-direction:column; gap:10px; z-index:2147482000; transition:opacity .3s ease; }
+      .xns-scroll-btn { width:40px; height:40px; padding:0; border:0; border-radius:50%; color:#fff; background:rgba(46,164,79,.8); display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,.2); opacity:.8; transition:all .2s ease; }
+      .xns-scroll-btn:hover, .xns-scroll-btn:focus-visible { background:rgba(46,164,79,1); opacity:1; transform:scale(1.05); outline:none; }
+      .xns-scroll-btn svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+      .xns-scroll-btn.hidden { opacity:0; pointer-events:none; }
       .xns-loading, .xns-status { margin:10px 0; padding:7px 10px; border:1px solid rgba(100,116,139,.2); border-radius:7px; color:#64748b; background:rgba(148,163,184,.08); font:13px/1.4 system-ui,sans-serif; }
       .xns-comment-root[data-xns-floor], .xns-comment-child[data-xns-floor] { position:relative; }
       .xns-comment-child { margin-top:7px !important; margin-left:clamp(8px,2vw,28px) !important; padding-left:clamp(8px,1.5vw,18px) !important; border-left:2px solid rgba(59,130,246,.35); }
@@ -311,6 +316,7 @@
         .xns-modal-header a, .xns-modal-close, .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
         .xns-toolbar-status, .xns-loading, .xns-status, .xns-remote-note { color:#9ca3af; }
       }
+      @media (max-width:800px) { .xns-scroll-btns { right:10px; bottom:30px; } .xns-scroll-btn { width:35px; height:35px; } }
       @media (max-width:640px) { .xns-overlay { padding:8px; } .xns-modal { max-height:94vh; } .xns-modal-body { padding:13px; } .xns-toolbar-status { width:100%; margin-left:0; } }
     `;
     (document.head || document.documentElement || document.body)?.appendChild(style);
@@ -318,6 +324,60 @@
 
   function removeBodyLock() {
     if (!state.modal) document.documentElement.style.removeProperty('overflow');
+  }
+
+  function createScrollArrow(points) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    polyline.setAttribute('points', points);
+    svg.appendChild(polyline);
+    return svg;
+  }
+
+  function scrollPageTo(edge) {
+    const scrolling = document.scrollingElement || document.documentElement;
+    const top = edge === 'bottom'
+      ? Math.max(scrolling?.scrollHeight || 0, document.body?.scrollHeight || 0)
+      : 0;
+    if (typeof scrolling?.scrollTo === 'function') scrolling.scrollTo({ top, behavior: 'smooth' });
+    else window.scrollTo({ top, behavior: 'smooth' });
+  }
+
+  function installScrollButtons() {
+    const mount = () => {
+      if (!document.body || document.querySelector('.xns-scroll-btns')) return;
+      const group = createElement('div', 'xns-scroll-btns');
+      const top = createElement('button', 'xns-scroll-btn xns-to-top');
+      top.type = 'button';
+      top.title = '回到顶部';
+      top.setAttribute('aria-label', '回到顶部');
+      top.appendChild(createScrollArrow('18 15 12 9 6 15'));
+      const bottom = createElement('button', 'xns-scroll-btn xns-to-bottom');
+      bottom.type = 'button';
+      bottom.title = '回到底部';
+      bottom.setAttribute('aria-label', '回到底部');
+      bottom.appendChild(createScrollArrow('6 9 12 15 18 9'));
+      top.addEventListener('click', () => scrollPageTo('top'));
+      bottom.addEventListener('click', () => scrollPageTo('bottom'));
+      group.append(top, bottom);
+      document.body.appendChild(group);
+
+      const update = () => {
+        const scrolling = document.scrollingElement || document.documentElement;
+        const scrollTop = scrolling?.scrollTop || window.scrollY || 0;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        const documentHeight = Math.max(scrolling?.scrollHeight || 0, document.body?.scrollHeight || 0);
+        top.classList.toggle('hidden', scrollTop <= 300);
+        bottom.classList.toggle('hidden', documentHeight - (scrollTop + viewportHeight) <= 300);
+      };
+      window.addEventListener('scroll', update, { passive: true });
+      window.addEventListener('resize', update, { passive: true });
+      update();
+    };
+    if (document.body) mount();
+    else document.addEventListener('DOMContentLoaded', mount, { once: true });
   }
 
   function closeModal() {
@@ -365,6 +425,290 @@
         image.insertAdjacentElement('afterend', message);
       }, { once: true });
     });
+  }
+
+  function getDirectCommentMenu(comment) {
+    return Array.from(comment?.children || []).find((child) => child.matches?.('.comment-menu, .comment-actions')) || null;
+  }
+
+  function getMenuActionKey(menuItem) {
+    const values = [
+      menuItem?.dataset?.action,
+      menuItem?.dataset?.type,
+      menuItem?.getAttribute?.('title'),
+      menuItem?.getAttribute?.('aria-label'),
+      menuItem?.textContent,
+    ].filter(Boolean).join(' ').toLowerCase();
+    if (/\b(like|upvote)\b|点赞/.test(values)) return 'like';
+    if (/\b(chicken|freelike)\b|鸡腿|投喂/.test(values)) return 'chicken';
+    if (/\b(dislike|downvote)\b|反对|踩/.test(values)) return 'dislike';
+    if (/\b(favorite|favourite|collection)\b|收藏/.test(values)) return 'favorite';
+    if (/\bquote\b|引用/.test(values)) return 'quote';
+    if (/\breply\b|回复/.test(values)) return 'reply';
+    return '';
+  }
+
+  function createPreviewMenu() {
+    const menu = createElement('div', 'comment-menu xns-preview-menu');
+    [
+      ['like', '点赞', '♡', true],
+      ['chicken', '加鸡腿', '🍗', true],
+      ['dislike', '反对', '♧', true],
+      ['favorite', '收藏', '☆', true],
+      ['quote', '引用', '❝', false],
+      ['reply', '回复', '↩', false],
+    ].forEach(([key, label, icon, withCount]) => {
+      const item = createElement('span', 'menu-item');
+      item.dataset.xnsAction = key;
+      item.title = label;
+      item.setAttribute('role', 'button');
+      item.tabIndex = 0;
+      const iconNode = createElement('span', 'xns-action-icon', icon);
+      iconNode.setAttribute('aria-hidden', 'true');
+      item.appendChild(iconNode);
+      if (withCount) item.appendChild(createElement('span', 'xns-action-count', '0'));
+      item.appendChild(createElement('span', 'xns-action-label', label));
+      menu.appendChild(item);
+    });
+    return menu;
+  }
+
+  function ensurePreviewMenu(comment) {
+    let menu = getDirectCommentMenu(comment);
+    if (!menu) {
+      menu = createPreviewMenu();
+      comment.appendChild(menu);
+    } else {
+      menu.classList.add('comment-menu', 'xns-preview-menu');
+      const existingActions = new Set(qsa(menu, ':scope > .menu-item').map(getMenuActionKey).filter(Boolean));
+      qsa(createPreviewMenu(), ':scope > .menu-item').forEach((item) => {
+        const action = item.dataset.xnsAction;
+        if (action && !existingActions.has(action)) menu.appendChild(item);
+      });
+    }
+    qsa(menu, ':scope > .menu-item').forEach((item) => {
+      const action = getMenuActionKey(item);
+      if (action) {
+        item.dataset.xnsAction = action;
+        if (action === 'favorite' && /已收藏|取消收藏/.test(`${item.title} ${item.textContent}`)) item.dataset.xnsFavoriteState = 'added';
+      }
+      if (!item.hasAttribute('role')) item.setAttribute('role', 'button');
+      if (!item.hasAttribute('tabindex')) item.tabIndex = 0;
+    });
+    return menu;
+  }
+
+  function getCommentId(comment) {
+    const value = comment?.getAttribute('data-comment-id') || '';
+    return safePositiveInt(value);
+  }
+
+  function randomCsrfToken() {
+    const bytes = new Uint8Array(16);
+    if (window.crypto?.getRandomValues) window.crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function postAction(path, payload, options = {}) {
+    const endpoint = parseSameOriginUrl(path, state.modal?.url?.href || window.location.href);
+    const allowed = new Set(['/aics/upvote', '/api/statistics/upvote', '/api/statistics/like', '/api/statistics/dislike', '/api/statistics/collection', '/api/content/new-comment']);
+    if (!endpoint || !allowed.has(endpoint.pathname)) throw new Error('操作地址不是 NodeSeek 同源接口');
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+    try {
+      const response = await fetch(endpoint.href, {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        redirect: 'error',
+        referrer: state.modal?.url?.href || window.location.href,
+        referrerPolicy: 'same-origin',
+        headers: {
+          Accept: 'application/json, text/plain, */*',
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+          'csrf-token': randomCsrfToken(),
+          ...(options.headers || {}),
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch { /* 某些接口成功时不返回 JSON。 */ }
+      const contentType = (response.headers.get('content-type') || '').toLowerCase();
+      const explicitFailure = data && typeof data === 'object' && (
+        data.success === false || data.ok === false || data.error === true ||
+        (typeof data.status === 'string' && /fail|error|unauthor|denied/i.test(data.status)) ||
+        (typeof data.code === 'string' && /fail|error|unauthor|denied/i.test(data.code))
+      );
+      if (!response.ok || explicitFailure || (!data && /text\/html|<html[\s>]|登录|禁止访问/i.test(`${contentType} ${text.slice(0, 500)}`))) {
+        const message = data?.message || data?.msg || text.replace(/<[^>]+>/g, ' ').trim().slice(0, 120);
+        throw new Error(message || `HTTP ${response.status}`);
+      }
+      return data;
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+
+  function setActionState(menuItem, text, failed = false) {
+    menuItem.classList.toggle('xns-action-failed', failed);
+    let stateNode = qs(menuItem, ':scope > .xns-action-state');
+    if (!stateNode) {
+      stateNode = createElement('span', 'xns-action-state');
+      menuItem.appendChild(stateNode);
+    }
+    stateNode.textContent = text;
+  }
+
+  function getMenuCountElement(menuItem) {
+    return qsa(menuItem, ':scope > span').find((node) => /^\d+$/.test((node.textContent || '').trim())) || null;
+  }
+
+  function bumpMenuCount(menuItem, delta) {
+    const count = getMenuCountElement(menuItem);
+    if (!count) return;
+    const value = Number(count.textContent || 0);
+    count.textContent = String(Math.max(0, value + delta));
+  }
+
+  function getPreviewCommentText(comment) {
+    const content = getPostContent(comment);
+    if (!content) return '';
+    const copy = content.cloneNode(true);
+    qsa(copy, '.xns-remote-note').forEach((node) => node.remove());
+    return (copy.innerText || copy.textContent || '').trim().slice(0, 12_000);
+  }
+
+  function getPreviewSourceUrl(comment) {
+    const modalInfo = state.modal?.postId ? { postId: state.modal.postId, page: 1 } : null;
+    if (!modalInfo) return state.modal?.url?.href || window.location.href;
+    const page = safePositiveInt(comment?.getAttribute('data-xns-source-page')) || modalInfo.page;
+    const floor = getFloor(comment);
+    const url = new URL(`/post-${modalInfo.postId}-${page}`, window.location.origin);
+    if (floor !== null) url.hash = String(floor);
+    return url.href;
+  }
+
+  function openPreviewComposer(action, comment) {
+    const modal = state.modal;
+    if (!modal?.body) return;
+    modal.composer?.remove();
+
+    const floor = getFloor(comment);
+    const author = getAuthorName(comment);
+    const isReply = action === 'reply';
+    const composer = createElement('section', 'xns-preview-composer');
+    composer.appendChild(createElement('h3', 'xns-preview-composer-title', `${isReply ? '回复' : '引用'} #${floor || ''} · ${author}`));
+    const textarea = document.createElement('textarea');
+    textarea.setAttribute('aria-label', isReply ? '回复内容' : '引用内容');
+    const sourceUrl = getPreviewSourceUrl(comment);
+    const replyToken = `@${author} [#${floor || ''}](${sourceUrl})`;
+    const quoted = getPreviewCommentText(comment).split(/\r?\n/).slice(0, 80).map((line) => `> ${line}`).join('\n');
+    textarea.value = isReply ? `${replyToken} ` : `> ${replyToken}\n${quoted}\n\n`;
+    composer.appendChild(textarea);
+
+    const actions = createElement('div', 'xns-preview-composer-actions');
+    const submit = createElement('button', '', '发送回复');
+    submit.type = 'button';
+    const original = createElement('a', '', '打开原帖回复');
+    original.href = getPreviewSourceUrl(comment);
+    original.target = '_blank';
+    original.rel = 'noopener noreferrer';
+    const cancel = createElement('button', '', '取消');
+    cancel.type = 'button';
+    const status = createElement('span', 'xns-preview-composer-status');
+    actions.append(submit, original, cancel, status);
+    composer.appendChild(actions);
+    modal.body.appendChild(composer);
+    modal.composer = composer;
+    textarea.focus();
+
+    cancel.addEventListener('click', () => {
+      composer.remove();
+      if (modal.composer === composer) modal.composer = null;
+    });
+    submit.addEventListener('click', async () => {
+      const content = textarea.value.trim();
+      if (!content) {
+        status.textContent = '请输入内容。';
+        textarea.focus();
+        return;
+      }
+      submit.disabled = true;
+      status.textContent = '正在发送…';
+      try {
+        await postAction('/api/content/new-comment', {
+          content,
+          mode: 'new-comment',
+          postId: Number(modal.postId),
+        });
+        status.textContent = '回复已发送。';
+        textarea.readOnly = true;
+        submit.remove();
+      } catch (error) {
+        status.textContent = `发送失败：${error.message || '网络错误'}`;
+        submit.disabled = false;
+      }
+    });
+  }
+
+  async function runPreviewAction(action, menuItem, comment) {
+    if (action === 'quote' || action === 'reply') {
+      openPreviewComposer(action, comment);
+      return;
+    }
+
+    const postId = safePositiveInt(state.modal?.postId || '');
+    const commentId = getCommentId(comment);
+    if ((action !== 'favorite' && commentId === null) || (action === 'favorite' && postId === null)) {
+      setActionState(menuItem, action === 'favorite' ? '缺少帖子ID' : '缺少评论ID', true);
+      return;
+    }
+    if (action !== 'favorite' && menuItem.dataset.xnsActionDone === 'true') {
+      setActionState(menuItem, '已操作');
+      return;
+    }
+    if (menuItem.classList.contains('xns-action-pending')) return;
+    if (action === 'chicken' && !window.confirm('确认给这条评论加鸡腿？NodeSeek 可能会消耗鸡腿。')) return;
+    if (action === 'dislike' && !window.confirm('确认反对这条评论？NodeSeek 可能会消耗两个鸡腿。')) return;
+
+    const isFavoriteRemoval = action === 'favorite' && menuItem.dataset.xnsFavoriteState === 'added';
+    menuItem.classList.add('xns-action-pending');
+    menuItem.classList.remove('xns-action-failed');
+    setActionState(menuItem, '处理中…');
+    try {
+      if (action === 'like') {
+        try {
+          await postAction('/aics/upvote', { commentId, action: 'add' });
+        } catch {
+          await postAction('/api/statistics/upvote', { commentId, action: 'add' });
+        }
+      } else if (action === 'chicken') {
+        await postAction('/api/statistics/like', { commentId, action: 'add' });
+      } else if (action === 'dislike') {
+        await postAction('/api/statistics/dislike', { commentId, action: 'add' });
+      } else if (action === 'favorite') {
+        await postAction('/api/statistics/collection', { action: isFavoriteRemoval ? 'del' : 'add', postId });
+      }
+      if (action === 'favorite') {
+        menuItem.dataset.xnsFavoriteState = isFavoriteRemoval ? 'removed' : 'added';
+        bumpMenuCount(menuItem, isFavoriteRemoval ? -1 : 1);
+      } else {
+        menuItem.dataset.xnsActionDone = 'true';
+        bumpMenuCount(menuItem, 1);
+      }
+      setActionState(menuItem, '✓');
+      window.setTimeout(() => {
+        if (menuItem.isConnected && !menuItem.classList.contains('xns-action-failed')) qs(menuItem, ':scope > .xns-action-state')?.remove();
+      }, 1_800);
+    } catch (error) {
+      setActionState(menuItem, `失败：${error.message || '操作未完成'}`, true);
+    } finally {
+      menuItem.classList.remove('xns-action-pending');
+    }
   }
 
   async function loadPreviewRecords(info, firstDocument) {
@@ -487,7 +831,7 @@
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
     document.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay };
+    state.modal = { overlay, dialog, body, url, postId: getPostInfo(url.href)?.postId || '', composer: null };
     overlay.focus();
 
     fetchHtml(url)
@@ -554,6 +898,17 @@
     event.preventDefault();
     event.stopImmediatePropagation();
     openPreviewModal(url, link);
+  }
+
+  function handlePreviewActionClick(event) {
+    const menuItem = event.target.closest?.('.xns-overlay .xns-preview-thread .comment-menu > .menu-item');
+    if (!menuItem || !state.modal) return;
+    const comment = menuItem.closest('.content-item');
+    const action = menuItem.dataset.xnsAction || getMenuActionKey(menuItem);
+    if (!comment || !action) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    void runPreviewAction(action, menuItem, comment);
   }
 
   function handleKeydown(event) {
@@ -805,6 +1160,7 @@
 
   function start() {
     installStyle();
+    document.addEventListener('click', handlePreviewActionClick, true);
     document.addEventListener('click', handleDocumentClick, true);
     document.addEventListener('keydown', handleKeydown, true);
 
