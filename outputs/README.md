@@ -74,3 +74,15 @@ Ctrl/Command 点击、鼠标中键和右键菜单保持 NodeSeek 原生行为。
 ```powershell
 node --check .\nodeseek-comment-preview.user.js
 ```
+
+## 回归测试
+
+本地 fixture + 无头浏览器端到端测试，覆盖：楼中楼构建与跨页来源链接、原版/楼中楼切换、楼层链接跳转、帖子页回复后重排保留全部楼层（0.5.8）、点赞/收藏接口、预览弹窗结构与操作菜单、跨页来源链接范围（0.5.8）、楼层/帖子级回复编辑器、刷新保留滚动位置、弹窗发送回复后重排、标签页/ANSI/复制按钮。
+
+```powershell
+cd .\work\test
+npm install
+npm test
+```
+
+测试自动启动本地 fixture 服务器（随机端口）并在结束时关闭；需要本机 Chromium/Chrome/Edge，找不到时用 `CHROME_PATH` 指定浏览器可执行文件。全部通过退出码为 0，任一失败为 1。
