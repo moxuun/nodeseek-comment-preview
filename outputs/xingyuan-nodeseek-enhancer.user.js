@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.4
+// @version      0.5.5
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -145,7 +145,7 @@
     qsa(imported, dangerous).forEach((node) => node.remove());
     if (imported.matches?.(dangerous)) imported.remove();
 
-    // 跨页帖子评论默认是只读克隆；预览弹窗会显式接管菜单点击。
+    // 跨页帖子评论默认是只读克隆；预览页和新标签页统一接管楼层菜单点击。
     if (!options.keepCommentMenu) qsa(imported, '.comment-menu, .comment-actions').forEach((node) => node.remove());
     qsa(imported, '[id]').forEach((node) => node.removeAttribute('id'));
     // NodeSeek 的评论头部有一个灰色楼层按钮；预览已有自己的来源链接，移除这个无效控件。
@@ -1180,6 +1180,10 @@
     return url.href;
   }
 
+  function getDirectComposer(comment) {
+    return Array.from(comment?.children || []).find((child) => child.matches?.(':scope.xns-preview-composer')) || null;
+  }
+
   function openPreviewComposer(action, comment, context = null) {
     const modal = context?.modal || state.modal;
     const actionContext = context || {
@@ -1189,10 +1193,12 @@
     };
     const host = modal?.body || (comment ? comment : findCommentList());
     if (!host) return;
-    const previousComposer = modal?.composer || state.post?.composer;
-    previousComposer?.remove();
-
     const isPostReply = !comment || action === 'post-reply';
+    // 帖子回复只有一个入口；楼层回复按楼层独立保存，允许同时打开多个编辑器。
+    const previousComposer = isPostReply
+      ? (modal?.composer || state.post?.composer)
+      : getDirectComposer(comment);
+    previousComposer?.remove();
     const floor = isPostReply ? null : getDisplayFloor(comment);
     const author = isPostReply ? '' : getAuthorName(comment);
     const isReply = action === 'reply' && !isPostReply;
@@ -1225,14 +1231,14 @@
     const status = createElement('span', 'xns-preview-composer-status');
     actions.append(submit, original, cancel, status);
     composer.appendChild(actions);
-    if (modal?.body) {
+    if (isPostReply && modal?.body) {
       modal.body.appendChild(composer);
       modal.composer = composer;
     } else {
       const menu = qs(comment, '.xns-preview-menu');
       if (menu) menu.insertAdjacentElement('afterend', composer);
       else host.appendChild(composer);
-      if (state.post) state.post.composer = composer;
+      if (isPostReply && state.post) state.post.composer = composer;
     }
     textarea.focus();
     composer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
