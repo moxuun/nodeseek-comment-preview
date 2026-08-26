@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.3.9
-// @description  楼中楼、原版评论布局、紧凑预览、图片灯箱和弹窗顶部/底部快捷跳转。
+// @version      0.4.0
+// @description  楼中楼、原版评论布局、紧凑预览、图片灯箱和预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
@@ -279,11 +279,12 @@
       .xns-post-toolbar button[aria-pressed="true"] { color:#2563eb; border-color:#3b82f6; background:rgba(59,130,246,.1); }
       .xns-toolbar-status { margin-left:auto; color:#64748b; font-size:12px; }
       .xns-modal { position:relative; }
-      .xns-preview-scroll-btns { position:absolute; right:clamp(28px,3vw,40px); bottom:12px; display:flex; flex-direction:column; gap:5px; z-index:3; transition:opacity .3s ease; pointer-events:none; }
-      .xns-scroll-btn { width:26px; height:26px; padding:0; border:0; border-radius:50%; color:#fff; background:rgba(46,164,79,.8); display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,.2); opacity:.8; transition:all .2s ease; pointer-events:auto; }
+      .xns-preview-scroll-btns { position:absolute; top:50%; right:clamp(28px,3vw,40px); bottom:auto; display:flex; flex-direction:column; gap:7px; z-index:3; transform:translateY(-50%); transition:opacity .3s ease; pointer-events:none; }
+      .xns-scroll-btn { box-sizing:border-box !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:26px !important; min-height:26px !important; max-height:26px !important; flex:0 0 26px; padding:0 !important; border:0; border-radius:50%; color:#fff; background:rgba(46,164,79,.8); display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,.2); opacity:.8; line-height:1; transition:all .2s ease; pointer-events:auto; }
       .xns-scroll-btn:hover, .xns-scroll-btn:focus-visible { background:rgba(46,164,79,1); opacity:1; transform:scale(1.05); outline:none; }
       .xns-scroll-btn svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
       .xns-scroll-btn.hidden { opacity:0; pointer-events:none; }
+      .xns-scroll-btn.xns-action-pending { opacity:.45; pointer-events:none; }
       .xns-loading, .xns-status { margin:10px 0; padding:7px 10px; border:1px solid rgba(100,116,139,.2); border-radius:7px; color:#64748b; background:rgba(148,163,184,.08); font:13px/1.4 system-ui,sans-serif; }
       .xns-comment-root[data-xns-floor], .xns-comment-child[data-xns-floor] { position:relative; }
       .xns-comment-child { margin-top:7px !important; margin-left:clamp(8px,2vw,28px) !important; padding-left:clamp(8px,1.5vw,18px) !important; border-left:2px solid rgba(59,130,246,.35); }
@@ -356,8 +357,8 @@
         .xns-modal-header a, .xns-modal-close, .xns-preview-post, .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
         .xns-toolbar-status, .xns-loading, .xns-status, .xns-remote-note { color:#9ca3af; }
       }
-      @media (max-width:800px) { .xns-preview-scroll-btns { right:24px; bottom:8px; } .xns-scroll-btn { width:24px; height:24px; } .xns-preview-thread .xns-remote-note { max-width:62%; } }
-      @media (max-width:640px) { .xns-overlay { padding:5px; } .xns-modal { max-height:96vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-thread .xns-remote-note { top:5px; right:7px; max-width:70%; } .xns-preview-scroll-btns { right:20px; bottom:7px; } .xns-scroll-btn { width:23px; height:23px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; margin-left:0; } }
+      @media (max-width:800px) { .xns-preview-scroll-btns { right:24px; } .xns-scroll-btn { width:24px !important; min-width:24px !important; max-width:24px !important; height:24px !important; min-height:24px !important; max-height:24px !important; flex-basis:24px; } .xns-preview-thread .xns-remote-note { max-width:62%; } }
+      @media (max-width:640px) { .xns-overlay { padding:5px; } .xns-modal { max-height:96vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-thread .xns-remote-note { top:5px; right:7px; max-width:70%; } .xns-preview-scroll-btns { right:20px; } .xns-scroll-btn { width:23px !important; min-width:23px !important; max-width:23px !important; height:23px !important; min-height:23px !important; max-height:23px !important; flex-basis:23px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; margin-left:0; } }
     `;
     (document.head || document.documentElement || document.body)?.appendChild(style);
   }
@@ -421,6 +422,7 @@
   }
 
   function closeModal() {
+    closeImageLightbox();
     state.modal?.scrollCleanup?.();
     state.modal?.overlay?.remove();
     state.modal = null;
@@ -456,13 +458,145 @@
     });
   }
 
+  function getPreviewImageSource(image) {
+    const link = image?.closest?.('a[href]');
+    const candidates = [
+      image?.currentSrc,
+      image?.getAttribute?.('src'),
+      image?.getAttribute?.('data-src'),
+      image?.getAttribute?.('data-original'),
+      link?.getAttribute?.('href'),
+    ];
+    for (const candidate of candidates) {
+      const safe = getSafeUrlAttribute('src', candidate);
+      if (safe) return safe;
+    }
+    return null;
+  }
+
+  function closeImageLightbox() {
+    const lightbox = state.lightbox;
+    if (!lightbox) return;
+    lightbox.cleanup?.();
+    lightbox.overlay?.remove();
+    state.lightbox = null;
+  }
+
+  function openImageLightbox(image) {
+    const source = getPreviewImageSource(image);
+    if (!source) return;
+    closeImageLightbox();
+
+    const overlay = createElement('div', 'xns-lightbox');
+    overlay.tabIndex = -1;
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', '图片预览');
+    const stage = createElement('div', 'xns-lightbox-stage');
+    const preview = document.createElement('img');
+    preview.className = 'xns-lightbox-image';
+    preview.src = source;
+    preview.alt = image.getAttribute('alt') || '图片预览';
+    preview.setAttribute('referrerpolicy', 'origin');
+    preview.setAttribute('draggable', 'false');
+    const close = createElement('button', 'xns-lightbox-close', '×');
+    close.type = 'button';
+    close.setAttribute('aria-label', '关闭图片预览');
+    const original = createElement('a', 'xns-lightbox-open', '打开原图');
+    original.href = source;
+    original.target = '_blank';
+    original.rel = 'noopener noreferrer';
+    stage.appendChild(preview);
+    overlay.append(stage, close, original);
+
+    let scale = 1;
+    let offsetX = 0;
+    let offsetY = 0;
+    let dragging = false;
+    let pointerId = null;
+    let startX = 0;
+    let startY = 0;
+    let startOffsetX = 0;
+    let startOffsetY = 0;
+    const render = () => {
+      preview.style.transform = `translate3d(${offsetX}px, ${offsetY}px, 0) scale(${scale})`;
+    };
+    const onWheel = (event) => {
+      event.preventDefault();
+      scale = Math.min(4, Math.max(0.5, scale * (event.deltaY < 0 ? 1.12 : 0.89)));
+      if (scale <= 1) {
+        scale = 1;
+        offsetX = 0;
+        offsetY = 0;
+      }
+      render();
+    };
+    const onPointerDown = (event) => {
+      if (event.button !== 0) return;
+      dragging = true;
+      pointerId = event.pointerId;
+      startX = event.clientX;
+      startY = event.clientY;
+      startOffsetX = offsetX;
+      startOffsetY = offsetY;
+      stage.classList.add('xns-dragging');
+      stage.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    };
+    const onPointerMove = (event) => {
+      if (!dragging || event.pointerId !== pointerId) return;
+      offsetX = startOffsetX + event.clientX - startX;
+      offsetY = startOffsetY + event.clientY - startY;
+      render();
+    };
+    const onPointerUp = (event) => {
+      if (event.pointerId !== pointerId) return;
+      dragging = false;
+      pointerId = null;
+      stage.classList.remove('xns-dragging');
+      stage.releasePointerCapture?.(event.pointerId);
+    };
+    const cleanup = () => {
+      stage.removeEventListener('wheel', onWheel);
+      stage.removeEventListener('pointerdown', onPointerDown);
+      stage.removeEventListener('pointermove', onPointerMove);
+      stage.removeEventListener('pointerup', onPointerUp);
+      stage.removeEventListener('pointercancel', onPointerUp);
+    };
+    stage.addEventListener('wheel', onWheel, { passive: false });
+    stage.addEventListener('pointerdown', onPointerDown);
+    stage.addEventListener('pointermove', onPointerMove);
+    stage.addEventListener('pointerup', onPointerUp);
+    stage.addEventListener('pointercancel', onPointerUp);
+    stage.addEventListener('click', (event) => { if (event.target === stage) closeImageLightbox(); });
+    preview.addEventListener('click', (event) => event.stopPropagation());
+    close.addEventListener('click', closeImageLightbox);
+    overlay.addEventListener('click', (event) => { if (event.target === overlay) closeImageLightbox(); });
+    document.body.appendChild(overlay);
+    state.lightbox = { overlay, cleanup };
+    render();
+    overlay.focus();
+  }
+
   function installPreviewImageFallback(root) {
     qsa(root, 'img').forEach((image) => {
       if (image.dataset.xnsImageBound === 'true') return;
       image.dataset.xnsImageBound = 'true';
+      image.setAttribute('tabindex', '0');
+      image.setAttribute('role', 'button');
+      image.setAttribute('title', '点击放大图片');
+      const open = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openImageLightbox(image);
+      };
+      image.addEventListener('click', open);
+      image.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') open(event);
+      });
       image.addEventListener('error', () => {
         if (image.nextElementSibling?.matches('.xns-image-error')) return;
-        const message = createElement('span', 'xns-image-error', '图片加载失败：图片站拒绝了当前嵌入来源。');
+        const message = createElement('span', 'xns-image-error', '图片加载失败：图片站拒绝了当前嵌入来源。仍可点击“打开原图”尝试查看。');
         image.insertAdjacentElement('afterend', message);
       }, { once: true });
     });
@@ -997,7 +1131,13 @@
   }
 
   function handleKeydown(event) {
-    if (event.key === 'Escape' && state.modal) closeModal();
+    if (event.key !== 'Escape') return;
+    if (state.lightbox) {
+      event.preventDefault();
+      closeImageLightbox();
+    } else if (state.modal) {
+      closeModal();
+    }
   }
 
   function stripRenderArtifacts(item) {
