@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.0
-// @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、图片灯箱和 V2Next 式预览刷新/滚动控制。
+// @version      0.5.1
+// @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
@@ -325,6 +325,12 @@
       .xns-preview-content .xns-markdown-tab.is-active { border-color:rgba(59,130,246,.28); color:#1d4ed8; background:#fff; box-shadow:0 1px 2px rgba(15,23,42,.08); }
       .xns-preview-content .xns-markdown-tab-panel { display:none; padding:8px 10px; }
       .xns-preview-content .xns-markdown-tab-panel.is-active { display:block; }
+      .xns-preview-content .nsk-magic-tabs { margin:8px 0; overflow:hidden; border:1px solid rgba(100,116,139,.24); border-radius:7px; background:#f8fafc; }
+      .xns-preview-content .nsk-magic-tabs > .nsk-magic-tab-title { display:inline-block; box-sizing:border-box; margin:0; padding:8px 12px; border:1px solid transparent; border-bottom:0; color:#64748b; background:transparent; cursor:pointer; font-size:14px; line-height:1.3; vertical-align:bottom; }
+      .xns-preview-content .nsk-magic-tabs > .nsk-magic-tab-title:hover, .xns-preview-content .nsk-magic-tabs > .nsk-magic-tab-title:focus-visible { color:#2563eb; outline:none; }
+      .xns-preview-content .nsk-magic-tabs > .nsk-magic-tab-title.xns-active { border-color:rgba(100,116,139,.24); border-radius:7px 7px 0 0; color:#1d4ed8; background:#fff; }
+      .xns-preview-content .nsk-magic-tabs > .nsk-magic-tab-body { display:none; clear:both; box-sizing:border-box; padding:8px 10px; border-top:1px solid rgba(100,116,139,.24); }
+      .xns-preview-content .nsk-magic-tabs > .nsk-magic-tab-body.xns-active { display:block; }
       .xns-preview-content h1, .xns-preview-content h2, .xns-preview-content h3, .xns-preview-content p { line-height:1.45; }
       .xns-preview-content h1, .xns-preview-content h2, .xns-preview-content h3 { margin-top:0; }
       .xns-preview-content p { margin:3px 0 6px; }
@@ -381,6 +387,7 @@
         .xns-preview-content pre.xns-code-block { color:#e5e7eb; background:#0b1220; }
         .xns-preview-content .xns-ansi-fg-black { color:#e5e7eb; } .xns-preview-content .xns-ansi-fg-white { color:#111827; }
         .xns-preview-content .xns-markdown-tabs { background:#111827; } .xns-preview-content .xns-markdown-tabs-nav { background:rgba(15,23,42,.65); } .xns-preview-content .xns-markdown-tab.is-active { color:#93c5fd; background:#18202b; }
+        .xns-preview-content .nsk-magic-tabs { background:#111827; } .xns-preview-content .nsk-magic-tabs > .nsk-magic-tab-title.xns-active { color:#93c5fd; background:#18202b; }
         .xns-toolbar-status, .xns-loading, .xns-status, .xns-remote-note { color:#9ca3af; }
       }
       @media (max-width:800px) { .xns-preview-scroll-btns { right:6px; } .xns-scroll-btn { width:30px !important; min-width:30px !important; max-width:30px !important; height:30px !important; min-height:30px !important; max-height:30px !important; flex-basis:30px; } .xns-preview-thread .xns-remote-note { max-width:62%; } }
@@ -646,6 +653,255 @@
     });
   }
 
+  const ANSI_COLORS = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
+
+  function createAnsiState() {
+    return { fg: '', bg: '', bold: false, dim: false, italic: false, underline: false, strike: false, hidden: false, inverse: false };
+  }
+
+  function applyAnsiCodes(state, rawCodes) {
+    const codes = rawCodes.length ? rawCodes : [0];
+    for (let index = 0; index < codes.length; index += 1) {
+      const code = Number(codes[index]);
+      if (!Number.isFinite(code)) continue;
+      if (code === 0) {
+        Object.assign(state, createAnsiState());
+      } else if (code === 1) {
+        state.bold = true;
+      } else if (code === 2) {
+        state.dim = true;
+      } else if (code === 3) {
+        state.italic = true;
+      } else if (code === 4) {
+        state.underline = true;
+      } else if (code === 7) {
+        state.inverse = true;
+      } else if (code === 8) {
+        state.hidden = true;
+      } else if (code === 9) {
+        state.strike = true;
+      } else if (code === 22) {
+        state.bold = false;
+        state.dim = false;
+      } else if (code === 23) {
+        state.italic = false;
+      } else if (code === 24) {
+        state.underline = false;
+      } else if (code === 27) {
+        state.inverse = false;
+      } else if (code === 28) {
+        state.hidden = false;
+      } else if (code === 29) {
+        state.strike = false;
+      } else if (code === 39) {
+        state.fg = '';
+      } else if (code === 49) {
+        state.bg = '';
+      } else if (code >= 30 && code <= 37) {
+        state.fg = ANSI_COLORS[code - 30];
+      } else if (code >= 40 && code <= 47) {
+        state.bg = ANSI_COLORS[code - 40];
+      } else if (code >= 90 && code <= 97) {
+        state.fg = 'bright-' + ANSI_COLORS[code - 90];
+      } else if (code >= 100 && code <= 107) {
+        state.bg = 'bright-' + ANSI_COLORS[code - 100];
+      } else if (code === 38 || code === 48) {
+        const mode = Number(codes[index + 1]);
+        index += mode === 5 ? 2 : mode === 2 ? 4 : 0;
+      }
+    }
+  }
+
+  function getAnsiClasses(state) {
+    return [
+      state.fg && 'xns-ansi-fg-' + state.fg,
+      state.bg && 'xns-ansi-bg-' + state.bg,
+      state.bold && 'xns-ansi-bold',
+      state.dim && 'xns-ansi-dim',
+      state.italic && 'xns-ansi-italic',
+      state.underline && 'xns-ansi-underline',
+      state.strike && 'xns-ansi-strike',
+      state.hidden && 'xns-ansi-hidden',
+      state.inverse && 'xns-ansi-inverse',
+    ].filter(Boolean);
+  }
+
+  function appendAnsiText(code, text, state) {
+    if (!text) return;
+    const classes = getAnsiClasses(state);
+    if (!classes.length) {
+      code.appendChild(document.createTextNode(text));
+      return;
+    }
+    const span = createElement('span', classes.join(' '));
+    span.textContent = text;
+    code.appendChild(span);
+  }
+
+  function isAnsiCodeBlock(pre) {
+    const code = qs(pre, ':scope > code') || qs(pre, 'code');
+    const className = String(pre.className || '') + ' ' + String(code?.className || '');
+    return Boolean(code && /(?:^|\s)(?:language-ansi|lang-ansi|ansi)(?:\s|$)/i.test(className));
+  }
+
+  function serializeAnsiNode(node) {
+    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || '';
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    let output = '';
+    if (node.matches('span[data-ansicode]')) {
+      const code = Number(node.getAttribute('data-ansicode'));
+      if (Number.isInteger(code) && code >= 0 && code <= 127) output += String.fromCharCode(code);
+    }
+    Array.from(node.childNodes).forEach((child) => {
+      output += serializeAnsiNode(child);
+    });
+    return output;
+  }
+
+  function renderAnsiCodeBlock(pre) {
+    if (!isAnsiCodeBlock(pre)) return;
+    const code = qs(pre, ':scope > code') || qs(pre, 'code');
+    if (!code || code.dataset.xnsAnsiRendered === 'true') return;
+    const source = serializeAnsiNode(code)
+      .replace(/\u0008/g, '')
+      .replace(/\u000d\u000a?/g, '\n')
+      .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, '');
+    clearElement(code);
+    const state = createAnsiState();
+    const ansiPattern = /\u001b\[([0-9;]*)m/g;
+    let cursor = 0;
+    let match;
+    while ((match = ansiPattern.exec(source))) {
+      appendAnsiText(code, source.slice(cursor, match.index), state);
+      applyAnsiCodes(state, match[1].split(';').filter((value) => value !== '').map(Number));
+      cursor = ansiPattern.lastIndex;
+    }
+    appendAnsiText(code, source.slice(cursor), state);
+    code.dataset.xnsAnsiRendered = 'true';
+  }
+
+  function installPreviewAnsiBlocks(root) {
+    qsa(root, '.xns-preview-content pre').forEach(renderAnsiCodeBlock);
+  }
+
+  function installPreviewMagicTabs(root) {
+    qsa(root, '.xns-preview-content .nsk-magic-tabs').forEach((tabs) => {
+      if (tabs.dataset.xnsMagicTabsBound === 'true') return;
+      const titles = qsa(tabs, ':scope > .nsk-magic-tab-title');
+      const bodies = qsa(tabs, ':scope > .nsk-magic-tab-body');
+      if (!titles.length || titles.length !== bodies.length) return;
+      const activate = (selected) => {
+        titles.forEach((title, index) => {
+          const active = index === selected;
+          title.classList.toggle('xns-active', active);
+          title.setAttribute('aria-selected', active ? 'true' : 'false');
+          bodies[index].classList.toggle('xns-active', active);
+          bodies[index].setAttribute('aria-hidden', active ? 'false' : 'true');
+        });
+      };
+      titles.forEach((title, index) => {
+        title.setAttribute('role', 'tab');
+        title.setAttribute('tabindex', '0');
+        title.addEventListener('click', () => activate(index));
+        title.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            activate(index);
+          }
+        });
+      });
+      bodies.forEach((body) => body.setAttribute('role', 'tabpanel'));
+      activate(0);
+      tabs.dataset.xnsMagicTabsBound = 'true';
+    });
+  }
+
+  function getDirectiveText(node) {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE || node.matches('pre, code')) return '';
+    return (node.textContent || '').trim().replace(/\s+/g, ' ');
+  }
+
+  function getMarkdownTabLabel(text) {
+    const match = /^:::\s*tab-item(?:\s+(.+?))?\s*$/i.exec(text);
+    return match?.[1]?.trim() || '标签页';
+  }
+
+  function installPreviewMarkdownTabs(root) {
+    const selector = '.xns-preview-content .post-content, .xns-preview-content article.post-content';
+    const contents = [];
+    if (root?.matches?.(selector)) contents.push(root);
+    contents.push(...qsa(root, selector));
+    contents.forEach((content) => {
+      if (content.dataset.xnsTabsBound === 'true') return;
+      const children = Array.from(content.children);
+      const start = children.findIndex((node) => getDirectiveText(node) === ':::: tabs');
+      if (start < 0) return;
+
+      const tabs = [];
+      const markers = [children[start]];
+      let current = null;
+      let end = -1;
+      for (let index = start + 1; index < children.length; index += 1) {
+        const node = children[index];
+        const text = getDirectiveText(node);
+        const tabMatch = /^:::\s*tab-item(?:\s+(.+?))?\s*$/i.exec(text);
+        if (tabMatch) {
+          current = { label: getMarkdownTabLabel(text), nodes: [] };
+          tabs.push(current);
+          markers.push(node);
+          continue;
+        }
+        if (text === ':::') {
+          markers.push(node);
+          current = null;
+          continue;
+        }
+        if (text === '::::') {
+          markers.push(node);
+          end = index;
+          break;
+        }
+        if (current) current.nodes.push(node);
+      }
+      if (end < 0 || !tabs.length) return;
+
+      const wrapper = createElement('section', 'xns-markdown-tabs');
+      const nav = createElement('div', 'xns-markdown-tabs-nav');
+      nav.setAttribute('role', 'tablist');
+      wrapper.appendChild(nav);
+      const firstNode = children[start];
+      content.insertBefore(wrapper, firstNode);
+      tabs.forEach((tab, tabIndex) => {
+        const button = createElement('button', 'xns-markdown-tab', tab.label);
+        const panel = createElement('div', 'xns-markdown-tab-panel');
+        const active = tabIndex === 0;
+        button.type = 'button';
+        button.setAttribute('role', 'tab');
+        button.setAttribute('aria-selected', active ? 'true' : 'false');
+        panel.setAttribute('role', 'tabpanel');
+        if (active) {
+          button.classList.add('is-active');
+          panel.classList.add('is-active');
+        }
+        tab.nodes.forEach((node) => panel.appendChild(node));
+        button.addEventListener('click', () => {
+          Array.from(nav.children).forEach((item, index) => {
+            const selected = index === tabIndex;
+            item.classList.toggle('is-active', selected);
+            item.setAttribute('aria-selected', selected ? 'true' : 'false');
+          });
+          Array.from(wrapper.querySelectorAll('.xns-markdown-tab-panel')).forEach((item, index) => {
+            item.classList.toggle('is-active', index === tabIndex);
+          });
+        });
+        nav.appendChild(button);
+        wrapper.appendChild(panel);
+      });
+      markers.forEach((node) => node.remove());
+      content.dataset.xnsTabsBound = 'true';
+    });
+  }
+
   function fallbackCopyText(text) {
     const textarea = createElement('textarea');
     textarea.value = text;
@@ -885,6 +1141,7 @@
   }
 
   function getPreviewSourceUrl(comment) {
+    if (!comment) return state.modal?.url?.href || window.location.href;
     const modalInfo = state.modal?.postId ? { postId: state.modal.postId, page: 1 } : null;
     if (!modalInfo) return state.modal?.url?.href || window.location.href;
     const page = safePositiveInt(comment?.getAttribute('data-xns-source-page')) || modalInfo.page;
@@ -1210,9 +1467,16 @@
       modal.title.textContent = preview.title || 'NodeSeek 帖子预览';
       clearElement(modal.body);
       modal.body.appendChild(preview.content);
+      installPreviewMagicTabs(modal.body);
+      installPreviewMarkdownTabs(modal.body);
+      installPreviewAnsiBlocks(modal.body);
       installPreviewImageFallback(modal.body);
       installPreviewCodeBlocks(modal.body);
       if (preview.hydrate) await preview.hydrate;
+      installPreviewMagicTabs(modal.body);
+      installPreviewMarkdownTabs(modal.body);
+      installPreviewAnsiBlocks(modal.body);
+      installPreviewImageFallback(modal.body);
       installPreviewCodeBlocks(modal.body);
       if (preserveContent && state.modal === modal && modal.loadGeneration === generation) {
         const maxScrollTop = Math.max(0, modal.body.scrollHeight - modal.body.clientHeight);
