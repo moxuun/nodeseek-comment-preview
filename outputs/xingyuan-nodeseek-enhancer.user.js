@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.4.5
-// @description  楼中楼、原版评论布局、快速首屏、安全边距、帖子回复、图片灯箱和 V2Next 式预览刷新/滚动控制。
+// @version      0.4.6
+// @description  楼中楼、原版评论布局、快速首屏、可点击安全边距、帖子回复、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
@@ -813,18 +813,25 @@
     if (!modal?.body) return;
     modal.composer?.remove();
 
-    const floor = getDisplayFloor(comment);
-    const author = getAuthorName(comment);
-    const isReply = action === 'reply';
+    const isPostReply = !comment || action === 'post-reply';
+    const floor = isPostReply ? null : getDisplayFloor(comment);
+    const author = isPostReply ? '' : getAuthorName(comment);
+    const isReply = action === 'reply' && !isPostReply;
     const composer = createElement('section', 'xns-preview-composer');
     const floorLabel = floor === null ? '' : floor;
-    composer.appendChild(createElement('h3', 'xns-preview-composer-title', `${isReply ? '回复' : '引用'} #${floorLabel} · ${author}`));
+    const composerTitle = isPostReply ? '回复帖子' : `${isReply ? '回复' : '引用'} #${floorLabel} · ${author}`;
+    composer.appendChild(createElement('h3', 'xns-preview-composer-title', composerTitle));
     const textarea = document.createElement('textarea');
-    textarea.setAttribute('aria-label', isReply ? '回复内容' : '引用内容');
-    const sourceUrl = getPreviewSourceUrl(comment);
-    const replyToken = `@${author} [#${floorLabel}](${sourceUrl})`;
-    const quoted = getPreviewCommentText(comment).split(/\r?\n/).slice(0, 80).map((line) => `> ${line}`).join('\n');
-    textarea.value = isReply ? `${replyToken} ` : `> ${replyToken}\n${quoted}\n\n`;
+    textarea.setAttribute('aria-label', isPostReply || isReply ? '回复内容' : '引用内容');
+    const sourceUrl = isPostReply ? (modal.url?.href || window.location.href) : getPreviewSourceUrl(comment);
+    if (isPostReply) {
+      textarea.placeholder = '输入对帖子的回复内容…';
+      textarea.value = '';
+    } else {
+      const replyToken = `@${author} [#${floorLabel}](${sourceUrl})`;
+      const quoted = getPreviewCommentText(comment).split(/\r?\n/).slice(0, 80).map((line) => `> ${line}`).join('\n');
+      textarea.value = isReply ? `${replyToken} ` : `> ${replyToken}\n${quoted}\n\n`;
+    }
     composer.appendChild(textarea);
 
     const actions = createElement('div', 'xns-preview-composer-actions');
@@ -842,6 +849,7 @@
     modal.body.appendChild(composer);
     modal.composer = composer;
     textarea.focus();
+    composer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
     cancel.addEventListener('click', () => {
       composer.remove();
@@ -1151,12 +1159,15 @@
     dialog.setAttribute('aria-modal', 'true');
     const header = createElement('header', 'xns-modal-header');
     const title = createElement('h2', 'xns-modal-title', '正在加载帖子…');
+    const replyPost = createElement('button', 'xns-modal-reply', '回复帖子');
+    replyPost.type = 'button';
+    replyPost.addEventListener('click', () => openPreviewComposer('post-reply', null));
     const original = createElement('a', '', '新标签打开');
     original.href = url.href;
     original.target = '_blank';
     original.rel = 'noopener noreferrer';
     const close = createCloseButton(closeModal);
-    header.append(title, original, close);
+    header.append(title, replyPost, original, close);
 
     const body = createElement('div', 'xns-modal-body');
     body.appendChild(createElement('p', 'xns-loading', '正在读取帖子内容…'));
