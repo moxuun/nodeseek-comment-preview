@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.3.0
+// @version      0.3.1
 // @description  只保留楼中楼、原版评论布局和首页帖子预览。
 // @author       Codex
 // @license      MIT
@@ -217,8 +217,11 @@
 
   function getPageNumbers(root, postId) {
     const pages = new Set();
+    const baseUrl = typeof root?.baseURI === 'string' && /^https?:/.test(root.baseURI)
+      ? root.baseURI
+      : window.location.href;
     qsa(root, 'a[href]').forEach((link) => {
-      const url = parseSameOriginUrl(link.getAttribute('href') || '', root.baseURI || window.location.href);
+      const url = parseSameOriginUrl(link.getAttribute('href') || '', baseUrl);
       const info = url ? getPostInfo(url.href) : null;
       if (info?.postId === String(postId) && info.page <= MAX_PAGE) pages.add(info.page);
     });
@@ -285,10 +288,12 @@
       .xns-modal-body { overflow:auto; padding:clamp(14px,3vw,26px); }
       .xns-modal-body img { max-width:100%; height:auto; }
       .xns-preview-comments { margin-top:20px; padding-top:12px; border-top:1px solid rgba(100,116,139,.2); }
-      .xns-preview-comment { margin:8px 0; padding:8px 10px; border:1px solid rgba(100,116,139,.2); border-radius:7px; background:#f8fafc; }
+      .xns-preview-thread { margin:0; padding:0; list-style:none; }
+      .xns-preview-thread > .content-item { margin:8px 0; padding:8px 10px; border:1px solid rgba(100,116,139,.2); border-radius:7px; background:#f8fafc; }
+      .xns-preview-thread .xns-comment-child { margin-top:7px !important; padding-left:12px !important; }
       @media (prefers-color-scheme: dark) {
         .xns-modal { color:#e5e7eb; background:#18202b; }
-        .xns-modal-header a, .xns-modal-close, .xns-preview-comment { color:#e5e7eb; background:#111827; }
+        .xns-modal-header a, .xns-modal-close, .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
         .xns-toolbar-status, .xns-loading, .xns-status, .xns-remote-note { color:#9ca3af; }
       }
       @media (max-width:640px) { .xns-overlay { padding:8px; } .xns-modal { max-height:94vh; } .xns-modal-body { padding:13px; } .xns-toolbar-status { width:100%; margin-left:0; } }
@@ -314,7 +319,94 @@
     return button;
   }
 
-  function buildPreviewContent(parsed) {
+  function buildReplyTree(records) {
+    const byFloor = new Map(records.map((record) => [record.floor, record]));
+    records.forEach((record) => {
+      record.parent = null;
+      record.children = [];
+    });
+    records.forEach((record) => {
+      const target = record.reply?.targetFloor ? byFloor.get(record.reply.targetFloor) : null;
+      if (target && target !== record && !record.pinned) {
+        record.parent = target;
+        target.children.push(record);
+      }
+    });
+    const order = (record) => record.page * 100_000 + record.index;
+    records.forEach((record) => record.children.sort((a, b) => order(a) - order(b)));
+    return records.filter((record) => !record.parent).sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      return order(a) - order(b);
+    });
+  }
+
+  async function loadPreviewRecords(info, firstDocument) {
+    const pageDocs = new Map([[info.page, firstDocument]]);
+    const failedPages = [];
+    const pages = new Set([info.page]);
+    getPageNumbers(firstDocument, info.postId).forEach((page) => {
+      if (page <= MAX_PAGE) pages.add(page);
+    });
+    const maxSeed = Math.min(MAX_PAGE, Math.max(...pages));
+    for (let page = 1; page <= maxSeed; page += 1) pages.add(page);
+    pages.delete(info.page);
+
+    const pending = Array.from(pages).sort((a, b) => a - b);
+    const worker = async () => {
+      while (pending.length) {
+        const page = pending.shift();
+        if (page === undefined || pageDocs.has(page)) continue;
+        const pageUrl = new URL(`/post-${info.postId}-${page}`, window.location.origin);
+        try {
+          const { html } = await fetchHtml(pageUrl);
+          const parsed = parseHtml(html);
+          pageDocs.set(page, parsed);
+          getPageNumbers(parsed, info.postId).forEach((foundPage) => {
+            if (foundPage <= MAX_PAGE && !pages.has(foundPage) && foundPage !== info.page) {
+              pages.add(foundPage);
+              pending.push(foundPage);
+            }
+          });
+        } catch {
+          failedPages.push(page);
+        }
+      }
+    };
+    await Promise.all([worker(), worker()]);
+
+    const allRecords = [];
+    pageDocs.forEach((root, page) => {
+      getCommentItems(root).forEach((item, index) => {
+        const record = getCommentRecord(item, info.postId, page, index, false);
+        if (record) allRecords.push(record);
+      });
+    });
+    const unique = new Map();
+    allRecords.forEach((record) => {
+      if (!unique.has(record.floor)) unique.set(record.floor, record);
+    });
+    return { records: Array.from(unique.values()), loadedPages: pageDocs.size, failedPages };
+  }
+
+  function preparePreviewRecord(record, depth) {
+    stripRenderArtifacts(record.node);
+    record.node.setAttribute('data-xns-floor', String(record.floor));
+    record.node.setAttribute('data-xns-remote', 'true');
+    record.node.setAttribute('data-xns-source-page', String(record.page));
+    record.node.classList.add(depth === 0 ? 'xns-comment-root' : 'xns-comment-child');
+    if (depth > 0 && record.parent) record.node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
+  }
+
+  function appendPreviewRecord(record, container, depth) {
+    preparePreviewRecord(record, depth);
+    container.appendChild(record.node);
+    if (!record.children.length) return;
+    const replyList = createElement('ul', 'xns-reply-list');
+    record.children.forEach((child) => appendPreviewRecord(child, replyList, depth + 1));
+    record.node.appendChild(replyList);
+  }
+
+  async function buildPreviewContent(url, parsed) {
     const wrapper = createElement('div', 'xns-preview-content');
     const title = qs(parsed, SELECTORS.postTitle)?.textContent?.trim() || '';
     const content = qs(parsed, SELECTORS.postContent);
@@ -322,19 +414,24 @@
     if (importedContent) wrapper.appendChild(importedContent);
     else wrapper.appendChild(createElement('p', 'xns-status', '没有找到帖子正文。'));
 
-    const comments = getCommentItems(parsed).slice(0, 5);
-    if (comments.length) {
-      const section = createElement('section', 'xns-preview-comments');
-      section.appendChild(createElement('h3', '', `前 ${comments.length} 条回复`));
-      comments.forEach((comment) => {
-        const item = createElement('div', 'xns-preview-comment');
-        item.appendChild(createElement('strong', '', getAuthorName(comment)));
-        const commentContent = sanitizeImportedNode(getPostContent(comment));
-        if (commentContent) item.appendChild(commentContent);
-        section.appendChild(item);
-      });
-      wrapper.appendChild(section);
+    const info = getPostInfo(url.href);
+    if (!info) return { title, content: wrapper };
+    const preview = await loadPreviewRecords(info, parsed);
+    if (!preview.records.length) {
+      wrapper.appendChild(createElement('p', 'xns-status', '没有读取到评论。'));
+      return { title, content: wrapper };
     }
+
+    const section = createElement('section', 'xns-preview-comments');
+    section.appendChild(createElement('h3', '', `楼中楼预览 · ${preview.records.length} 条回复`));
+    const thread = createElement('ul', 'xns-preview-thread');
+    buildReplyTree(preview.records).forEach((record) => appendPreviewRecord(record, thread, 0));
+    preview.records.forEach((record) => addRemoteNote(record, info.postId));
+    section.appendChild(thread);
+    if (preview.failedPages.length) {
+      section.appendChild(createElement('p', 'xns-status', `已读取 ${preview.loadedPages} 页，${preview.failedPages.length} 页读取失败。`));
+    }
+    wrapper.appendChild(section);
     return { title, content: wrapper };
   }
 
@@ -366,8 +463,8 @@
     overlay.focus();
 
     fetchHtml(url)
-      .then(({ html }) => {
-        const preview = buildPreviewContent(parseHtml(html));
+      .then(({ html }) => buildPreviewContent(url, parseHtml(html)))
+      .then((preview) => {
         title.textContent = preview.title || 'NodeSeek 帖子预览';
         clearElement(body);
         body.appendChild(preview.content);
