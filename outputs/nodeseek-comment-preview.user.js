@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.9
+// @version      0.5.10
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -315,7 +315,7 @@
     style.id = STYLE_ID;
     style.textContent = `
       .xns-post-toolbar, .xns-post-toolbar * { box-sizing: border-box; }
-      .xns-post-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin:10px 0; padding:7px; border:1px solid rgba(100,116,139,.25); border-radius:8px; background:rgba(148,163,184,.08); font:13px/1.3 system-ui,sans-serif; }
+      .xns-post-toolbar { position:fixed; right:42px; bottom:166px; z-index:1000; display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin:0; padding:7px; border:1px solid rgba(100,116,139,.25); border-radius:8px; background:rgba(248,250,252,.96); font:13px/1.3 system-ui,sans-serif; box-shadow:0 4px 16px rgba(0,0,0,.25); }
       .xns-post-toolbar button { padding:5px 10px; border:1px solid rgba(100,116,139,.28); border-radius:6px; color:inherit; background:transparent; cursor:pointer; font:inherit; }
       .xns-post-toolbar button:hover, .xns-post-toolbar button:focus-visible { border-color:#3b82f6; outline:none; }
       .xns-post-toolbar button[aria-pressed="true"] { color:#2563eb; border-color:#3b82f6; background:rgba(59,130,246,.1); }

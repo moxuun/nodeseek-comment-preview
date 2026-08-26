@@ -201,6 +201,11 @@ scenario('跨页评论点赞/鸡腿/反对计数来自 SSR 状态（0.5.9 回归
 
 scenario('原版/楼中楼切换', async (ctx) => {
   const page = await openPostPage(ctx);
+  const toolbarStyle = await page.evaluate(() => {
+    const style = getComputedStyle(document.querySelector('.xns-post-toolbar'));
+    return { position: style.position, right: style.right, bottom: style.bottom };
+  });
+  assert(toolbarStyle.position === 'fixed', `评论布局切换应悬浮固定，实际 ${toolbarStyle.position}`);
   await page.evaluate(() => {
     [...document.querySelectorAll('.xns-post-toolbar [data-mode]')].find((button) => button.dataset.mode === 'original').click();
   });
