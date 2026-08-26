@@ -1,6 +1,6 @@
 # NodeSeek 楼中楼预览
 
-NodeSeek（https://www.nodeseek.com）用户脚本：把平铺评论重建成「楼中楼」嵌套视图，并支持首页/列表页的站内预览弹窗。
+NodeSeek（https://www.nodeseek.com）用户脚本：把平铺评论重建成「楼中楼」嵌套视图。功能参考 [V2Next](https://github.com/zyronon/V2Next)，用 Codex 辅助开发的轮子。
 
 ## 安装
 
@@ -10,13 +10,21 @@ NodeSeek（https://www.nodeseek.com）用户脚本：把平铺评论重建成「
 
 脚本使用 `@grant none`，不加载远程模块，不执行远程代码。
 
-## 功能一览
+## 功能
 
-- 帖子页：`楼中楼` / `原版` 布局切换（右下角悬浮按钮），自动读取同帖其他分页补齐引用关系
-- 列表页：普通左键点击帖子标题打开站内预览弹窗，弹窗内同样按楼中楼展示
-- 评论操作（点赞/加鸡腿/反对/收藏/引用/回复）、图片放大、代码块复制、ANSI 与标签页渲染
+1. **预览楼中楼**：首页/列表页点击帖子标题打开站内预览，回复按楼中楼嵌套展示；压缩信息密度，复杂论战一分钟吃完瓜。
+2. **图片灯箱**：预览图片点击放大、滚轮缩放、拖动、Esc 关闭，可打开原图。
+3. **Markdown / NQ 渲染**：沿用 NodeSeek 服务端渲染的 Markdown 结构、ANSI 代码块、标签页；`pre > code` 代码块带一键复制。
+4. **懒加载与并发优化**：多分页并发读取（上限 4），评论卡片浏览器懒渲染，首屏先出当前页。
 
-完整功能、使用说明、故障排查与版本历史见 [outputs/README.md](outputs/README.md)。
+完整使用说明、故障排查与版本历史见 [outputs/README.md](outputs/README.md)。
+
+## 已知问题
+
+- Stardust 收款码不会显示（有意不支持）。
+- 主要用本地夹具测试，真实 NodeSeek 环境的鸡腿、收藏、点赞、回复可能有未发现的边界问题。
+- 内容含邮箱时会触发 NodeSeek 的 email protect。
+- 只能读取帖子前 12 页评论。
 
 ## 文件结构
 
@@ -27,6 +35,10 @@ NodeSeek（https://www.nodeseek.com）用户脚本：把平铺评论重建成「
 | `work/test/` | 浏览器端到端回归测试（`npm install && npm test`） |
 | `work/xns-fixture-server.mjs` | 本地 fixture HTTP 服务器（测试用） |
 | `work/xns-fixture/` | 测试用帖子/列表页面 |
+
+## 反馈
+
+欢迎提 [issue](https://github.com/moxuun/nodeseek-comment-preview/issues) 反馈问题，我会在自己帖子下测试「点赞、鸡腿、收藏、回复」相关场景。对你有帮助的话点个 [star](https://github.com/moxuun/nodeseek-comment-preview) 吧。
 
 ## 安全边界
 
