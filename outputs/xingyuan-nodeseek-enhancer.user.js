@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.4.4
-// @description  楼中楼、原版评论布局、快速首屏、全高弹窗、图片灯箱和 V2Next 式预览刷新/滚动控制。
+// @version      0.4.5
+// @description  楼中楼、原版评论布局、快速首屏、安全边距、帖子回复、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
@@ -297,11 +297,12 @@
       .xns-remote-note a { color:#2563eb; }
       .xns-floor-highlight { animation:xns-floor-highlight 1.8s ease both; }
       @keyframes xns-floor-highlight { 0%,100%{box-shadow:none} 20%{box-shadow:0 0 0 4px rgba(59,130,246,.3)} }
-      .xns-overlay { position:fixed; z-index:2147483000; inset:0; display:flex; align-items:stretch; justify-content:center; padding:0; background:rgba(15,23,42,.55); }
-      .xns-modal { display:flex; flex-direction:column; width:min(1040px,100%); height:100vh; max-height:100vh; overflow:hidden; border-radius:0; color:#1f2937; background:#fff; box-shadow:0 18px 55px rgba(15,23,42,.3); }
+      .xns-overlay { position:fixed; z-index:2147483000; inset:0; display:flex; align-items:stretch; justify-content:center; padding:0 clamp(32px,5vw,110px); background:rgba(15,23,42,.55); }
+      .xns-modal { display:flex; flex-direction:column; width:min(960px,100%); height:100vh; max-height:100vh; overflow:hidden; border-radius:0; color:#1f2937; background:#fff; box-shadow:0 18px 55px rgba(15,23,42,.3); }
       .xns-modal-header { display:flex; align-items:center; gap:10px; padding:12px 14px; border-bottom:1px solid rgba(100,116,139,.2); }
       .xns-modal-title { flex:1; min-width:0; overflow:hidden; margin:0; font-size:17px; text-overflow:ellipsis; white-space:nowrap; }
-      .xns-modal-header a, .xns-modal-close { padding:5px 8px; border:1px solid rgba(100,116,139,.25); border-radius:6px; color:inherit; background:#f8fafc; cursor:pointer; text-decoration:none; font:12px/1.2 system-ui,sans-serif; }
+      .xns-modal-header a, .xns-modal-header .xns-modal-reply, .xns-modal-close { padding:5px 8px; border:1px solid rgba(100,116,139,.25); border-radius:6px; color:inherit; background:#f8fafc; cursor:pointer; text-decoration:none; font:12px/1.2 system-ui,sans-serif; }
+      .xns-modal-header .xns-modal-reply:hover, .xns-modal-header .xns-modal-reply:focus-visible { border-color:#3b82f6; outline:none; }
       .xns-modal-close { font-size:18px; }
       .xns-modal-body { overflow:auto; padding:clamp(10px,2vw,18px); }
       .xns-modal-body img { max-width:100%; height:auto; }
@@ -358,11 +359,11 @@
       .xns-lightbox-close:hover, .xns-lightbox-open:hover, .xns-lightbox-close:focus-visible, .xns-lightbox-open:focus-visible { background:rgba(15,23,42,.9); outline:none; }
       @media (prefers-color-scheme: dark) {
         .xns-modal { color:#e5e7eb; background:#18202b; }
-        .xns-modal-header a, .xns-modal-close, .xns-preview-post, .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
+        .xns-modal-header a, .xns-modal-header .xns-modal-reply, .xns-modal-close, .xns-preview-post, .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
         .xns-toolbar-status, .xns-loading, .xns-status, .xns-remote-note { color:#9ca3af; }
       }
       @media (max-width:800px) { .xns-preview-scroll-btns { right:6px; } .xns-scroll-btn { width:30px !important; min-width:30px !important; max-width:30px !important; height:30px !important; min-height:30px !important; max-height:30px !important; flex-basis:30px; } .xns-preview-thread .xns-remote-note { max-width:62%; } }
-      @media (max-width:640px) { .xns-overlay { padding:0; } .xns-modal { max-height:100vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-thread .xns-remote-note { top:5px; right:7px; max-width:70%; } .xns-preview-scroll-btns { right:5px; } .xns-scroll-btn { width:28px !important; min-width:28px !important; max-width:28px !important; height:28px !important; min-height:28px !important; max-height:28px !important; flex-basis:28px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; margin-left:0; } }
+      @media (max-width:640px) { .xns-overlay { padding:0; } .xns-modal { width:100%; max-height:100vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-thread .xns-remote-note { top:5px; right:7px; max-width:70%; } .xns-preview-scroll-btns { right:5px; } .xns-scroll-btn { width:28px !important; min-width:28px !important; max-width:28px !important; height:28px !important; min-height:28px !important; max-height:28px !important; flex-basis:28px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; margin-left:0; } }
     `;
     (document.head || document.documentElement || document.body)?.appendChild(style);
   }
