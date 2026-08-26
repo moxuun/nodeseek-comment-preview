@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.3.4
-// @description  楼中楼、原版评论布局、评论操作栏和页面顶部/底部快捷跳转。
+// @version      0.3.5
+// @description  楼中楼、原版评论布局、评论操作栏和预览弹窗顶部/底部快捷跳转。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
@@ -272,7 +272,8 @@
       .xns-post-toolbar button:hover, .xns-post-toolbar button:focus-visible { border-color:#3b82f6; outline:none; }
       .xns-post-toolbar button[aria-pressed="true"] { color:#2563eb; border-color:#3b82f6; background:rgba(59,130,246,.1); }
       .xns-toolbar-status { margin-left:auto; color:#64748b; font-size:12px; }
-      .xns-scroll-btns { position:fixed; right:20px; bottom:50px; display:flex; flex-direction:column; gap:10px; z-index:2147482000; transition:opacity .3s ease; }
+      .xns-modal { position:relative; }
+      .xns-preview-scroll-btns { position:absolute; right:14px; bottom:16px; display:flex; flex-direction:column; gap:10px; z-index:3; transition:opacity .3s ease; }
       .xns-scroll-btn { width:40px; height:40px; padding:0; border:0; border-radius:50%; color:#fff; background:rgba(46,164,79,.8); display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,.2); opacity:.8; transition:all .2s ease; }
       .xns-scroll-btn:hover, .xns-scroll-btn:focus-visible { background:rgba(46,164,79,1); opacity:1; transform:scale(1.05); outline:none; }
       .xns-scroll-btn svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
@@ -316,7 +317,7 @@
         .xns-modal-header a, .xns-modal-close, .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
         .xns-toolbar-status, .xns-loading, .xns-status, .xns-remote-note { color:#9ca3af; }
       }
-      @media (max-width:800px) { .xns-scroll-btns { right:10px; bottom:30px; } .xns-scroll-btn { width:35px; height:35px; } }
+      @media (max-width:800px) { .xns-preview-scroll-btns { right:10px; bottom:20px; } .xns-scroll-btn { width:35px; height:35px; } }
       @media (max-width:640px) { .xns-overlay { padding:8px; } .xns-modal { max-height:94vh; } .xns-modal-body { padding:13px; } .xns-toolbar-status { width:100%; margin-left:0; } }
     `;
     (document.head || document.documentElement || document.body)?.appendChild(style);
@@ -374,6 +375,9 @@
       };
       window.addEventListener('scroll', update, { passive: true });
       window.addEventListener('resize', update, { passive: true });
+      if (window.MutationObserver) new MutationObserver(update).observe(document.body, { childList: true, subtree: true });
+      if (window.ResizeObserver) new ResizeObserver(update).observe(document.body);
+      window.setTimeout(update, 0);
       update();
     };
     if (document.body) mount();
@@ -1160,6 +1164,7 @@
 
   function start() {
     installStyle();
+    installScrollButtons();
     document.addEventListener('click', handlePreviewActionClick, true);
     document.addEventListener('click', handleDocumentClick, true);
     document.addEventListener('keydown', handleKeydown, true);
