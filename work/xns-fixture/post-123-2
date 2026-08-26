@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>Fixture page 2</title></head>
+<body>
+  <div class="nsk-post"><div class="content-item" id="0"><h1 class="post-title">Fixture NodeSeek 帖子</h1><article class="post-content"><p>测试分页。</p><pre><code class="language-js">const page = 2;</code></pre></article></div></div>
+  <div class="comment-container">
+    <div class="nsk-pager post-top-pager"><a class="pager-pos" href="/post-123-1">1</a><span class="pager-pos pager-cur">2</span></div>
+    <ul class="comments">
+      <li id="4" data-comment-id="104" class="content-item"><div class="nsk-content-meta-info"><a href="/space/4">Carol</a></div><article class="post-content"><p>@Alice <a href="/post-123-2#2">#2</a> 跨页回复</p><pre><code class="language-js">const page = 2;</code></pre></article></li>
+      <li id="5" data-comment-id="105" class="content-item"><div class="nsk-content-meta-info"><a href="/space/5">Dave</a></div><article class="post-content"><p>第二页普通评论</p></article></li>
+    </ul>
+    <div class="nsk-pager post-bottom-pager"><a class="pager-pos" href="/post-123-1">1</a><span class="pager-pos pager-cur">2</span></div>
+  </div>
+</body>
+</html>

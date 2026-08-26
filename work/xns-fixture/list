@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>Fixture list</title></head>
+<body>
+  <main>
+    <div class="post-item"><a href="/post-123-1">Fixture NodeSeek 帖子</a></div>
+  </main>
+  <script src="/outputs/nodeseek-comment-preview.user.js"></script>
+</body>
+</html>
