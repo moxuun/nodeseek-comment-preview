@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.3.7
-// @description  楼中楼、原版评论布局、紧凑预览主帖/楼层操作栏和弹窗顶部/底部快捷跳转。
+// @version      0.3.8
+// @description  楼中楼、原版评论布局、紧凑预览、评论元信息整理和弹窗顶部/底部快捷跳转。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
@@ -146,6 +146,11 @@
     // 跨页帖子评论默认是只读克隆；预览弹窗会显式接管菜单点击。
     if (!options.keepCommentMenu) qsa(imported, '.comment-menu, .comment-actions').forEach((node) => node.remove());
     qsa(imported, '[id]').forEach((node) => node.removeAttribute('id'));
+    // NodeSeek 的评论头部有一个灰色楼层按钮；预览已有自己的来源链接，移除这个无效控件。
+    qsa(imported, '.nsk-content-meta-info .floor-link, .nsk-content-meta-info [class*="floor-link"]').forEach((node) => node.remove());
+    qsa(imported, '.nsk-content-meta-info a, .nsk-content-meta-info span').forEach((node) => {
+      if (/^#\d+$/.test((node.textContent || '').trim())) node.remove();
+    });
 
     const all = [imported, ...qsa(imported, '*')].filter((node) => node.nodeType === Node.ELEMENT_NODE);
     all.forEach((node) => {
@@ -273,10 +278,10 @@
       .xns-post-toolbar button[aria-pressed="true"] { color:#2563eb; border-color:#3b82f6; background:rgba(59,130,246,.1); }
       .xns-toolbar-status { margin-left:auto; color:#64748b; font-size:12px; }
       .xns-modal { position:relative; }
-      .xns-preview-scroll-btns { position:absolute; right:14px; bottom:16px; display:flex; flex-direction:column; gap:10px; z-index:3; transition:opacity .3s ease; }
-      .xns-scroll-btn { width:40px; height:40px; padding:0; border:0; border-radius:50%; color:#fff; background:rgba(46,164,79,.8); display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,.2); opacity:.8; transition:all .2s ease; }
+      .xns-preview-scroll-btns { position:absolute; right:10px; bottom:10px; display:flex; flex-direction:column; gap:6px; z-index:3; transition:opacity .3s ease; }
+      .xns-scroll-btn { width:30px; height:30px; padding:0; border:0; border-radius:50%; color:#fff; background:rgba(46,164,79,.8); display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,.2); opacity:.8; transition:all .2s ease; }
       .xns-scroll-btn:hover, .xns-scroll-btn:focus-visible { background:rgba(46,164,79,1); opacity:1; transform:scale(1.05); outline:none; }
-      .xns-scroll-btn svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+      .xns-scroll-btn svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
       .xns-scroll-btn.hidden { opacity:0; pointer-events:none; }
       .xns-loading, .xns-status { margin:10px 0; padding:7px 10px; border:1px solid rgba(100,116,139,.2); border-radius:7px; color:#64748b; background:rgba(148,163,184,.08); font:13px/1.4 system-ui,sans-serif; }
       .xns-comment-root[data-xns-floor], .xns-comment-child[data-xns-floor] { position:relative; }
@@ -286,8 +291,8 @@
       .xns-remote-note a { color:#2563eb; }
       .xns-floor-highlight { animation:xns-floor-highlight 1.8s ease both; }
       @keyframes xns-floor-highlight { 0%,100%{box-shadow:none} 20%{box-shadow:0 0 0 4px rgba(59,130,246,.3)} }
-      .xns-overlay { position:fixed; z-index:2147483000; inset:0; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(15,23,42,.55); }
-      .xns-modal { display:flex; flex-direction:column; width:min(920px,100%); max-height:90vh; overflow:hidden; border-radius:10px; color:#1f2937; background:#fff; box-shadow:0 18px 55px rgba(15,23,42,.3); }
+      .xns-overlay { position:fixed; z-index:2147483000; inset:0; display:flex; align-items:center; justify-content:center; padding:10px; background:rgba(15,23,42,.55); }
+      .xns-modal { display:flex; flex-direction:column; width:min(1040px,100%); max-height:94vh; overflow:hidden; border-radius:10px; color:#1f2937; background:#fff; box-shadow:0 18px 55px rgba(15,23,42,.3); }
       .xns-modal-header { display:flex; align-items:center; gap:10px; padding:12px 14px; border-bottom:1px solid rgba(100,116,139,.2); }
       .xns-modal-title { flex:1; min-width:0; overflow:hidden; margin:0; font-size:17px; text-overflow:ellipsis; white-space:nowrap; }
       .xns-modal-header a, .xns-modal-close { padding:5px 8px; border:1px solid rgba(100,116,139,.25); border-radius:6px; color:inherit; background:#f8fafc; cursor:pointer; text-decoration:none; font:12px/1.2 system-ui,sans-serif; }
@@ -312,6 +317,11 @@
       .xns-preview-thread > .content-item { margin:4px 0; padding:6px 8px; border:1px solid rgba(100,116,139,.2); border-radius:6px; background:#f8fafc; }
       .xns-preview-thread .xns-comment-child { margin-top:3px !important; padding-left:8px !important; }
       .xns-preview-thread .nsk-content-meta-info { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; margin:0 0 2px; color:#64748b; font-size:12px; line-height:1.25; }
+      .xns-preview-content .nsk-content-meta-info .content-info, .xns-preview-content .nsk-content-meta-info .date-created { display:inline-flex; align-items:center; flex-wrap:wrap; gap:5px; margin:0 !important; line-height:1.25; }
+      .xns-preview-content .nsk-content-meta-info .date-created time { display:inline; white-space:nowrap; }
+      .xns-preview-content .user-info-display { position:static !important; display:inline-flex !important; align-items:center; transform:none !important; margin:0 !important; padding:0 !important; }
+      .xns-preview-thread .xns-remote-note { position:absolute; top:7px; right:9px; z-index:1; display:flex; justify-content:flex-end; max-width:52%; overflow:hidden; margin:0; white-space:nowrap; text-overflow:ellipsis; }
+      .xns-preview-thread .xns-remote-note a { overflow:hidden; text-overflow:ellipsis; }
       .xns-preview-thread .post-content, .xns-preview-thread article.post-content { margin:0; line-height:1.45; }
       .xns-preview-thread .post-content p, .xns-preview-thread article.post-content p { margin:2px 0 4px; }
       .xns-preview-thread .post-content > :first-child, .xns-preview-thread article.post-content > :first-child { margin-top:0; }
@@ -335,8 +345,8 @@
         .xns-modal-header a, .xns-modal-close, .xns-preview-post, .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
         .xns-toolbar-status, .xns-loading, .xns-status, .xns-remote-note { color:#9ca3af; }
       }
-      @media (max-width:800px) { .xns-preview-scroll-btns { right:10px; bottom:20px; } .xns-scroll-btn { width:35px; height:35px; } }
-      @media (max-width:640px) { .xns-overlay { padding:6px; } .xns-modal { max-height:96vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-toolbar-status { width:100%; margin-left:0; } }
+      @media (max-width:800px) { .xns-preview-scroll-btns { right:8px; bottom:8px; } .xns-scroll-btn { width:28px; height:28px; } .xns-preview-thread .xns-remote-note { max-width:62%; } }
+      @media (max-width:640px) { .xns-overlay { padding:5px; } .xns-modal { max-height:96vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-thread .xns-remote-note { top:5px; right:7px; max-width:70%; } .xns-toolbar-status { width:100%; margin-left:0; } }
     `;
     (document.head || document.documentElement || document.body)?.appendChild(style);
   }
