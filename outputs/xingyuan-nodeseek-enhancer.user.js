@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.3
+// @version      0.5.4
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -293,7 +293,7 @@
       .xns-comment-root[data-xns-floor], .xns-comment-child[data-xns-floor] { position:relative; }
       .xns-comment-child { margin-top:7px !important; margin-left:clamp(8px,2vw,28px) !important; padding-left:clamp(8px,1.5vw,18px) !important; border-left:2px solid rgba(59,130,246,.35); }
       .xns-reply-list { margin:6px 0 0 !important; padding:0 !important; list-style:none !important; }
-      .xns-remote-note { display:flex; gap:6px; flex-wrap:wrap; margin:5px 0 0; color:#64748b; font-size:11px; }
+      .xns-remote-note { position:absolute; top:7px; right:9px; z-index:1; display:flex; justify-content:flex-end; max-width:52%; overflow:hidden; gap:6px; flex-wrap:wrap; margin:0; color:#64748b; font-size:11px; white-space:nowrap; text-overflow:ellipsis; }
       .xns-remote-note a { color:#2563eb; }
       .xns-floor-highlight { animation:xns-floor-highlight 1.8s ease both; }
       @keyframes xns-floor-highlight { 0%,100%{box-shadow:none} 20%{box-shadow:0 0 0 4px rgba(59,130,246,.3)} }
@@ -1070,6 +1070,21 @@
     return null;
   }
 
+  function getPageActionContext() {
+    const info = pageInfo || getPostInfo(window.location.href);
+    return {
+      modal: null,
+      postId: info?.postId || '',
+      url: parseSameOriginUrl(window.location.href),
+    };
+  }
+
+  function getActionContext(menuItem) {
+    const modal = menuItem?.closest?.('.xns-overlay') ? state.modal : null;
+    if (modal) return { modal, postId: modal.postId, url: modal.url };
+    return getPageActionContext();
+  }
+
   function randomCsrfToken() {
     const bytes = new Uint8Array(16);
     if (window.crypto?.getRandomValues) window.crypto.getRandomValues(bytes);
@@ -1077,7 +1092,8 @@
   }
 
   async function postAction(path, payload, options = {}) {
-    const endpoint = parseSameOriginUrl(path, state.modal?.url?.href || window.location.href);
+    const contextUrl = options.context?.url?.href || state.modal?.url?.href || window.location.href;
+    const endpoint = parseSameOriginUrl(path, contextUrl);
     const allowed = new Set(['/aics/upvote', '/api/statistics/upvote', '/api/statistics/like', '/api/statistics/dislike', '/api/statistics/collection', '/api/content/new-comment']);
     if (!endpoint || !allowed.has(endpoint.pathname)) throw new Error('操作地址不是 NodeSeek 同源接口');
 
@@ -1089,7 +1105,7 @@
         credentials: 'same-origin',
         cache: 'no-store',
         redirect: 'error',
-        referrer: state.modal?.url?.href || window.location.href,
+        referrer: contextUrl,
         referrerPolicy: 'same-origin',
         headers: {
           Accept: 'application/json, text/plain, */*',
@@ -1149,10 +1165,14 @@
     return (copy.innerText || copy.textContent || '').trim().slice(0, 12_000);
   }
 
-  function getPreviewSourceUrl(comment) {
-    if (!comment) return state.modal?.url?.href || window.location.href;
-    const modalInfo = state.modal?.postId ? { postId: state.modal.postId, page: 1 } : null;
-    if (!modalInfo) return state.modal?.url?.href || window.location.href;
+  function getPreviewSourceUrl(comment, context = null) {
+    const contextUrl = context?.url?.href || state.modal?.url?.href || window.location.href;
+    if (!comment) return contextUrl;
+    const contextInfo = getPostInfo(contextUrl);
+    const modalInfo = context?.postId
+      ? { postId: String(context.postId), page: contextInfo?.page || 1 }
+      : (contextInfo || (state.modal?.postId ? { postId: state.modal.postId, page: 1 } : null));
+    if (!modalInfo) return contextUrl;
     const page = safePositiveInt(comment?.getAttribute('data-xns-source-page')) || modalInfo.page;
     const floor = getDisplayFloor(comment);
     const url = new URL(`/post-${modalInfo.postId}-${page}`, window.location.origin);
@@ -1160,10 +1180,17 @@
     return url.href;
   }
 
-  function openPreviewComposer(action, comment) {
-    const modal = state.modal;
-    if (!modal?.body) return;
-    modal.composer?.remove();
+  function openPreviewComposer(action, comment, context = null) {
+    const modal = context?.modal || state.modal;
+    const actionContext = context || {
+      modal,
+      postId: modal?.postId || pageInfo?.postId || '',
+      url: modal?.url || parseSameOriginUrl(window.location.href),
+    };
+    const host = modal?.body || (comment ? comment : findCommentList());
+    if (!host) return;
+    const previousComposer = modal?.composer || state.post?.composer;
+    previousComposer?.remove();
 
     const isPostReply = !comment || action === 'post-reply';
     const floor = isPostReply ? null : getDisplayFloor(comment);
@@ -1175,7 +1202,7 @@
     composer.appendChild(createElement('h3', 'xns-preview-composer-title', composerTitle));
     const textarea = document.createElement('textarea');
     textarea.setAttribute('aria-label', isPostReply || isReply ? '回复内容' : '引用内容');
-    const sourceUrl = isPostReply ? (modal.url?.href || window.location.href) : getPreviewSourceUrl(comment);
+    const sourceUrl = isPostReply ? (actionContext.url?.href || window.location.href) : getPreviewSourceUrl(comment, actionContext);
     if (isPostReply) {
       textarea.placeholder = '输入对帖子的回复内容…';
       textarea.value = '';
@@ -1190,7 +1217,7 @@
     const submit = createElement('button', '', '发送回复');
     submit.type = 'button';
     const original = createElement('a', '', '打开原帖回复');
-    original.href = getPreviewSourceUrl(comment);
+    original.href = getPreviewSourceUrl(comment, actionContext);
     original.target = '_blank';
     original.rel = 'noopener noreferrer';
     const cancel = createElement('button', '', '取消');
@@ -1198,14 +1225,22 @@
     const status = createElement('span', 'xns-preview-composer-status');
     actions.append(submit, original, cancel, status);
     composer.appendChild(actions);
-    modal.body.appendChild(composer);
-    modal.composer = composer;
+    if (modal?.body) {
+      modal.body.appendChild(composer);
+      modal.composer = composer;
+    } else {
+      const menu = qs(comment, '.xns-preview-menu');
+      if (menu) menu.insertAdjacentElement('afterend', composer);
+      else host.appendChild(composer);
+      if (state.post) state.post.composer = composer;
+    }
     textarea.focus();
     composer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
     cancel.addEventListener('click', () => {
       composer.remove();
-      if (modal.composer === composer) modal.composer = null;
+      if (modal?.composer === composer) modal.composer = null;
+      if (!modal && state.post?.composer === composer) state.post.composer = null;
     });
     submit.addEventListener('click', async () => {
       const content = textarea.value.trim();
@@ -1220,8 +1255,8 @@
         await postAction('/api/content/new-comment', {
           content,
           mode: 'new-comment',
-          postId: Number(modal.postId),
-        });
+          postId: Number(actionContext.postId),
+        }, { context: actionContext });
         status.textContent = '回复已发送。';
         textarea.readOnly = true;
         submit.remove();
@@ -1232,13 +1267,14 @@
     });
   }
 
-  async function runPreviewAction(action, menuItem, comment) {
+  async function runPreviewAction(action, menuItem, comment, context = null) {
+    const actionContext = context || getActionContext(menuItem);
     if (action === 'quote' || action === 'reply') {
-      openPreviewComposer(action, comment);
+      openPreviewComposer(action, comment, actionContext);
       return;
     }
 
-    const postId = safePositiveInt(state.modal?.postId || '');
+    const postId = safePositiveInt(actionContext?.postId || '');
     const targetId = getActionTargetId(comment);
     if ((action !== 'favorite' && targetId === null) || (action === 'favorite' && postId === null)) {
       setActionState(menuItem, action === 'favorite' ? '缺少帖子ID' : '缺少目标ID', true);
@@ -1259,16 +1295,16 @@
     try {
       if (action === 'like') {
         try {
-          await postAction('/aics/upvote', { commentId: targetId, action: 'add' });
+          await postAction('/aics/upvote', { commentId: targetId, action: 'add' }, { context: actionContext });
         } catch {
-          await postAction('/api/statistics/upvote', { commentId: targetId, action: 'add' });
+          await postAction('/api/statistics/upvote', { commentId: targetId, action: 'add' }, { context: actionContext });
         }
       } else if (action === 'chicken') {
-        await postAction('/api/statistics/like', { commentId: targetId, action: 'add' });
+        await postAction('/api/statistics/like', { commentId: targetId, action: 'add' }, { context: actionContext });
       } else if (action === 'dislike') {
-        await postAction('/api/statistics/dislike', { commentId: targetId, action: 'add' });
+        await postAction('/api/statistics/dislike', { commentId: targetId, action: 'add' }, { context: actionContext });
       } else if (action === 'favorite') {
-        await postAction('/api/statistics/collection', { action: isFavoriteRemoval ? 'del' : 'add', postId });
+        await postAction('/api/statistics/collection', { action: isFavoriteRemoval ? 'del' : 'add', postId }, { context: actionContext });
       }
       if (action === 'favorite') {
         menuItem.dataset.xnsFavoriteState = isFavoriteRemoval ? 'removed' : 'added';
@@ -1768,14 +1804,17 @@
   }
 
   function handlePreviewActionClick(event) {
-    const menuItem = event.target.closest?.('.xns-overlay .xns-preview-content .comment-menu > .menu-item');
-    if (!menuItem || !state.modal) return;
+    const menuItem = event.target.closest?.('.xns-preview-menu > .menu-item');
+    if (!menuItem) return;
+    const inPreview = Boolean(menuItem.closest('.xns-overlay .xns-preview-content'));
+    const inPost = Boolean(menuItem.closest('.comment-container'));
+    if (!inPreview && !inPost) return;
     const comment = menuItem.closest('.content-item');
     const action = menuItem.dataset.xnsAction || getMenuActionKey(menuItem);
     if (!comment || !action) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    void runPreviewAction(action, menuItem, comment);
+    void runPreviewAction(action, menuItem, comment, getActionContext(menuItem));
   }
 
   function handleKeydown(event) {
@@ -1801,7 +1840,7 @@
   function addRemoteNote(record, postId) {
     if (!record.node?.hasAttribute('data-xns-remote')) return;
     const content = getPostContent(record.node) || record.node;
-    const note = createElement('div', 'xns-remote-note', `来自第 ${record.page} 页 · ${record.author}`);
+    const note = createElement('div', 'xns-remote-note');
     const source = createElement('a', '', `打开原楼层 #${record.floor}`);
     source.href = `/post-${postId}-${record.page}#${record.floor}`;
     source.target = '_blank';
@@ -1822,6 +1861,7 @@
       this.statusNode = null;
       this.loadingNode = null;
       this.generation = 0;
+      this.composer = null;
     }
 
     async init() {
@@ -1933,7 +1973,7 @@
       const allRecords = [];
       this.pageDocs.forEach((root, page) => {
         getCommentItems(root).forEach((item, index) => {
-          const record = getCommentRecord(item, this.info.postId, page, index, root === document);
+          const record = getCommentRecord(item, this.info.postId, page, index, root === document, { keepCommentMenu: true });
           if (record) allRecords.push(record);
         });
       });
@@ -1966,27 +2006,6 @@
       this.list?.closest(SELECTORS.commentContainer)?.insertAdjacentElement('beforebegin', this.statusNode);
     }
 
-    buildTree() {
-      const byFloor = new Map(this.records.map((record) => [record.floor, record]));
-      this.records.forEach((record) => {
-        record.parent = null;
-        record.children = [];
-      });
-      this.records.forEach((record) => {
-        const target = record.reply?.targetFloor ? byFloor.get(record.reply.targetFloor) : null;
-        if (target && target !== record && !record.pinned) {
-          record.parent = target;
-          target.children.push(record);
-        }
-      });
-      const order = (record) => record.page * 100_000 + record.index;
-      this.records.forEach((record) => record.children.sort((a, b) => order(a) - order(b)));
-      return this.records.filter((record) => !record.parent).sort((a, b) => {
-        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-        return order(a) - order(b);
-      });
-    }
-
     prepareRecord(record, depth) {
       stripRenderArtifacts(record.node);
       record.node.setAttribute('data-xns-floor', String(record.floor));
@@ -1996,21 +2015,14 @@
         record.node.setAttribute('data-xns-source-page', String(record.page));
       }
       if (depth > 0 && record.parent) record.node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
-    }
-
-    appendRecord(record, container, depth) {
-      this.prepareRecord(record, depth);
-      container.appendChild(record.node);
-      if (!record.children.length) return;
-      const replyList = createElement('ul', 'xns-reply-list');
-      record.children.forEach((child) => this.appendRecord(child, replyList, depth + 1));
-      record.node.appendChild(replyList);
+      ensurePreviewMenu(record.node, { includeFavorite: false });
     }
 
     render() {
       if (!this.list || state.mode !== 'thread') return;
       this.restoreOriginal();
-      this.buildTree().forEach((record) => this.appendRecord(record, this.list, 0));
+      const prepare = this.prepareRecord.bind(this);
+      buildReplyTree(this.records).forEach((record) => appendNestedRecord(record, this.list, 0, prepare));
       this.records.filter((record) => record.node.hasAttribute('data-xns-remote')).forEach((record) => addRemoteNote(record, this.info.postId));
       const loadedPages = this.pageDocs.size;
       const status = this.failedPages.length
