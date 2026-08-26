@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.3.5
-// @description  楼中楼、原版评论布局、评论操作栏和预览弹窗顶部/底部快捷跳转。
+// @version      0.3.6
+// @description  楼中楼、原版评论布局、预览主帖/楼层操作栏和弹窗顶部/底部快捷跳转。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
@@ -296,6 +296,7 @@
       .xns-modal-body img { max-width:100%; height:auto; }
       .xns-preview-comments { margin-top:20px; padding-top:12px; border-top:1px solid rgba(100,116,139,.2); }
       .xns-preview-thread { margin:0; padding:0; list-style:none; }
+      .xns-preview-post { margin:0 0 14px; padding:10px 12px; border:1px solid rgba(100,116,139,.2); border-radius:7px; background:#f8fafc; }
       .xns-preview-thread > .content-item { margin:8px 0; padding:8px 10px; border:1px solid rgba(100,116,139,.2); border-radius:7px; background:#f8fafc; }
       .xns-preview-thread .xns-comment-child { margin-top:7px !important; padding-left:12px !important; }
       .xns-preview-thread .comment-menu, .xns-preview-menu { display:flex; align-items:center; flex-wrap:wrap; gap:14px; margin-top:8px; color:#8b95a1; font:13px/1.25 system-ui,sans-serif; }
@@ -314,7 +315,7 @@
       .xns-image-error { display:block; margin-top:5px; color:#b91c1c; font:12px/1.4 system-ui,sans-serif; }
       @media (prefers-color-scheme: dark) {
         .xns-modal { color:#e5e7eb; background:#18202b; }
-        .xns-modal-header a, .xns-modal-close, .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
+        .xns-modal-header a, .xns-modal-close, .xns-preview-post, .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
         .xns-toolbar-status, .xns-loading, .xns-status, .xns-remote-note { color:#9ca3af; }
       }
       @media (max-width:800px) { .xns-preview-scroll-btns { right:10px; bottom:20px; } .xns-scroll-btn { width:35px; height:35px; } }
@@ -337,54 +338,52 @@
     return svg;
   }
 
-  function scrollPageTo(edge) {
-    const scrolling = document.scrollingElement || document.documentElement;
-    const top = edge === 'bottom'
-      ? Math.max(scrolling?.scrollHeight || 0, document.body?.scrollHeight || 0)
-      : 0;
-    if (typeof scrolling?.scrollTo === 'function') scrolling.scrollTo({ top, behavior: 'smooth' });
-    else window.scrollTo({ top, behavior: 'smooth' });
-  }
-
-  function installScrollButtons() {
-    const mount = () => {
-      if (!document.body || document.querySelector('.xns-scroll-btns')) return;
-      const group = createElement('div', 'xns-scroll-btns');
-      const top = createElement('button', 'xns-scroll-btn xns-to-top');
-      top.type = 'button';
-      top.title = '回到顶部';
-      top.setAttribute('aria-label', '回到顶部');
-      top.appendChild(createScrollArrow('18 15 12 9 6 15'));
-      const bottom = createElement('button', 'xns-scroll-btn xns-to-bottom');
-      bottom.type = 'button';
-      bottom.title = '回到底部';
-      bottom.setAttribute('aria-label', '回到底部');
-      bottom.appendChild(createScrollArrow('6 9 12 15 18 9'));
-      top.addEventListener('click', () => scrollPageTo('top'));
-      bottom.addEventListener('click', () => scrollPageTo('bottom'));
-      group.append(top, bottom);
-      document.body.appendChild(group);
-
-      const update = () => {
-        const scrolling = document.scrollingElement || document.documentElement;
-        const scrollTop = scrolling?.scrollTop || window.scrollY || 0;
-        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-        const documentHeight = Math.max(scrolling?.scrollHeight || 0, document.body?.scrollHeight || 0);
-        top.classList.toggle('hidden', scrollTop <= 300);
-        bottom.classList.toggle('hidden', documentHeight - (scrollTop + viewportHeight) <= 300);
-      };
-      window.addEventListener('scroll', update, { passive: true });
-      window.addEventListener('resize', update, { passive: true });
-      if (window.MutationObserver) new MutationObserver(update).observe(document.body, { childList: true, subtree: true });
-      if (window.ResizeObserver) new ResizeObserver(update).observe(document.body);
-      window.setTimeout(update, 0);
-      update();
+  function installPreviewScrollButtons(dialog, body) {
+    const group = createElement('div', 'xns-preview-scroll-btns');
+    const top = createElement('button', 'xns-scroll-btn xns-to-top');
+    top.type = 'button';
+    top.title = '回到顶部';
+    top.setAttribute('aria-label', '回到顶部');
+    top.appendChild(createScrollArrow('18 15 12 9 6 15'));
+    const bottom = createElement('button', 'xns-scroll-btn xns-to-bottom');
+    bottom.type = 'button';
+    bottom.title = '回到底部';
+    bottom.setAttribute('aria-label', '回到底部');
+    bottom.appendChild(createScrollArrow('6 9 12 15 18 9'));
+    const scrollTo = (edge) => {
+      const topPosition = edge === 'bottom' ? Math.max(0, body.scrollHeight - body.clientHeight) : 0;
+      body.scrollTo({ top: topPosition, behavior: 'smooth' });
     };
-    if (document.body) mount();
-    else document.addEventListener('DOMContentLoaded', mount, { once: true });
+    top.addEventListener('click', () => scrollTo('top'));
+    bottom.addEventListener('click', () => scrollTo('bottom'));
+    group.append(top, bottom);
+    dialog.appendChild(group);
+
+    const update = () => {
+      const distanceFromBottom = body.scrollHeight - (body.scrollTop + body.clientHeight);
+      top.classList.toggle('hidden', body.scrollTop <= 300);
+      bottom.classList.toggle('hidden', distanceFromBottom <= 300);
+    };
+    const cleanup = () => {
+      body.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+      mutationObserver?.disconnect();
+      resizeObserver?.disconnect();
+      group.remove();
+    };
+    const mutationObserver = window.MutationObserver ? new MutationObserver(update) : null;
+    const resizeObserver = window.ResizeObserver ? new ResizeObserver(update) : null;
+    body.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update, { passive: true });
+    mutationObserver?.observe(body, { childList: true, subtree: true });
+    resizeObserver?.observe(body);
+    window.setTimeout(update, 0);
+    update();
+    return cleanup;
   }
 
   function closeModal() {
+    state.modal?.scrollCleanup?.();
     state.modal?.overlay?.remove();
     state.modal = null;
     removeBodyLock();
@@ -452,16 +451,17 @@
     return '';
   }
 
-  function createPreviewMenu() {
+  function createPreviewMenu(includeFavorite = true) {
     const menu = createElement('div', 'comment-menu xns-preview-menu');
-    [
+    const actions = [
       ['like', '点赞', '♡', true],
       ['chicken', '加鸡腿', '🍗', true],
       ['dislike', '反对', '♧', true],
       ['favorite', '收藏', '☆', true],
       ['quote', '引用', '❝', false],
       ['reply', '回复', '↩', false],
-    ].forEach(([key, label, icon, withCount]) => {
+    ].filter(([key]) => includeFavorite || key !== 'favorite');
+    actions.forEach(([key, label, icon, withCount]) => {
       const item = createElement('span', 'menu-item');
       item.dataset.xnsAction = key;
       item.title = label;
@@ -477,15 +477,17 @@
     return menu;
   }
 
-  function ensurePreviewMenu(comment) {
+  function ensurePreviewMenu(comment, options = {}) {
+    const includeFavorite = options.includeFavorite !== false;
     let menu = getDirectCommentMenu(comment);
     if (!menu) {
-      menu = createPreviewMenu();
+      menu = createPreviewMenu(includeFavorite);
       comment.appendChild(menu);
     } else {
       menu.classList.add('comment-menu', 'xns-preview-menu');
+      if (!includeFavorite) qsa(menu, ':scope > .menu-item').filter((item) => getMenuActionKey(item) === 'favorite').forEach((item) => item.remove());
       const existingActions = new Set(qsa(menu, ':scope > .menu-item').map(getMenuActionKey).filter(Boolean));
-      qsa(createPreviewMenu(), ':scope > .menu-item').forEach((item) => {
+      qsa(createPreviewMenu(includeFavorite), ':scope > .menu-item').forEach((item) => {
         const action = item.dataset.xnsAction;
         if (action && !existingActions.has(action)) menu.appendChild(item);
       });
@@ -505,6 +507,21 @@
   function getCommentId(comment) {
     const value = comment?.getAttribute('data-comment-id') || '';
     return safePositiveInt(value);
+  }
+
+  function getDisplayFloor(comment) {
+    const raw = comment?.getAttribute('data-xns-floor') || comment?.getAttribute('id') || '';
+    if (raw === '0') return 0;
+    return getFloor(comment);
+  }
+
+  function getActionTargetId(comment) {
+    const commentId = getCommentId(comment);
+    if (commentId !== null) return commentId;
+    if (comment?.getAttribute('data-xns-target-type') === 'post') {
+      return safePositiveInt(comment.getAttribute('data-xns-post-id') || '') || safePositiveInt(state.modal?.postId || '');
+    }
+    return null;
   }
 
   function randomCsrfToken() {
@@ -590,7 +607,7 @@
     const modalInfo = state.modal?.postId ? { postId: state.modal.postId, page: 1 } : null;
     if (!modalInfo) return state.modal?.url?.href || window.location.href;
     const page = safePositiveInt(comment?.getAttribute('data-xns-source-page')) || modalInfo.page;
-    const floor = getFloor(comment);
+    const floor = getDisplayFloor(comment);
     const url = new URL(`/post-${modalInfo.postId}-${page}`, window.location.origin);
     if (floor !== null) url.hash = String(floor);
     return url.href;
@@ -601,15 +618,16 @@
     if (!modal?.body) return;
     modal.composer?.remove();
 
-    const floor = getFloor(comment);
+    const floor = getDisplayFloor(comment);
     const author = getAuthorName(comment);
     const isReply = action === 'reply';
     const composer = createElement('section', 'xns-preview-composer');
-    composer.appendChild(createElement('h3', 'xns-preview-composer-title', `${isReply ? '回复' : '引用'} #${floor || ''} · ${author}`));
+    const floorLabel = floor === null ? '' : floor;
+    composer.appendChild(createElement('h3', 'xns-preview-composer-title', `${isReply ? '回复' : '引用'} #${floorLabel} · ${author}`));
     const textarea = document.createElement('textarea');
     textarea.setAttribute('aria-label', isReply ? '回复内容' : '引用内容');
     const sourceUrl = getPreviewSourceUrl(comment);
-    const replyToken = `@${author} [#${floor || ''}](${sourceUrl})`;
+    const replyToken = `@${author} [#${floorLabel}](${sourceUrl})`;
     const quoted = getPreviewCommentText(comment).split(/\r?\n/).slice(0, 80).map((line) => `> ${line}`).join('\n');
     textarea.value = isReply ? `${replyToken} ` : `> ${replyToken}\n${quoted}\n\n`;
     composer.appendChild(textarea);
@@ -666,9 +684,9 @@
     }
 
     const postId = safePositiveInt(state.modal?.postId || '');
-    const commentId = getCommentId(comment);
-    if ((action !== 'favorite' && commentId === null) || (action === 'favorite' && postId === null)) {
-      setActionState(menuItem, action === 'favorite' ? '缺少帖子ID' : '缺少评论ID', true);
+    const targetId = getActionTargetId(comment);
+    if ((action !== 'favorite' && targetId === null) || (action === 'favorite' && postId === null)) {
+      setActionState(menuItem, action === 'favorite' ? '缺少帖子ID' : '缺少目标ID', true);
       return;
     }
     if (action !== 'favorite' && menuItem.dataset.xnsActionDone === 'true') {
@@ -686,14 +704,14 @@
     try {
       if (action === 'like') {
         try {
-          await postAction('/aics/upvote', { commentId, action: 'add' });
+          await postAction('/aics/upvote', { commentId: targetId, action: 'add' });
         } catch {
-          await postAction('/api/statistics/upvote', { commentId, action: 'add' });
+          await postAction('/api/statistics/upvote', { commentId: targetId, action: 'add' });
         }
       } else if (action === 'chicken') {
-        await postAction('/api/statistics/like', { commentId, action: 'add' });
+        await postAction('/api/statistics/like', { commentId: targetId, action: 'add' });
       } else if (action === 'dislike') {
-        await postAction('/api/statistics/dislike', { commentId, action: 'add' });
+        await postAction('/api/statistics/dislike', { commentId: targetId, action: 'add' });
       } else if (action === 'favorite') {
         await postAction('/api/statistics/collection', { action: isFavoriteRemoval ? 'del' : 'add', postId });
       }
@@ -770,7 +788,7 @@
     record.node.setAttribute('data-xns-source-page', String(record.page));
     record.node.classList.add(depth === 0 ? 'xns-comment-root' : 'xns-comment-child');
     if (depth > 0 && record.parent) record.node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
-    ensurePreviewMenu(record.node);
+    ensurePreviewMenu(record.node, { includeFavorite: false });
   }
 
   function appendPreviewRecord(record, container, depth) {
@@ -782,15 +800,39 @@
     record.node.appendChild(replyList);
   }
 
+  function buildPreviewPostNode(parsed, info) {
+    const postRoot = qs(parsed, '.nsk-post');
+    const source = postRoot?.matches?.('.content-item')
+      ? postRoot
+      : qs(postRoot, ':scope > .content-item, .content-item') || postRoot || qs(parsed, SELECTORS.postContent);
+    let node = sanitizeImportedNode(source, { keepCommentMenu: true });
+    if (!node) return null;
+    if (node.matches?.('article.post-content')) {
+      const wrapper = createElement('div', 'content-item');
+      wrapper.appendChild(node);
+      node = wrapper;
+    }
+    node.classList.add('content-item', 'xns-preview-post', 'xns-comment-root');
+    node.setAttribute('data-xns-floor', '0');
+    node.setAttribute('data-xns-target-type', 'post');
+    node.setAttribute('data-xns-post-id', info.postId);
+    ensurePreviewMenu(node, { includeFavorite: true });
+    return node;
+  }
+
   async function buildPreviewContent(url, parsed) {
     const wrapper = createElement('div', 'xns-preview-content');
     const title = qs(parsed, SELECTORS.postTitle)?.textContent?.trim() || '';
-    const content = qs(parsed, SELECTORS.postContent);
-    const importedContent = sanitizeImportedNode(content);
-    if (importedContent) wrapper.appendChild(importedContent);
-    else wrapper.appendChild(createElement('p', 'xns-status', '没有找到帖子正文。'));
-
     const info = getPostInfo(url.href);
+    const importedPost = info ? buildPreviewPostNode(parsed, info) : null;
+    if (importedPost) {
+      wrapper.appendChild(importedPost);
+    } else {
+      const content = qs(parsed, SELECTORS.postContent);
+      const importedContent = sanitizeImportedNode(content);
+      if (importedContent) wrapper.appendChild(importedContent);
+      else wrapper.appendChild(createElement('p', 'xns-status', '没有找到帖子正文。'));
+    }
     if (!info) return { title, content: wrapper };
     const preview = await loadPreviewRecords(info, parsed);
     if (!preview.records.length) {
@@ -832,10 +874,11 @@
     const body = createElement('div', 'xns-modal-body');
     body.appendChild(createElement('p', 'xns-loading', '正在读取帖子内容…'));
     dialog.append(header, body);
+    const scrollCleanup = installPreviewScrollButtons(dialog, body);
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
     document.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, url, postId: getPostInfo(url.href)?.postId || '', composer: null };
+    state.modal = { overlay, dialog, body, url, postId: getPostInfo(url.href)?.postId || '', composer: null, scrollCleanup };
     overlay.focus();
 
     fetchHtml(url)
@@ -905,7 +948,7 @@
   }
 
   function handlePreviewActionClick(event) {
-    const menuItem = event.target.closest?.('.xns-overlay .xns-preview-thread .comment-menu > .menu-item');
+    const menuItem = event.target.closest?.('.xns-overlay .xns-preview-content .comment-menu > .menu-item');
     if (!menuItem || !state.modal) return;
     const comment = menuItem.closest('.content-item');
     const action = menuItem.dataset.xnsAction || getMenuActionKey(menuItem);
@@ -1164,7 +1207,6 @@
 
   function start() {
     installStyle();
-    installScrollButtons();
     document.addEventListener('click', handlePreviewActionClick, true);
     document.addEventListener('click', handleDocumentClick, true);
     document.addEventListener('keydown', handleKeydown, true);
