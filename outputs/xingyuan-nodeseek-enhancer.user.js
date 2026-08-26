@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.2
+// @version      0.5.3
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -1350,11 +1350,15 @@
   }
 
   function appendPreviewRecord(record, container, depth) {
-    preparePreviewRecord(record, depth);
+    appendNestedRecord(record, container, depth, preparePreviewRecord);
+  }
+
+  function appendNestedRecord(record, container, depth, prepareRecord) {
+    prepareRecord(record, depth);
     container.appendChild(record.node);
     if (!record.children.length) return;
     const replyList = createElement('ul', 'xns-reply-list');
-    record.children.forEach((child) => appendPreviewRecord(child, replyList, depth + 1));
+    record.children.forEach((child) => appendNestedRecord(child, replyList, depth + 1, prepareRecord));
     record.node.appendChild(replyList);
   }
 
@@ -1424,10 +1428,181 @@
     renderPreviewRecords(section, info, currentRecords, { loading: hasRemotePages });
     wrapper.appendChild(section);
     const hydrate = loadPreviewRecords(info, parsed, { noStore: options.noStore === true }).then((preview) => {
-      if (section.isConnected) renderPreviewRecords(section, info, preview.records, preview);
+      if (section.isConnected || options.renderDetached === true) renderPreviewRecords(section, info, preview.records, preview);
       return preview;
     });
     return { title, content: wrapper, hydrate };
+  }
+
+  function getPreviewScrollOwners(body) {
+    return qsa(body, '.xns-preview-post, .xns-preview-thread .content-item[data-comment-id], .xns-preview-thread .content-item[data-xns-floor]');
+  }
+
+  function getPreviewScrollOwner(node) {
+    return node?.closest?.('.xns-preview-post, .xns-preview-thread .content-item[data-comment-id], .xns-preview-thread .content-item[data-xns-floor]') || null;
+  }
+
+  function getPreviewScrollCandidates(body) {
+    const seen = new Set();
+    const candidates = [];
+    getPreviewScrollOwners(body).forEach((owner) => {
+      const blocks = [
+        owner,
+        ...qsa(owner, ':scope > .post-title, :scope > .nsk-content-meta-info, :scope > article.post-content > *, :scope > .post-content > *'),
+      ];
+      blocks.forEach((node) => {
+        if (!node || seen.has(node) || getPreviewScrollOwner(node) !== owner) return;
+        seen.add(node);
+        candidates.push(node);
+      });
+    });
+    return candidates;
+  }
+
+  function getPreviewChildPath(owner, node) {
+    const path = [];
+    let current = node;
+    while (current && current !== owner) {
+      const parent = current.parentElement;
+      if (!parent) return [];
+      const index = Array.prototype.indexOf.call(parent.children, current);
+      if (index < 0) return [];
+      path.unshift(index);
+      current = parent;
+    }
+    return current === owner ? path : [];
+  }
+
+  function capturePreviewScroll(body) {
+    const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
+    const snapshot = {
+      scrollTop: body.scrollTop,
+      maxScrollTop,
+      ratio: maxScrollTop > 0 ? body.scrollTop / maxScrollTop : 0,
+      atTop: body.scrollTop <= 3,
+      atBottom: maxScrollTop - body.scrollTop <= 24,
+      anchor: null,
+    };
+    if (snapshot.atTop || snapshot.atBottom || maxScrollTop === 0) return snapshot;
+
+    const bodyRect = body.getBoundingClientRect();
+    const anchorLine = bodyRect.top + Math.min(12, Math.max(2, body.clientHeight * 0.03));
+    const rows = getPreviewScrollCandidates(body).map((node) => ({ node, rect: node.getBoundingClientRect() }))
+      .filter(({ rect }) => rect.height > 0 && rect.bottom > bodyRect.top && rect.top < bodyRect.bottom);
+    const crossing = rows.filter(({ rect }) => rect.top <= anchorLine && rect.bottom > anchorLine);
+    const chosen = crossing.reduce((best, row) => (!best || row.rect.top > best.rect.top ? row : best), null)
+      || rows.filter(({ rect }) => rect.top > anchorLine).sort((left, right) => left.rect.top - right.rect.top)[0]
+      || null;
+    if (!chosen) return snapshot;
+
+    const owner = getPreviewScrollOwner(chosen.node);
+    if (!owner) return snapshot;
+    const isPost = owner.matches('.xns-preview-post, [data-xns-target-type="post"]');
+    snapshot.anchor = {
+      isPost,
+      commentId: isPost ? '' : (owner.getAttribute('data-comment-id') || ''),
+      floor: owner.getAttribute('data-xns-floor') || '',
+      path: getPreviewChildPath(owner, chosen.node),
+      tagName: chosen.node.tagName,
+      offset: chosen.rect.top - bodyRect.top,
+    };
+    return snapshot;
+  }
+
+  function findPreviewScrollOwner(body, anchor) {
+    if (anchor.isPost) return qs(body, '.xns-preview-post, [data-xns-target-type="post"]');
+    if (anchor.commentId) {
+      const byCommentId = qs(body, '.xns-preview-thread .content-item[data-comment-id="' + CSS.escape(anchor.commentId) + '"]');
+      if (byCommentId) return byCommentId;
+    }
+    if (anchor.floor) {
+      return qs(body, '.xns-preview-thread .content-item[data-xns-floor="' + CSS.escape(anchor.floor) + '"]');
+    }
+    return null;
+  }
+
+  function resolvePreviewScrollAnchor(body, anchor) {
+    const owner = findPreviewScrollOwner(body, anchor);
+    if (!owner) return null;
+    let node = owner;
+    for (const index of anchor.path || []) {
+      node = node?.children?.[index] || null;
+      if (!node) return owner;
+    }
+    return !anchor.tagName || node.tagName === anchor.tagName ? node : owner;
+  }
+
+  function restorePreviewScroll(body, snapshot) {
+    if (!snapshot) return;
+    const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
+    if (snapshot.atTop) {
+      body.scrollTop = 0;
+      return;
+    }
+    if (snapshot.atBottom) {
+      body.scrollTop = maxScrollTop;
+      return;
+    }
+
+    const anchor = snapshot.anchor ? resolvePreviewScrollAnchor(body, snapshot.anchor) : null;
+    if (anchor) {
+      const currentOffset = anchor.getBoundingClientRect().top - body.getBoundingClientRect().top;
+      const targetScrollTop = body.scrollTop + currentOffset - snapshot.anchor.offset;
+      body.scrollTop = Math.max(0, Math.min(targetScrollTop, maxScrollTop));
+      return;
+    }
+
+    const proportional = Number.isFinite(snapshot.ratio) ? snapshot.ratio * maxScrollTop : snapshot.scrollTop;
+    body.scrollTop = Math.max(0, Math.min(proportional, maxScrollTop));
+  }
+
+  function stabilizePreviewScroll(modal, snapshot, generation) {
+    modal.refreshScrollCleanup?.();
+    const body = modal.body;
+    let active = true;
+    let frame = 0;
+    const timers = [];
+    const imageHandlers = [];
+    const apply = () => {
+      frame = 0;
+      if (!active || state.modal !== modal || modal.loadGeneration !== generation) return;
+      restorePreviewScroll(body, snapshot);
+    };
+    const schedule = () => {
+      if (!active || frame) return;
+      frame = window.requestAnimationFrame(apply);
+    };
+    const cleanup = () => {
+      if (!active) return;
+      active = false;
+      if (frame) window.cancelAnimationFrame(frame);
+      timers.forEach((timer) => window.clearTimeout(timer));
+      resizeObserver?.disconnect();
+      imageHandlers.forEach(({ image, done }) => {
+        image.removeEventListener('load', done);
+        image.removeEventListener('error', done);
+      });
+      ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach((name) => {
+        modal.overlay.removeEventListener(name, cleanup, true);
+      });
+      if (modal.refreshScrollCleanup === cleanup) modal.refreshScrollCleanup = null;
+    };
+    const resizeObserver = window.ResizeObserver ? new ResizeObserver(schedule) : null;
+    resizeObserver?.observe(body.firstElementChild || body);
+    qsa(body, 'img').forEach((image) => {
+      if (image.complete) return;
+      const done = () => schedule();
+      imageHandlers.push({ image, done });
+      image.addEventListener('load', done, { once: true });
+      image.addEventListener('error', done, { once: true });
+    });
+    ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach((name) => {
+      modal.overlay.addEventListener(name, cleanup, { capture: true, passive: true });
+    });
+    [0, 60, 180, 420, 900, 1_400].forEach((delay) => timers.push(window.setTimeout(schedule, delay)));
+    timers.push(window.setTimeout(cleanup, 1_800));
+    modal.refreshScrollCleanup = cleanup;
+    restorePreviewScroll(body, snapshot);
   }
 
   function showPreviewLoadError(modal, error) {
@@ -1456,7 +1631,7 @@
   async function loadPreviewModal(modal, loadingText, options = {}) {
     if (!modal || modal.loading) return;
     const preserveContent = Boolean(options.preserveContent);
-    const previousScrollTop = preserveContent ? modal.body.scrollTop : 0;
+    modal.refreshScrollCleanup?.();
     modal.loading = true;
     const generation = (modal.loadGeneration || 0) + 1;
     modal.loadGeneration = generation;
@@ -1471,8 +1646,13 @@
     }
     try {
       const { html } = await fetchHtml(modal.url, { noStore: preserveContent });
-      const preview = buildPreviewContent(modal.url, parseHtml(html), { noStore: preserveContent });
+      const preview = buildPreviewContent(modal.url, parseHtml(html), {
+        noStore: preserveContent,
+        renderDetached: preserveContent,
+      });
+      if (preserveContent && preview.hydrate) await preview.hydrate;
       if (state.modal !== modal || modal.loadGeneration !== generation) return;
+      const scrollSnapshot = preserveContent ? capturePreviewScroll(modal.body) : null;
       modal.title.textContent = preview.title || 'NodeSeek 帖子预览';
       clearElement(modal.body);
       modal.body.appendChild(preview.content);
@@ -1481,16 +1661,16 @@
       installPreviewAnsiBlocks(modal.body);
       installPreviewImageFallback(modal.body);
       installPreviewCodeBlocks(modal.body);
-      if (preview.hydrate) await preview.hydrate;
-      installPreviewMagicTabs(modal.body);
-      installPreviewMarkdownTabs(modal.body);
-      installPreviewAnsiBlocks(modal.body);
-      installPreviewImageFallback(modal.body);
-      installPreviewCodeBlocks(modal.body);
-      if (preserveContent && state.modal === modal && modal.loadGeneration === generation) {
-        const maxScrollTop = Math.max(0, modal.body.scrollHeight - modal.body.clientHeight);
-        modal.body.scrollTop = Math.min(previousScrollTop, maxScrollTop);
+      if (!preserveContent && preview.hydrate) {
+        await preview.hydrate;
+        if (state.modal !== modal || modal.loadGeneration !== generation) return;
+        installPreviewMagicTabs(modal.body);
+        installPreviewMarkdownTabs(modal.body);
+        installPreviewAnsiBlocks(modal.body);
+        installPreviewImageFallback(modal.body);
+        installPreviewCodeBlocks(modal.body);
       }
+      if (preserveContent) stabilizePreviewScroll(modal, scrollSnapshot, generation);
     } catch (error) {
       if (state.modal === modal && modal.loadGeneration === generation) {
         if (preserveContent) showPreviewRefreshError(modal, error);
