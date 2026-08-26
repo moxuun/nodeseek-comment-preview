@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         星渊 NodeSeek 楼中楼与预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.3.1
+// @version      0.3.2
 // @description  只保留楼中楼、原版评论布局和首页帖子预览。
 // @author       Codex
 // @license      MIT
@@ -168,7 +168,8 @@
       if (node.localName === 'img') {
         node.setAttribute('loading', 'lazy');
         node.setAttribute('decoding', 'async');
-        node.setAttribute('referrerpolicy', 'no-referrer');
+        // 部分图片站会把 no-referrer 判定为直链访问，改为带站点来源的嵌入请求。
+        node.setAttribute('referrerpolicy', 'origin');
       }
     });
     return imported;
