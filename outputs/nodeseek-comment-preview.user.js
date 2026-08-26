@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.8
+// @version      0.5.9
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -45,6 +45,10 @@
     if (!/^\d{1,15}$/.test(text)) return null;
     const number = Number(text);
     return Number.isSafeInteger(number) && number > 0 ? number : null;
+  }
+  function safeCount(value) {
+    const number = Number(value);
+    return Number.isSafeInteger(number) && number >= 0 ? number : null;
   }
 
   function getPostInfo(rawUrl) {
@@ -209,6 +213,7 @@
     if (floor === null) return null;
     const node = current ? item : sanitizeImportedNode(item, options);
     if (!node) return null;
+    const commentId = getCommentId(item);
     return {
       floor,
       page,
@@ -217,6 +222,7 @@
       pinned: isPinnedComment(item),
       author: getAuthorName(item),
       reply: extractReplyMetadata(item, postId),
+      counts: commentId !== null && options.state ? getSsrCommentCounts(options.state, commentId) : null,
       node,
       parent: null,
       children: [],
@@ -266,7 +272,41 @@
   }
 
   function parseHtml(html) {
-    return new DOMParser().parseFromString(html, 'text/html');
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.__xnsState = extractSsrState(doc);
+    return doc;
+  }
+  // NodeSeek 的 SSR HTML 把点赞/鸡腿/反对/收藏计数放在 <script id="temp-script"> 的 base64 JSON 里，
+  // 评论菜单本身由 Vue 客户端渲染（服务端只输出空的 comment-menu-mount），
+  // 预览/跨页克隆必须从这份状态里恢复真实计数。
+  function extractSsrState(doc) {
+    try {
+      const script = qs(doc, '#temp-script[type="application/json"]');
+      const encoded = script?.textContent?.trim();
+      if (!encoded) return null;
+      const json = decodeURIComponent(escape(atob(encoded)));
+      const data = JSON.parse(json);
+      return data && data.postData && Array.isArray(data.postData.comments) ? data : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function getDocState(root) {
+    return root && root !== document ? root.__xnsState || null : null;
+  }
+
+  function getSsrCommentCounts(state, commentId) {
+    const comment = state?.postData?.comments?.find((item) => String(item.commentId) === String(commentId));
+    if (!comment) return null;
+    return {
+      like: safeCount(comment.upvoteCount),
+      chicken: safeCount(comment.likeCount),
+      dislike: safeCount(comment.dislikeCount),
+      liked: Boolean(comment.upvoted),
+      chickened: Boolean(comment.liked),
+      disliked: Boolean(comment.disliked),
+    };
   }
 
   function installStyle() {
@@ -1047,6 +1087,18 @@
         });
       }
     });
+    const counts = options.counts || null;
+    if (counts) {
+      qsa(menu, ':scope > .menu-item').forEach((item) => {
+        const action = getMenuActionKey(item);
+        const value = counts[action];
+        const countNode = qs(item, ':scope > .xns-action-count') || getMenuCountElement(item);
+        if (countNode && Number.isFinite(value) && value >= 0) countNode.textContent = String(value);
+        if (action === 'favorite' && counts.collected && item.dataset.xnsFavoriteState !== 'removed') {
+          item.dataset.xnsFavoriteState = 'added';
+        }
+      });
+    }
     return menu;
   }
 
@@ -1339,7 +1391,8 @@
   }
 
   function collectPageRecords(info, root, page) {
-    return getCommentItems(root).map((item, index) => getCommentRecord(item, info.postId, page, index, false, { keepCommentMenu: true })).filter(Boolean);
+    const state = getDocState(root);
+    return getCommentItems(root).map((item, index) => getCommentRecord(item, info.postId, page, index, false, { keepCommentMenu: true, state })).filter(Boolean);
   }
 
   async function loadPreviewRecords(info, firstDocument, options = {}) {
@@ -1396,7 +1449,7 @@
     record.node.setAttribute('data-xns-source-page', String(record.page));
     record.node.classList.add(depth === 0 ? 'xns-comment-root' : 'xns-comment-child');
     if (depth > 0 && record.parent) record.node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
-    ensurePreviewMenu(record.node, { includeFavorite: false });
+    ensurePreviewMenu(record.node, { includeFavorite: false, counts: record.counts || undefined });
   }
 
   function appendPreviewRecord(record, container, depth) {
@@ -1428,7 +1481,15 @@
     node.setAttribute('data-xns-floor', '0');
     node.setAttribute('data-xns-target-type', 'post');
     node.setAttribute('data-xns-post-id', info.postId);
-    ensurePreviewMenu(node, { includeFavorite: true });
+    const postState = getDocState(parsed);
+    const postCommentId = getCommentId(node);
+    const counts = postCommentId !== null && postState ? getSsrCommentCounts(postState, postCommentId) : null;
+    if (counts) {
+      const collectionCount = safeCount(postState?.postData?.collectionCount);
+      if (collectionCount !== null) counts.favorite = collectionCount;
+      if (postState?.postData?.collected) counts.collected = true;
+    }
+    ensurePreviewMenu(node, { includeFavorite: true, counts });
     return node;
   }
 
@@ -1991,18 +2052,19 @@
 
       const allRecords = [];
       this.pageDocs.forEach((root, page) => {
+        const state = getDocState(root);
         if (root === document && this.originalChildren.length) {
           // 楼中楼渲染会把当前页评论重排进嵌套回复列表；必须从初始扁平快照收集，
           // 否则在线程模式下 reload 会漏掉被嵌套的楼层。
           this.originalChildren.forEach((item, index) => {
             if (item.nodeType !== Node.ELEMENT_NODE) return;
-            const record = getCommentRecord(item, this.info.postId, page, index, true, { keepCommentMenu: true });
+            const record = getCommentRecord(item, this.info.postId, page, index, true, { keepCommentMenu: true, state });
             if (record) allRecords.push(record);
           });
           return;
         }
         getCommentItems(root).forEach((item, index) => {
-          const record = getCommentRecord(item, this.info.postId, page, index, root === document, { keepCommentMenu: true });
+          const record = getCommentRecord(item, this.info.postId, page, index, root === document, { keepCommentMenu: true, state });
           if (record) allRecords.push(record);
         });
       });
@@ -2044,7 +2106,7 @@
         record.node.setAttribute('data-xns-source-page', String(record.page));
       }
       if (depth > 0 && record.parent) record.node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
-      ensurePreviewMenu(record.node, { includeFavorite: false });
+      ensurePreviewMenu(record.node, { includeFavorite: false, counts: record.counts || undefined });
     }
 
     render() {

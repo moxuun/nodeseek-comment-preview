@@ -131,7 +131,6 @@ function createContext(browser, base) {
 }
 
 const dataOf = (page) => page.__testData;
-
 async function waitPost(page, predicate, timeout = 12_000) {
   const started = Date.now();
   for (;;) {
@@ -176,6 +175,28 @@ scenario('帖子页楼中楼构建与跨页来源链接', async (ctx) => {
   assert(state.replyLists === 2, `应有 2 个嵌套回复列表，实际 ${state.replyLists}`);
   assert(JSON.stringify(state.noteOwners) === JSON.stringify(['4', '5']), `跨页来源链接应只在 #4 #5，实际 ${JSON.stringify(state.noteOwners)}`);
   assert(dataOf(page).pageErrors.length === 0, `页面出现未捕获异常：${dataOf(page).pageErrors.join('; ')}`);
+});
+
+scenario('跨页评论点赞/鸡腿/反对计数来自 SSR 状态（0.5.9 回归）', async (ctx) => {
+  const page = await openPostPage(ctx);
+  const state = await page.evaluate(() => {
+    const countOf = (menu, action) => {
+      const item = [...menu.children].find((node) => (node.dataset.xnsAction || node.title) === action);
+      const span = item && [...item.children].find((node) => /^\d+$/.test((node.textContent || '').trim()));
+      return span ? span.textContent.trim() : null;
+    };
+    const carol = document.querySelector('.comment-container > ul.comments .content-item[data-xns-floor="4"]');
+    const menu = carol?.querySelector(':scope > .comment-menu');
+    return {
+      floor: carol?.getAttribute('data-xns-floor'),
+      like: countOf(menu, 'like'),
+      chicken: countOf(menu, 'chicken'),
+      dislike: countOf(menu, 'dislike'),
+    };
+  });
+  assert(state.floor === '4', '应找到跨页评论 #4');
+  assert(state.like === '3' && state.chicken === '2' && state.dislike === '1',
+    `#4 计数应为 点赞3/鸡腿2/反对1，实际 ${state.like}/${state.chicken}/${state.dislike}`);
 });
 
 scenario('原版/楼中楼切换', async (ctx) => {
@@ -268,6 +289,31 @@ scenario('列表页预览弹窗结构与操作菜单', async (ctx) => {
   assert(JSON.stringify(state.floorActions) === JSON.stringify(['like', 'chicken', 'dislike', 'quote', 'reply']), `回复楼层不应有收藏，实际 ${JSON.stringify(state.floorActions)}`);
   assert(state.items === 9, `弹窗应有 9 条回复，实际 ${state.items}`);
 });
+scenario('弹窗点赞/鸡腿/反对/收藏计数来自 SSR 状态（0.5.9 回归）', async (ctx) => {
+  const page = await openPreviewModal(ctx);
+  const state = await page.evaluate(() => {
+    const countOf = (menu, action) => {
+      const item = [...menu.children].find((node) => (node.dataset.xnsAction || node.title) === action);
+      const span = item && [...item.children].find((node) => /^\d+$/.test((node.textContent || '').trim()));
+      return span ? span.textContent.trim() : null;
+    };
+    const modal = document.querySelector('.xns-modal');
+    const postMenu = modal.querySelector('.xns-preview-post > .comment-menu');
+    const bob = [...modal.querySelectorAll('.xns-preview-thread .content-item[data-xns-floor]')].find((node) => node.textContent.includes('普通评论'));
+    const root = modal.querySelector('.xns-preview-thread .content-item[data-xns-floor="1"]');
+    return {
+      post: { like: countOf(postMenu, 'like'), chicken: countOf(postMenu, 'chicken'), dislike: countOf(postMenu, 'dislike'), favorite: countOf(postMenu, 'favorite') },
+      bob: { like: countOf(bob?.querySelector(':scope > .comment-menu'), 'like'), chicken: countOf(bob?.querySelector(':scope > .comment-menu'), 'chicken'), dislike: countOf(bob?.querySelector(':scope > .comment-menu'), 'dislike') },
+      root: { like: countOf(root?.querySelector(':scope > .comment-menu'), 'like'), chicken: countOf(root?.querySelector(':scope > .comment-menu'), 'chicken') },
+    };
+  });
+  assert(state.post.like === '5' && state.post.chicken === '3' && state.post.dislike === '1' && state.post.favorite === '7',
+    `主帖计数应为 点赞5/鸡腿3/反对1/收藏7，实际 ${state.post.like}/${state.post.chicken}/${state.post.dislike}/${state.post.favorite}`);
+  assert(state.bob.like === '1' && state.bob.chicken === '4' && state.bob.dislike === '1',
+    `#3 计数应为 点赞1/鸡腿4/反对1，实际 ${state.bob.like}/${state.bob.chicken}/${state.bob.dislike}`);
+  assert(state.root.like === '2' && state.root.chicken === '2',
+    `#1 计数应为 点赞2/鸡腿2，实际 ${state.root.like}/${state.root.chicken}`);
+});
 
 scenario('弹窗跨页来源链接只出现在跨页评论（0.5.8 回归）', async (ctx) => {
   const page = await openPreviewModal(ctx);
@@ -300,7 +346,7 @@ scenario('弹窗点赞与收藏', async (ctx) => {
     if (item?.dataset.xnsFavoriteState !== 'added') return null;
     return { state: item.dataset.xnsFavoriteState, count: item.querySelector('.xns-action-count')?.textContent };
   }, 5_000, '收藏状态');
-  assert(favorite.state === 'added' && favorite.count === '1', `收藏后应 added/1，实际 ${JSON.stringify(favorite)}`);
+  assert(favorite.state === 'added' && favorite.count === '8', `收藏应从 SSR 基数 7 递增到 8，实际 ${JSON.stringify(favorite)}`);
 });
 
 scenario('楼层回复编辑器与帖子级回复编辑器', async (ctx) => {
