@@ -1220,7 +1220,7 @@
   async function postAction(path, payload, options = {}) {
     const contextUrl = options.context?.url?.href || state.modal?.url?.href || window.location.href;
     const endpoint = parseSameOriginUrl(path, contextUrl);
-    const allowed = new Set(['/aics/upvote', '/api/statistics/upvote', '/api/statistics/like', '/api/statistics/dislike', '/api/statistics/collection', '/api/content/new-comment', '/api/vote/voteforitem']);
+    const allowed = new Set(['/api/statistics/upvote', '/api/statistics/like', '/api/statistics/dislike', '/api/statistics/collection', '/api/content/new-comment', '/api/vote/voteforitem']);
     if (!endpoint || !allowed.has(endpoint.pathname)) throw new Error('操作地址不是 NodeSeek 同源接口');
 
     const controller = new AbortController();
@@ -1395,7 +1395,8 @@
         textarea.readOnly = true;
         submit.remove();
         if (actionContext.modal && state.modal === actionContext.modal) {
-          await loadPreviewModal(actionContext.modal, '正在更新回复…', { preserveContent: true });
+          const refreshed = await loadPreviewModal(actionContext.modal, '正在更新回复…', { preserveContent: true });
+          if (!refreshed) status.textContent = '回复已发送。帖子正在刷新中，楼中楼可能暂未包含新回复，请稍后再点刷新。';
         } else if (state.post) {
           const post = state.post;
           if (post.composer === composer) post.composer = null;
@@ -1436,11 +1437,8 @@
     setActionState(menuItem, '处理中…');
     try {
       if (action === 'like') {
-        try {
-          await postAction('/aics/upvote', { commentId: targetId, action: 'add' }, { context: actionContext });
-        } catch {
-          await postAction('/api/statistics/upvote', { commentId: targetId, action: 'add' }, { context: actionContext });
-        }
+        // /aics/upvote 已失效（恒定 404），直接调用站点实际的点赞接口。
+        await postAction('/api/statistics/upvote', { commentId: targetId, action: 'add' }, { context: actionContext });
       } else if (action === 'chicken') {
         await postAction('/api/statistics/like', { commentId: targetId, action: 'add' }, { context: actionContext });
       } else if (action === 'dislike') {
@@ -1830,7 +1828,7 @@
   }
 
   async function loadPreviewModal(modal, loadingText, options = {}) {
-    if (!modal || modal.loading) return;
+    if (!modal || modal.loading) return false;
     const preserveContent = Boolean(options.preserveContent);
     modal.refreshScrollCleanup?.();
     modal.loading = true;
@@ -1853,15 +1851,17 @@
         renderDetached: preserveContent,
       });
       if (preserveContent && preview.hydrate) await preview.hydrate;
-      if (state.modal !== modal || modal.loadGeneration !== generation) return;
+      if (state.modal !== modal || modal.loadGeneration !== generation) return false;
       const scrollSnapshot = preserveContent ? capturePreviewScroll(modal.body) : null;
       modal.title.textContent = preview.title || 'NodeSeek 帖子预览';
       clearElement(modal.body);
       modal.body.appendChild(preview.content);
+      // 刷新重建楼中楼时恢复仍然打开的帖子回复编辑器，避免清掉进行中的草稿。
+      if (modal.composer && !modal.composer.isConnected) modal.body.appendChild(modal.composer);
       installPreviewFeatures(modal.body);
       if (!preserveContent && preview.hydrate) {
         await preview.hydrate;
-        if (state.modal !== modal || modal.loadGeneration !== generation) return;
+        if (state.modal !== modal || modal.loadGeneration !== generation) return false;
         installPreviewFeatures(modal.body);
       }
       if (preserveContent) stabilizePreviewScroll(modal, scrollSnapshot, generation);
@@ -1875,6 +1875,7 @@
       refresh?.classList.remove('xns-action-pending');
       refresh?.removeAttribute('aria-busy');
     }
+    return true;
   }
 
   function refreshPreviewModal() {
@@ -1885,6 +1886,8 @@
 
   function openPreviewModal(url, fallbackLink) {
     closeModal();
+    // 预览抓取只接受干净的帖子路径：先剥离 query 与 hash，避免触发 fetchHtml 的同源校验。
+    const fetchUrl = url.search || url.hash ? new URL(url.pathname, url.origin) : url;
     const overlay = createElement('div', 'xns-overlay');
     overlay.tabIndex = -1;
     overlay.addEventListener('click', (event) => { if (event.target === overlay) closeModal(); });
@@ -1911,7 +1914,7 @@
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
     document.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url, fallbackLink, postId: getPostInfo(url.href)?.postId || '', composer: null, scrollCleanup, loading: false, loadGeneration: 0 };
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, loading: false, loadGeneration: 0 };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }
@@ -2145,6 +2148,8 @@
 
   function handleKeydown(event) {
     if (event.key !== 'Escape') return;
+    // 焦点在可编辑控件内时把 Esc 交给原生行为，避免误关弹窗丢失草稿。
+    if (event.target.closest?.('textarea, input, [contenteditable="true"]')) return;
     if (state.lightbox) {
       event.preventDefault();
       closeImageLightbox();
