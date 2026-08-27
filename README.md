@@ -1,6 +1,6 @@
 # NodeSeek 楼中楼预览
 
-[NodeSeek]（https://www.nodeseek.com）用户脚本：把平铺评论重建成楼中楼嵌套视图。功能参考 [V2Next](https://github.com/zyronon/V2Next)，用 Codex 辅助开发的轮子。
+[NodeSeek](https://www.nodeseek.com)用户脚本：把平铺评论重建成楼中楼嵌套视图。功能参考 [V2Next](https://github.com/zyronon/V2Next)，用 Codex 辅助开发的轮子。
 
 ## 安装
 
@@ -36,10 +36,5 @@
 | `work/xns-fixture-server.mjs` | 本地 fixture HTTP 服务器（测试用） |
 | `work/xns-fixture/` | 测试用帖子/列表页面 |
 
-## 反馈
 
-欢迎提 [issue](https://github.com/moxuun/nodeseek-comment-preview/issues) 反馈问题，我会在自己帖子下测试「点赞、鸡腿、收藏、回复」相关场景。对你有帮助的话点个 [star](https://github.com/moxuun/nodeseek-comment-preview) 吧。
 
-## 安全边界
-
-只读取当前 NodeSeek 帖子页面的同源 HTML；不读取 Cookie、密码、令牌、剪贴板、私信或浏览历史；所有点赞、鸡腿、反对、收藏、回复都须由用户主动点击后才请求 NodeSeek。
