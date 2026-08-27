@@ -169,17 +169,20 @@
     all.forEach((node) => {
       Array.from(node.attributes).forEach((attribute) => {
         const name = attribute.name.toLowerCase();
-        if (name.startsWith('on') || ['style', 'srcdoc', 'srcset', 'formaction', 'contenteditable'].includes(name)) {
+        if (name.startsWith('on') || ['style', 'srcdoc', 'srcset', 'formaction', 'contenteditable', 'ping'].includes(name)) {
           node.removeAttribute(attribute.name);
           return;
         }
-        if (['href', 'src', 'poster'].includes(name)) {
-          const safeValue = getSafeUrlAttribute(name === 'poster' ? 'src' : name, attribute.value);
+        if (['href', 'src', 'poster', 'xlink:href'].includes(name)) {
+          // SVG 图标普遍用 #片段 引用雪碧图，片段引用不会发生跳转，原样保留以免误伤。
+          const safeFragment = name === 'xlink:href' && attribute.value.trim().startsWith('#');
+          const urlName = name === 'poster' ? 'src' : name === 'xlink:href' ? 'href' : name;
+          const safeValue = safeFragment ? attribute.value : getSafeUrlAttribute(urlName, attribute.value);
           if (!safeValue) node.removeAttribute(attribute.name);
           else node.setAttribute(attribute.name, safeValue);
         }
       });
-      if (node.localName === 'a' && node.hasAttribute('href')) {
+      if (node.localName === 'a' && (node.hasAttribute('href') || node.hasAttribute('xlink:href'))) {
         node.setAttribute('target', '_blank');
         node.setAttribute('rel', 'noopener noreferrer');
       }
