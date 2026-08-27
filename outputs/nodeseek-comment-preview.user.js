@@ -2246,6 +2246,8 @@
         if (generation !== this.generation) return;
         this.render();
       } catch (error) {
+        // 旧代失败不能回滚新代已渲染的楼中楼，先过代际守卫再恢复。
+        if (generation !== this.generation) return;
         this.restoreOriginal();
         this.showStatus(`楼中楼读取失败：${error.message || '网络错误'}，已保留原版布局。`);
       } finally {
@@ -2264,6 +2266,8 @@
         noStore: options.noStore !== false,
         isAborted: () => generation !== this.generation,
       });
+      // 代际守卫：并发刷新时旧代晚到就直接放弃，绝不覆盖新代已写入的数据。
+      if (generation !== this.generation) return;
       this.pageDocs = pageDocs;
       this.failedPages = failedPages;
       this.truncated = truncated;
@@ -2320,7 +2324,13 @@
       if (!this.list || state.mode !== 'thread') return;
       this.restoreOriginal();
       buildReplyTree(this.records).forEach((record) => appendNestedRecord(record, this.list, 0, prepareCommentRecord));
-      this.records.filter((record) => record.node.hasAttribute('data-xns-remote')).forEach((record) => addRemoteNote(record, this.info.postId));
+      this.records.filter((record) => record.node.hasAttribute('data-xns-remote')).forEach((record) => {
+        addRemoteNote(record, this.info.postId);
+        // 跨页克隆脱离 NodeSeek Vue 环境：复用预览弹窗的功能接线与作用域样式，
+        // 重建投票面板、代码复制、标签页和 ANSI 渲染；当前页楼层不加类，仍交给 Vue。
+        record.node.classList.add('xns-preview-content');
+        installPreviewFeatures(record.node);
+      });
       const loadedPages = this.pageDocs.size;
       let status = this.failedPages.length
         ? `楼中楼已整理：读取 ${loadedPages} 页，${this.failedPages.length} 页失败。`
