@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.10
+// @version      0.5.11
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -149,13 +149,22 @@
   function sanitizeImportedNode(sourceNode, options = {}) {
     if (!sourceNode) return null;
     const imported = document.importNode(sourceNode, true);
+    // 投票面板是 NodeSeek 官方组件（Vue SSR 输出 form + radio + 按钮），
+    // 必须整体保留，否则预览和跨页克隆里投票会消失。
+    const isVotePanel = (node) => Boolean(node.closest?.('.vote-panel, .embed-vote'));
     const dangerous = 'script,style,link,meta,base,iframe,object,embed,form,input,textarea,select,option,button';
-    qsa(imported, dangerous).forEach((node) => node.remove());
-    if (imported.matches?.(dangerous)) imported.remove();
+    qsa(imported, dangerous).forEach((node) => {
+      if (node.closest?.('.vote-panel, .embed-vote')) return;
+      node.remove();
+    });
+    if (!isVotePanel(imported) && imported.matches?.(dangerous)) imported.remove();
 
     // 跨页帖子评论默认是只读克隆；预览页和新标签页统一接管楼层菜单点击。
     if (!options.keepCommentMenu) qsa(imported, '.comment-menu, .comment-actions').forEach((node) => node.remove());
-    qsa(imported, '[id]').forEach((node) => node.removeAttribute('id'));
+    qsa(imported, '[id]').forEach((node) => {
+      if (node.closest?.('.vote-panel, .embed-vote')) return;
+      node.removeAttribute('id');
+    });
     // NodeSeek 的评论头部有一个灰色楼层按钮；预览已有自己的来源链接，移除这个无效控件。
     qsa(imported, '.nsk-content-meta-info .floor-link, .nsk-content-meta-info [class*="floor-link"]').forEach((node) => node.remove());
     qsa(imported, '.nsk-content-meta-info a, .nsk-content-meta-info span').forEach((node) => {
@@ -419,6 +428,15 @@
       .xns-preview-composer button:hover, .xns-preview-composer button:focus-visible, .xns-preview-composer a:hover, .xns-preview-composer a:focus-visible { border-color:#3b82f6; outline:none; }
       .xns-preview-composer-status { color:#64748b; font-size:12px; }
       .xns-image-error { display:block; margin-top:5px; color:#b91c1c; font:12px/1.4 system-ui,sans-serif; }
+      .xns-preview-content .vote-panel { margin:8px 0; }
+      .xns-preview-content .vote-panel .pure-form { padding:2px 0; }
+      .xns-preview-content .vote-panel form { background:#fbfbfb; border:1px solid rgba(100,116,139,.2); border-radius:7px; padding:8px 10px; }
+      .xns-preview-content .vote-panel .vote-stat { display:flex; align-items:flex-start; gap:6px; margin:4px 0; }
+      .xns-preview-content .vote-panel input[type="radio"] { margin-top:3px; flex:0 0 auto; }
+      .xns-preview-content .vote-panel button { margin-top:8px; padding:4px 14px; border:1px solid rgba(0,120,231,.4); border-radius:6px; color:#0078e7; background:transparent; cursor:pointer; font:13px/1.3 system-ui,sans-serif; }
+      .xns-preview-content .vote-panel button:disabled { opacity:.55; cursor:not-allowed; }
+      .xns-vote-status { margin-top:6px; color:#64748b; font-size:12px; }
+      .xns-vote-status:empty { display:none; }
       .xns-preview-content img { cursor:zoom-in; }
       .xns-lightbox { position:fixed; z-index:2147483500; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; background:rgba(2,6,23,.88); }
       .xns-lightbox-stage { position:relative; display:flex; align-items:center; justify-content:center; width:100%; height:100%; overflow:hidden; cursor:grab; }
@@ -436,7 +454,14 @@
         .xns-preview-content .xns-ansi-fg-black { color:#e5e7eb; } .xns-preview-content .xns-ansi-fg-white { color:#111827; }
         .xns-preview-content .xns-markdown-tabs { background:#111827; } .xns-preview-content .xns-markdown-tabs-nav { background:rgba(15,23,42,.65); } .xns-preview-content .xns-markdown-tab.is-active { color:#93c5fd; background:#18202b; }
         .xns-preview-content .nsk-magic-tabs { background:#111827; } .xns-preview-content .nsk-magic-tabs > .nsk-magic-tab-title.xns-active { color:#93c5fd; background:#18202b; }
-        .xns-toolbar-status, .xns-loading, .xns-status, .xns-remote-note { color:#9ca3af; }
+        .xns-post-toolbar { color:#e5e7eb; background:#1e293b; border-color:rgba(148,163,184,.3); }
+        .xns-post-toolbar button { color:#e5e7eb; border-color:rgba(148,163,184,.35); }
+        .xns-post-toolbar button[aria-pressed="true"] { color:#93c5fd; border-color:#3b82f6; background:rgba(59,130,246,.22); }
+        .xns-preview-composer textarea { color:#e5e7eb; }
+        .xns-preview-composer button, .xns-preview-composer a { color:#e5e7eb; border-color:rgba(148,163,184,.35); }
+        .xns-preview-content .vote-panel form { color:#e5e7eb; background:#111827; border-color:rgba(148,163,184,.25); }
+        .xns-preview-content .vote-panel button { color:#93c5fd; border-color:rgba(59,130,246,.5); }
+        .xns-toolbar-status, .xns-loading, .xns-status, .xns-remote-note, .xns-vote-status { color:#9ca3af; }
       }
       @media (max-width:800px) { .xns-preview-scroll-btns { right:6px; } .xns-scroll-btn { width:30px !important; min-width:30px !important; max-width:30px !important; height:30px !important; min-height:30px !important; max-height:30px !important; flex-basis:30px; } .xns-preview-thread .xns-remote-note { max-width:62%; } }
       @media (max-width:640px) { .xns-overlay { padding:0; } .xns-modal { width:100%; max-height:100vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-thread .xns-remote-note { top:5px; right:7px; max-width:70%; } .xns-preview-scroll-btns { right:5px; } .xns-scroll-btn { width:28px !important; min-width:28px !important; max-width:28px !important; height:28px !important; min-height:28px !important; max-height:28px !important; flex-basis:28px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; margin-left:0; } }
@@ -1162,7 +1187,7 @@
   async function postAction(path, payload, options = {}) {
     const contextUrl = options.context?.url?.href || state.modal?.url?.href || window.location.href;
     const endpoint = parseSameOriginUrl(path, contextUrl);
-    const allowed = new Set(['/aics/upvote', '/api/statistics/upvote', '/api/statistics/like', '/api/statistics/dislike', '/api/statistics/collection', '/api/content/new-comment']);
+    const allowed = new Set(['/aics/upvote', '/api/statistics/upvote', '/api/statistics/like', '/api/statistics/dislike', '/api/statistics/collection', '/api/content/new-comment', '/api/vote/voteforitem']);
     if (!endpoint || !allowed.has(endpoint.pathname)) throw new Error('操作地址不是 NodeSeek 同源接口');
 
     const controller = new AbortController();
@@ -1893,6 +1918,49 @@
     openPreviewModal(url, link);
   }
 
+  function getVoteStatus(panel) {
+    let status = qs(panel, '.xns-vote-status');
+    if (!status) {
+      status = createElement('div', 'xns-vote-status');
+      const form = qs(panel, 'form') || panel;
+      form.appendChild(status);
+    }
+    return status;
+  }
+
+  // 只有用户点击投票按钮才发请求；原页面（非克隆）的投票交给 NodeSeek Vue 原生处理。
+  function handleVoteClick(event) {
+    const button = event.target.closest?.('.vote-panel button');
+    if (!button || button.disabled) return;
+    const panel = button.closest('.vote-panel');
+    if (!panel || panel.dataset.xnsVotePending === 'true') return;
+    const inPreview = Boolean(panel.closest('.xns-overlay .xns-preview-content'));
+    const inRemote = Boolean(panel.closest('[data-xns-remote]'));
+    if (!inPreview && !inRemote) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const form = qs(panel, 'form') || panel;
+    const selected = qsa(form, 'input[name="vote-item"]:checked').map((input) => input.value);
+    const status = getVoteStatus(panel);
+    if (!selected.length) {
+      status.textContent = '请先选择选项。';
+      return;
+    }
+    panel.dataset.xnsVotePending = 'true';
+    button.setAttribute('disabled', '');
+    status.textContent = '正在投票…';
+    void postAction('/api/vote/voteforitem', { ids: selected }, { context: getPageActionContext() })
+      .then(() => {
+        status.textContent = '投票成功，感谢参与。';
+        button.textContent = '已投票';
+      })
+      .catch((error) => {
+        status.textContent = `投票失败：${error.message || '网络错误'}`;
+        button.removeAttribute('disabled');
+        panel.dataset.xnsVotePending = '';
+      });
+  }
+
   function handlePreviewActionClick(event) {
     const menuItem = event.target.closest?.('.xns-preview-menu > .menu-item');
     if (!menuItem) return;
@@ -2107,6 +2175,7 @@
   function start() {
     installStyle();
     document.addEventListener('click', handlePreviewActionClick, true);
+    document.addEventListener('click', handleVoteClick, true);
     document.addEventListener('click', handleDocumentClick, true);
     document.addEventListener('keydown', handleKeydown, true);
 

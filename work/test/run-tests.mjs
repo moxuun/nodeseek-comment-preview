@@ -442,6 +442,57 @@ scenario('内容特性：标签页/ANSI/复制按钮', async (ctx) => {
   assert(state.copyButtons === 3, `应有 3 个代码复制按钮，实际 ${state.copyButtons}`);
 });
 
+scenario('弹窗保留投票面板并提交（0.5.11 回归）', async (ctx) => {
+  const page = await openPreviewModal(ctx);
+  const state = await page.evaluate(() => {
+    const panel = document.querySelector('.xns-preview-post .vote-panel');
+    const radios = panel ? [...panel.querySelectorAll('input[name="vote-item"]')].map((input) => input.value) : [];
+    return {
+      panelExists: !!panel,
+      radioCount: radios.length,
+      radios,
+      buttonText: panel?.querySelector('button')?.textContent?.trim() || null,
+      nsappText: panel?.textContent?.includes('nsapp://vote?id=123') || false,
+    };
+  });
+  assert(state.panelExists, '预览弹窗应保留投票面板');
+  assert(state.radioCount === 2 && JSON.stringify(state.radios) === JSON.stringify(['13788', '13789']), `应有 2 个选项，实际 ${JSON.stringify(state.radios)}`);
+  assert(state.buttonText === '投票', `应有投票按钮，实际 ${state.buttonText}`);
+  assert(state.nsappText, '应保留 nsapp://vote 文本');
+
+  await page.evaluate(() => {
+    const input = document.querySelector('.xns-preview-post .vote-panel input[value="13788"]');
+    input.click();
+    document.querySelector('.xns-preview-post .vote-panel button').click();
+  });
+  const post = await waitPost(page, (p) => p.url.endsWith('/api/vote/voteforitem'));
+  const payload = JSON.parse(post.body);
+  assert(payload.ids.length === 1 && payload.ids[0] === '13788', `应提交所选选项，实际 ${post.body}`);
+  await waitFor(page, () => document.querySelector('.xns-preview-post .xns-vote-status')?.textContent?.includes('投票成功'), 5_000, '投票成功状态');
+});
+
+scenario('暗色模式跟随系统（0.5.11 回归）', async (ctx) => {
+  const postPage = await ctx.newPage();
+  await postPage.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]);
+  await postPage.goto(`${ctx.base}/post-123-1`, { waitUntil: 'networkidle0' });
+  await waitFor(postPage, () => /条评论/.test(document.querySelector('.xns-toolbar-status')?.textContent || ''), 15_000, '帖子页楼中楼构建');
+  const toolbar = await postPage.evaluate(() => {
+    const style = getComputedStyle(document.querySelector('.xns-post-toolbar'));
+    return { background: style.backgroundColor, color: style.color };
+  });
+  assert(toolbar.background !== 'rgb(248, 250, 252)', `暗色下工具栏背景不应为浅色，实际 ${toolbar.background}`);
+  await postPage.close();
+
+  const modal = await openPreviewModal(ctx);
+  await modal.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const votePanel = await modal.evaluate(() => {
+    const style = getComputedStyle(document.querySelector('.xns-preview-post .vote-panel form'));
+    return { voteBg: style.backgroundColor };
+  });
+  assert(votePanel.voteBg !== 'rgb(251, 251, 251)', `暗色下投票面板不应为浅色，实际 ${votePanel.voteBg}`);
+});
+
 // ---------- 主流程 ----------
 
 const chromePath = findChrome();
