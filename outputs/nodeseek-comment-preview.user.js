@@ -1173,10 +1173,17 @@
     return getPageActionContext();
   }
 
-  function randomCsrfToken() {
-    const bytes = new Uint8Array(16);
-    if (window.crypto?.getRandomValues) window.crypto.getRandomValues(bytes);
-    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  // NodeSeek 对所有 /api/ 请求校验 x-dynamic-sign：对
+  // `method + "\n\n" + url + "\n\n" + userAgent + "\n\n" + body` 做 SHA-1（hex）。
+  // 计算失败时站点自身回退为 40 个 'a'，这里同样回退。
+  async function dynamicSign(method, url, body) {
+    const input = `${method}\n\n${url}\n\n${navigator.userAgent || ''}\n\n${body || ''}`;
+    try {
+      const digest = await window.crypto.subtle.digest('SHA-1', new TextEncoder().encode(input));
+      return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    } catch {
+      return 'a'.repeat(40);
+    }
   }
 
   async function postAction(path, payload, options = {}) {
@@ -1187,6 +1194,14 @@
 
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+    const bodyText = JSON.stringify(payload);
+    const requestHeaders = {
+      Accept: 'application/json, text/plain, */*',
+      'Content-Type': 'application/json',
+      'X-Requested-With': 'XMLHttpRequest',
+      ...(options.headers || {}),
+    };
+    if (window.crypto?.subtle) requestHeaders['x-dynamic-sign'] = await dynamicSign('POST', endpoint.href, bodyText);
     try {
       const response = await fetch(endpoint.href, {
         method: 'POST',
@@ -1195,14 +1210,8 @@
         redirect: 'error',
         referrer: contextUrl,
         referrerPolicy: 'same-origin',
-        headers: {
-          Accept: 'application/json, text/plain, */*',
-          'Content-Type': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest',
-          'csrf-token': randomCsrfToken(),
-          ...(options.headers || {}),
-        },
-        body: JSON.stringify(payload),
+        headers: requestHeaders,
+        body: bodyText,
         signal: controller.signal,
       });
       const text = await response.text();
@@ -1922,13 +1931,15 @@
   async function fetchVoteInfo(voteId) {
     const endpoint = parseSameOriginUrl(`/api/vote/info/${voteId}`);
     if (!endpoint) throw new Error('投票地址非法');
+    const headers = { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' };
+    if (window.crypto?.subtle) headers['x-dynamic-sign'] = await dynamicSign('GET', endpoint.href, '');
     const response = await fetch(endpoint.href, {
       method: 'GET',
       credentials: 'same-origin',
       cache: 'no-store',
       redirect: 'error',
       referrerPolicy: 'same-origin',
-      headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      headers,
     });
     const text = await response.text();
     let data = null;

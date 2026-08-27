@@ -115,9 +115,13 @@ function createContext(browser, base) {
     async newPage() {
       const page = await browser.newPage();
       await page.setViewport({ width: 1280, height: 800 });
-      const data = { posts: [], pageErrors: [], dialogs: [] };
+      const data = { posts: [], voteInfoGets: [], pageErrors: [], dialogs: [] };
       page.on('request', (request) => {
-        if (request.method() === 'POST') data.posts.push({ url: request.url(), body: request.postData() || '' });
+        const headers = request.headers();
+        const record = { url: request.url(), body: request.postData() || '' };
+        if ('x-dynamic-sign' in headers) record.signature = headers['x-dynamic-sign'];
+        if (request.method() === 'POST') data.posts.push(record);
+        else if (request.url().includes('/api/vote/info')) data.voteInfoGets.push(record);
       });
       page.on('pageerror', (error) => data.pageErrors.push(error.message));
       page.on('dialog', async (dialog) => {
@@ -475,6 +479,9 @@ scenario('弹窗保留投票面板并提交（0.5.11 回归）', async (ctx) => 
   const post = await waitPost(page, (p) => p.url.endsWith('/api/vote/voteforitem'));
   const payload = JSON.parse(post.body);
   assert(payload.ids.length === 1 && payload.ids[0] === '13788', `应提交所选选项，实际 ${post.body}`);
+  const get = dataOf(page).voteInfoGets.find((r) => r.url.endsWith('/api/vote/info/123'));
+  assert(get && /^[0-9a-f]{40}$/.test(get.signature || ''), `GET 投票信息应带 x-dynamic-sign，实际 ${get?.signature || '缺失'}`);
+  assert(/^[0-9a-f]{40}$/.test(post.signature || ''), `POST 投票应带 x-dynamic-sign，实际 ${post.signature || '缺失'}`);
   await waitFor(page, () => document.querySelector('.xns-preview-post .xns-vote-status')?.textContent?.includes('投票成功'), 5_000, '投票成功状态');
 });
 
