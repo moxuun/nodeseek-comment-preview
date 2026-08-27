@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.11
+// @version      0.5.12
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -431,6 +431,14 @@
       .xns-preview-content .vote-panel button:disabled { opacity:.55; cursor:not-allowed; }
       .xns-vote-status { margin-top:6px; color:#64748b; font-size:12px; }
       .xns-vote-status:empty { display:none; }
+      .xns-vote-results { display:flex; flex-direction:column; gap:6px; margin:4px 0 6px; }
+      .xns-vote-results .xns-vote-result { display:flex; flex-direction:column; gap:2px; }
+      .xns-vote-results .vote-item-text { font-size:13px; line-height:1.3; }
+      .xns-vote-results .xns-vote-bar-wrap { height:16px; border:1px solid rgba(100,116,139,.25); border-radius:4px; background:rgba(148,163,184,.12); overflow:hidden; }
+      .xns-vote-results .xns-vote-bar { box-sizing:border-box; min-width:26px; height:100%; padding:0 6px; display:flex; align-items:center; justify-content:flex-end; color:#fff; background:#3b82f6; font:11px/16px system-ui,sans-serif; border-radius:3px 0 0 3px; }
+      .xns-vote-results .xns-vote-mine .vote-item-text { color:#1d4ed8; font-weight:600; }
+      .xns-vote-results .xns-vote-result-meta { color:#64748b; font-size:12px; }
+      .xns-vote-total { margin-top:4px; color:#64748b; font-size:12px; }
       .xns-preview-content img { cursor:zoom-in; }
       .xns-lightbox { position:fixed; z-index:2147483500; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; background:rgba(2,6,23,.88); }
       .xns-lightbox-stage { position:relative; display:flex; align-items:center; justify-content:center; width:100%; height:100%; overflow:hidden; cursor:grab; }
@@ -441,22 +449,23 @@
       .xns-lightbox-close { top:10px; right:10px; font-size:20px; line-height:1; }
       .xns-lightbox-open { left:10px; bottom:10px; }
       .xns-lightbox-close:hover, .xns-lightbox-open:hover, .xns-lightbox-close:focus-visible, .xns-lightbox-open:focus-visible { background:rgba(15,23,42,.9); outline:none; }
-      @media (prefers-color-scheme: dark) {
-        .xns-modal { color:#e5e7eb; background:#18202b; }
-        .xns-modal-header a, .xns-modal-header .xns-modal-reply, .xns-modal-close, .xns-preview-post, .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
-        .xns-preview-content pre.xns-code-block { color:#e5e7eb; background:#0b1220; }
-        .xns-preview-content .xns-ansi-fg-black { color:#e5e7eb; } .xns-preview-content .xns-ansi-fg-white { color:#111827; }
-        .xns-preview-content .xns-markdown-tabs { background:#111827; } .xns-preview-content .xns-markdown-tabs-nav { background:rgba(15,23,42,.65); } .xns-preview-content .xns-markdown-tab.is-active { color:#93c5fd; background:#18202b; }
-        .xns-preview-content .nsk-magic-tabs { background:#111827; } .xns-preview-content .nsk-magic-tabs > .nsk-magic-tab-title.xns-active { color:#93c5fd; background:#18202b; }
-        .xns-post-toolbar { color:#e5e7eb; background:#1e293b; border-color:rgba(148,163,184,.3); }
-        .xns-post-toolbar button { color:#e5e7eb; border-color:rgba(148,163,184,.35); }
-        .xns-post-toolbar button[aria-pressed="true"] { color:#93c5fd; border-color:#3b82f6; background:rgba(59,130,246,.22); }
-        .xns-preview-composer textarea { color:#e5e7eb; }
-        .xns-preview-composer button, .xns-preview-composer a { color:#e5e7eb; border-color:rgba(148,163,184,.35); }
-        .xns-preview-content .vote-panel form { color:#e5e7eb; background:#111827; border-color:rgba(148,163,184,.25); }
-        .xns-preview-content .vote-panel button { color:#93c5fd; border-color:rgba(59,130,246,.5); }
-        .xns-toolbar-status, .xns-loading, .xns-status, .xns-remote-note, .xns-vote-status { color:#9ca3af; }
-      }
+      /* 暗色跟随网站：NodeSeek 在 body 上挂 .dark-layout（亮色为 .light-layout），不用系统偏好。 */
+      .dark-layout .xns-modal { color:#e5e7eb; background:#18202b; }
+      .dark-layout .xns-modal-header a, .dark-layout .xns-modal-header .xns-modal-reply, .dark-layout .xns-modal-close, .dark-layout .xns-preview-post, .dark-layout .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
+      .dark-layout .xns-preview-content pre.xns-code-block { color:#e5e7eb; background:#0b1220; }
+      .dark-layout .xns-preview-content .xns-ansi-fg-black { color:#e5e7eb; } .dark-layout .xns-preview-content .xns-ansi-fg-white { color:#111827; }
+      .dark-layout .xns-preview-content .xns-markdown-tabs { background:#111827; } .dark-layout .xns-preview-content .xns-markdown-tabs-nav { background:rgba(15,23,42,.65); } .dark-layout .xns-preview-content .xns-markdown-tab.is-active { color:#93c5fd; background:#18202b; }
+      .dark-layout .xns-preview-content .nsk-magic-tabs { background:#111827; } .dark-layout .xns-preview-content .nsk-magic-tabs > .nsk-magic-tab-title.xns-active { color:#93c5fd; background:#18202b; }
+      .dark-layout .xns-post-toolbar { color:#e5e7eb; background:#1e293b; border-color:rgba(148,163,184,.3); }
+      .dark-layout .xns-post-toolbar button { color:#e5e7eb; border-color:rgba(148,163,184,.35); }
+      .dark-layout .xns-post-toolbar button[aria-pressed="true"] { color:#93c5fd; border-color:#3b82f6; background:rgba(59,130,246,.22); }
+      .dark-layout .xns-preview-composer textarea { color:#e5e7eb; }
+      .dark-layout .xns-preview-composer button, .dark-layout .xns-preview-composer a { color:#e5e7eb; border-color:rgba(148,163,184,.35); }
+      .dark-layout .xns-preview-content .vote-panel form { color:#e5e7eb; background:#111827; border-color:rgba(148,163,184,.25); }
+      .dark-layout .xns-preview-content .vote-panel button { color:#93c5fd; border-color:rgba(59,130,246,.5); }
+      .dark-layout .xns-vote-results .xns-vote-bar { color:#0b1220; background:#60a5fa; }
+      .dark-layout .xns-vote-results .xns-vote-mine .vote-item-text { color:#93c5fd; }
+      .dark-layout .xns-toolbar-status, .dark-layout .xns-loading, .dark-layout .xns-status, .dark-layout .xns-remote-note, .dark-layout .xns-vote-status { color:#9ca3af; }
       @media (max-width:800px) { .xns-preview-scroll-btns { right:6px; } .xns-scroll-btn { width:30px !important; min-width:30px !important; max-width:30px !important; height:30px !important; min-height:30px !important; max-height:30px !important; flex-basis:30px; } .xns-preview-thread .xns-remote-note { max-width:62%; } }
       @media (max-width:640px) { .xns-overlay { padding:0; } .xns-modal { width:100%; max-height:100vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-thread .xns-remote-note { top:5px; right:7px; max-width:70%; } .xns-preview-scroll-btns { right:5px; } .xns-scroll-btn { width:28px !important; min-width:28px !important; max-width:28px !important; height:28px !important; min-height:28px !important; max-height:28px !important; flex-basis:28px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; margin-left:0; } }
     `;
@@ -1948,14 +1957,45 @@
     return data;
   }
 
+  // NodeSeek 接口约定：未投票时 items 不带统计字段（count），投票后才有。
+  const hasVoteResults = (vote) => (vote.items || []).some((item) => typeof item.count === 'number');
+
+  function buildVoteResults(vote) {
+    const items = vote.items || [];
+    const total = items.reduce((sum, item) => sum + (typeof item.count === 'number' ? item.count : 0), 0);
+    const box = createElement('div', 'xns-vote-results');
+    items.forEach((item) => {
+      const count = typeof item.count === 'number' ? item.count : 0;
+      const percent = total > 0 ? Math.round((count / total) * 100) : 0;
+      const row = createElement('div', 'xns-vote-result' + (item.voted ? ' xns-vote-mine' : ''));
+      row.appendChild(createElement('div', 'vote-item-text', item.text || ''));
+      const barWrap = createElement('div', 'xns-vote-bar-wrap');
+      const bar = createElement('div', 'xns-vote-bar');
+      bar.style.width = `${percent}%`;
+      bar.appendChild(document.createTextNode(`${percent}%`));
+      barWrap.appendChild(bar);
+      row.appendChild(barWrap);
+      row.appendChild(createElement('div', 'xns-vote-result-meta', `${count} 票${item.voted ? '（已选）' : ''}`));
+      box.appendChild(row);
+    });
+    box.appendChild(createElement('div', 'xns-vote-total', `共 ${total} 票${vote.locked ? ' · 已结束' : ''}`));
+    return box;
+  }
+
   function buildVotePanel(vote) {
-    const single = vote.multiple !== true;
     const panel = createElement('div', 'vote-panel xns-vote-panel');
     panel.dataset.xnsVoteId = String(vote.id);
     const title = createElement('h2', 'xns-vote-title', vote.title || '投票');
     title.style.textAlign = 'center';
     title.style.fontSize = '1.2rem';
     panel.appendChild(title);
+    // 投票后（或已锁定）接口返回统计字段：直接展示结果，不再渲染可点击选项。
+    if (hasVoteResults(vote)) {
+      panel.appendChild(buildVoteResults(vote));
+      panel.appendChild(createElement('div', 'xns-vote-note', `nsapp://vote?id=${vote.id}${vote.isPublic ? ' (公开投票)' : ''}${vote.locked ? ' · 已结束' : ''}`));
+      return panel;
+    }
+    const single = vote.multiple !== true;
     const wrapper = createElement('fieldset', 'vote-stat-wrapper');
     (vote.items || []).forEach((item) => {
       const stat = createElement('div', 'vote-stat' + (item.voted ? ' voted' : ' not-voted'));
@@ -1972,8 +2012,9 @@
     });
     panel.appendChild(wrapper);
     const buttons = createElement('fieldset', 'op-buttons');
-    const submit = createElement('button', 'pure-button pure-button-primary add-margin', '投票');
+    const submit = createElement('button', 'pure-button pure-button-primary add-margin', vote.locked ? '已结束' : '投票');
     submit.type = 'button';
+    if (vote.locked) submit.setAttribute('disabled', '');
     buttons.appendChild(submit);
     panel.appendChild(buttons);
     panel.appendChild(createElement('div', 'xns-vote-note', `nsapp://vote?id=${vote.id}${vote.isPublic ? ' (公开投票)' : ''}`));
@@ -2034,10 +2075,22 @@
     panel.dataset.xnsVotePending = 'true';
     button.setAttribute('disabled', '');
     status.textContent = '正在投票…';
-    void postAction('/api/vote/voteforitem', { ids: selected }, { context: getPageActionContext() })
-      .then(() => {
-        status.textContent = '投票成功，感谢参与。';
-        button.textContent = '已投票';
+    const voteId = safePositiveInt(panel.dataset.xnsVoteId || '');
+    void postAction('/api/vote/voteforitem', { ids: selected.map((value) => Number(value)) }, { context: getActionContext(button) })
+      .then(async () => {
+        // 投票后接口才会返回统计：重新拉取并把面板切换成结果视图。
+        let refreshed = null;
+        if (voteId !== null) {
+          try { refreshed = await fetchVoteInfo(voteId); } catch { /* 保留成功提示 */ }
+        }
+        if (!panel.isConnected) return;
+        if (refreshed?.vote) {
+          const rebuilt = buildVotePanel(refreshed.vote);
+          panel.replaceWith(rebuilt);
+        } else {
+          status.textContent = '投票成功，感谢参与。';
+          button.textContent = '已投票';
+        }
       })
       .catch((error) => {
         status.textContent = `投票失败：${error.message || '网络错误'}`;

@@ -446,9 +446,10 @@ scenario('内容特性：标签页/ANSI/复制按钮', async (ctx) => {
   assert(state.copyButtons === 3, `应有 3 个代码复制按钮，实际 ${state.copyButtons}`);
 });
 
-scenario('弹窗保留投票面板并提交（0.5.11 回归）', async (ctx) => {
+scenario('弹窗保留投票面板并提交，投后切换结果视图（0.5.12 回归）', async (ctx) => {
   const page = await openPreviewModal(ctx);
-  // 等待 fetch /api/vote/info/123 完成、脚本自建投票面板
+  // 等待 fetch /api/vote/info/123 完成、脚本自建投票面板。
+  // 未投票时接口不返回统计：面板必须是可投的选项，而不是结果视图。
   await waitFor(page, () => {
     const panel = document.querySelector('.xns-preview-post .xns-vote-panel');
     return panel && panel.querySelectorAll('input[name="vote-item"]').length === 2;
@@ -462,10 +463,12 @@ scenario('弹窗保留投票面板并提交（0.5.11 回归）', async (ctx) => 
       radios,
       title: panel.querySelector('.xns-vote-title')?.textContent?.trim() || null,
       buttonText: panel.querySelector('button')?.textContent?.trim() || null,
+      hasResults: !!panel.querySelector('.xns-vote-results'),
       nsappLinkGone: !document.querySelector('.xns-preview-post a[data-href*="nsapp"]'),
     };
   });
   assert(state.panelExists, '预览弹窗应渲染投票面板');
+  assert(!state.hasResults, '未投票时不应显示结果视图');
   assert(state.radioCount === 2 && JSON.stringify(state.radios) === JSON.stringify(['13788', '13789']), `应有 2 个选项，实际 ${JSON.stringify(state.radios)}`);
   assert(state.title === '测试投票', `应有投票标题，实际 ${state.title}`);
   assert(state.buttonText === '投票', `应有投票按钮，实际 ${state.buttonText}`);
@@ -478,34 +481,52 @@ scenario('弹窗保留投票面板并提交（0.5.11 回归）', async (ctx) => 
   });
   const post = await waitPost(page, (p) => p.url.endsWith('/api/vote/voteforitem'));
   const payload = JSON.parse(post.body);
-  assert(payload.ids.length === 1 && payload.ids[0] === '13788', `应提交所选选项，实际 ${post.body}`);
+  assert(payload.ids.length === 1 && payload.ids[0] === 13788, `应提交数字选项 id，实际 ${post.body}`);
   const get = dataOf(page).voteInfoGets.find((r) => r.url.endsWith('/api/vote/info/123'));
   assert(get && /^[0-9a-f]{40}$/.test(get.signature || ''), `GET 投票信息应带 x-dynamic-sign，实际 ${get?.signature || '缺失'}`);
   assert(/^[0-9a-f]{40}$/.test(post.signature || ''), `POST 投票应带 x-dynamic-sign，实际 ${post.signature || '缺失'}`);
-  await waitFor(page, () => document.querySelector('.xns-preview-post .xns-vote-status')?.textContent?.includes('投票成功'), 5_000, '投票成功状态');
+  // 提交成功后脚本重新拉取并切换到结果视图：百分比条 + 总票数 + 所选项标记。
+  await waitFor(page, () => document.querySelector('.xns-preview-post .xns-vote-panel .xns-vote-results'), 5_000, '投票后结果视图');
+  const results = await page.evaluate(() => {
+    const panel = document.querySelector('.xns-preview-post .xns-vote-panel');
+    return {
+      rows: panel.querySelectorAll('.xns-vote-result').length,
+      total: panel.querySelector('.xns-vote-total')?.textContent?.trim() || null,
+      mine: !!panel.querySelector('.xns-vote-mine'),
+      inputsLeft: panel.querySelectorAll('input[name="vote-item"]').length,
+    };
+  });
+  assert(results.rows === 2, `结果视图应有 2 行，实际 ${results.rows}`);
+  assert(results.total === '共 3 票', `应显示总票数，实际 ${results.total}`);
+  assert(results.mine, '所选项应有已选标记');
+  assert(results.inputsLeft === 0, '投票后不应再有可点击选项');
 });
 
-scenario('暗色模式跟随系统（0.5.11 回归）', async (ctx) => {
+scenario('暗色模式跟随网站 dark-layout（0.5.12 回归）', async (ctx) => {
+  // 系统偏好为暗色、网站亮色：预览组件必须保持亮色（不再跟随系统）。
   const postPage = await ctx.newPage();
   await postPage.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]);
   await postPage.goto(`${ctx.base}/post-123-1`, { waitUntil: 'networkidle0' });
   await waitFor(postPage, () => /条评论/.test(document.querySelector('.xns-toolbar-status')?.textContent || ''), 15_000, '帖子页楼中楼构建');
-  const toolbar = await postPage.evaluate(() => {
-    const style = getComputedStyle(document.querySelector('.xns-post-toolbar'));
-    return { background: style.backgroundColor, color: style.color };
+  const lightToolbar = await postPage.evaluate(() => getComputedStyle(document.querySelector('.xns-post-toolbar')).backgroundColor);
+  assert(lightToolbar.includes('248, 250, 252'), `网站亮色时工具栏应保持亮色，实际 ${lightToolbar}`);
+  // 网站切到暗色（body.dark-layout）：预览组件跟随变暗。
+  const darkToolbar = await postPage.evaluate(() => {
+    document.body.classList.add('dark-layout');
+    return getComputedStyle(document.querySelector('.xns-post-toolbar')).backgroundColor;
   });
-  assert(toolbar.background !== 'rgb(248, 250, 252)', `暗色下工具栏背景不应为浅色，实际 ${toolbar.background}`);
+  assert(darkToolbar === 'rgb(30, 41, 59)', `网站暗色时工具栏应变暗，实际 ${darkToolbar}`);
   await postPage.close();
 
   const modal = await openPreviewModal(ctx);
-  await modal.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]);
-  await new Promise((resolve) => setTimeout(resolve, 400));
-  await waitFor(modal, () => !!document.querySelector('.xns-preview-post .xns-vote-panel'), 5_000, '暗色下投票面板渲染');
-  const votePanel = await modal.evaluate(() => {
-    const style = getComputedStyle(document.querySelector('.xns-preview-post .xns-vote-panel'));
-    return { voteBg: style.backgroundColor };
+  await waitFor(modal, () => !!document.querySelector('.xns-modal'), 5_000, '预览弹窗打开');
+  const lightModal = await modal.evaluate(() => getComputedStyle(document.querySelector('.xns-modal')).backgroundColor);
+  assert(lightModal === 'rgb(255, 255, 255)', `网站亮色时弹窗应保持亮色，实际 ${lightModal}`);
+  const darkModal = await modal.evaluate(() => {
+    document.body.classList.add('dark-layout');
+    return getComputedStyle(document.querySelector('.xns-modal')).backgroundColor;
   });
-  assert(votePanel.voteBg !== 'rgb(251, 251, 251)', `暗色下投票面板不应为浅色，实际 ${votePanel.voteBg}`);
+  assert(darkModal === 'rgb(24, 32, 43)', `网站暗色时弹窗应变暗，实际 ${darkModal}`);
 });
 
 // ---------- 主流程 ----------
