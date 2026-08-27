@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.12
+// @version      0.5.13
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -17,7 +17,7 @@
   const PREFIX = 'xns';
   const REQUEST_TIMEOUT = 8_000;
   const MAX_RESPONSE_BYTES = 2_000_000;
-  const MAX_PAGE = 12;
+  const MAX_PAGE = 50;
   const PAGE_CONCURRENCY = 4;
   const STYLE_ID = `${PREFIX}-style`;
   const DEFAULT_MODE = 'thread';
@@ -244,7 +244,7 @@
     qsa(root, 'a[href]').forEach((link) => {
       const url = parseSameOriginUrl(link.getAttribute('href') || '', baseUrl);
       const info = url ? getPostInfo(url.href) : null;
-      if (info?.postId === String(postId) && info.page <= MAX_PAGE) pages.add(info.page);
+      if (info?.postId === String(postId)) pages.add(info.page);
     });
     return pages;
   }
@@ -252,30 +252,49 @@
   async function fetchHtml(url, options = {}) {
     if (!isAllowedPostRequest(url)) throw new Error('只允许读取同一站点的帖子页面');
     const noStore = options.noStore === true;
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
-    try {
-      const response = await fetch(url.href, {
-        method: 'GET',
-        credentials: 'same-origin',
-        cache: noStore ? 'no-store' : 'default',
-        redirect: 'error',
-        referrerPolicy: 'same-origin',
-        headers: { Accept: 'text/html,application/xhtml+xml' },
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const responseUrl = parseSameOriginUrl(response.url);
-      const contentType = (response.headers.get('content-type') || '').toLowerCase();
-      const contentLength = Number(response.headers.get('content-length') || 0);
-      if (!responseUrl || !isAllowedPostRequest(responseUrl) || !contentType.includes('text/html')) throw new Error('响应不是同站帖子页面');
-      if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) throw new Error('响应过大');
-      const html = await response.text();
-      if (!html || html.length > MAX_RESPONSE_BYTES) throw new Error('响应过大或为空');
-      return { html, url: responseUrl };
-    } finally {
-      window.clearTimeout(timer);
+    const maxAttempts = 3;
+    // NodeSeek/Cloudflare 对快速连续抓取会返回 429 限流；带退避重试，
+    // 避免长帖并发拉页时整页楼层因瞬时限流而缺失。
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+      try {
+        const response = await fetch(url.href, {
+          method: 'GET',
+          credentials: 'same-origin',
+          cache: noStore ? 'no-store' : 'default',
+          redirect: 'error',
+          referrerPolicy: 'same-origin',
+          headers: { Accept: 'text/html,application/xhtml+xml' },
+          signal: controller.signal,
+        });
+        if (response.status === 429 || response.status >= 500) {
+          if (attempt < maxAttempts) {
+            await new Promise((resolve) => window.setTimeout(resolve, 600 * attempt));
+            continue;
+          }
+          throw new Error(`HTTP ${response.status}`);
+        }
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const responseUrl = parseSameOriginUrl(response.url);
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+        const contentLength = Number(response.headers.get('content-length') || 0);
+        if (!responseUrl || !isAllowedPostRequest(responseUrl) || !contentType.includes('text/html')) throw new Error('响应不是同站帖子页面');
+        if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) throw new Error('响应过大');
+        const html = await response.text();
+        if (!html || html.length > MAX_RESPONSE_BYTES) throw new Error('响应过大或为空');
+        return { html, url: responseUrl };
+      } catch (error) {
+        if (attempt < maxAttempts && !(error instanceof DOMException && error.name === 'AbortError')) {
+          await new Promise((resolve) => window.setTimeout(resolve, 600 * attempt));
+          continue;
+        }
+        throw error;
+      } finally {
+        window.clearTimeout(timer);
+      }
     }
+    throw new Error('抓取失败');
   }
 
   function parseHtml(html) {
@@ -1449,16 +1468,21 @@
     return getCommentItems(root).map((item, index) => getCommentRecord(item, info.postId, page, index, false, { keepCommentMenu: true, state })).filter(Boolean);
   }
 
-  // 并发拉取同帖的所有分页（含分页器里动态发现的新页码）
+  // 并发拉取同帖的所有分页（含分页器里动态发现的新页码）。
+  // MAX_PAGE 防超长帖拖垮浏览器：总页数超过上限时只读取前 MAX_PAGE 页，
+  // 返回 truncated 让调用方向用户明示“部分楼层未加载”，而不是静默丢弃。
   async function fetchPostPages(info, firstDocument, options = {}) {
     const noStore = options.noStore !== false;
     const pageDocs = new Map([[info.page, firstDocument]]);
     const failedPages = [];
     const pages = new Set([info.page]);
-    getPageNumbers(firstDocument, info.postId).forEach((page) => {
+    const discovered = getPageNumbers(firstDocument, info.postId);
+    const totalPages = discovered.size ? Math.max(...discovered, info.page) : info.page;
+    const truncated = totalPages > MAX_PAGE;
+    discovered.forEach((page) => {
       if (page <= MAX_PAGE) pages.add(page);
     });
-    const maxSeed = Math.min(MAX_PAGE, Math.max(...pages));
+    const maxSeed = truncated ? MAX_PAGE : Math.min(MAX_PAGE, Math.max(...pages));
     for (let page = 1; page <= maxSeed; page += 1) pages.add(page);
     pages.delete(info.page);
 
@@ -1485,11 +1509,11 @@
     };
     const workerCount = Math.min(PAGE_CONCURRENCY, Math.max(1, pending.length));
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
-    return { pageDocs, failedPages };
+    return { pageDocs, failedPages, truncated, totalPages };
   }
 
   async function loadPreviewRecords(info, firstDocument, options = {}) {
-    const { pageDocs, failedPages } = await fetchPostPages(info, firstDocument, options);
+    const { pageDocs, failedPages, truncated, totalPages } = await fetchPostPages(info, firstDocument, options);
     const allRecords = [];
     pageDocs.forEach((root, page) => {
       allRecords.push(...collectPageRecords(info, root, page));
@@ -1498,7 +1522,7 @@
     allRecords.forEach((record) => {
       if (!unique.has(record.floor)) unique.set(record.floor, record);
     });
-    return { records: Array.from(unique.values()), loadedPages: pageDocs.size, failedPages };
+    return { records: Array.from(unique.values()), loadedPages: pageDocs.size, failedPages, truncated, totalPages };
   }
 
   function prepareCommentRecord(record, depth) {
@@ -1572,6 +1596,9 @@
     }
     if (options.failedPages?.length) {
       section.appendChild(createElement('p', 'xns-status xns-page-failed', `已读取 ${options.loadedPages} 页，${options.failedPages.length} 页读取失败。`));
+    }
+    if (options.truncated) {
+      section.appendChild(createElement('p', 'xns-status xns-page-truncated', `帖子共 ${options.totalPages} 页，只读取了前 ${MAX_PAGE} 页，后面页的楼层没有显示。`));
     }
   }
 
@@ -2153,6 +2180,8 @@
       this.records = [];
       this.pageDocs = new Map();
       this.failedPages = [];
+      this.truncated = false;
+      this.totalPages = null;
       this.toolbar = null;
       this.statusNode = null;
       this.loadingNode = null;
@@ -2231,12 +2260,14 @@
     async loadPages(generation, options = {}) {
       this.records = [];
       this.failedPages = [];
-      const { pageDocs, failedPages } = await fetchPostPages(this.info, document, {
+      const { pageDocs, failedPages, truncated, totalPages } = await fetchPostPages(this.info, document, {
         noStore: options.noStore !== false,
         isAborted: () => generation !== this.generation,
       });
       this.pageDocs = pageDocs;
       this.failedPages = failedPages;
+      this.truncated = truncated;
+      this.totalPages = totalPages;
 
       const allRecords = [];
       this.pageDocs.forEach((root, page) => {
@@ -2291,9 +2322,10 @@
       buildReplyTree(this.records).forEach((record) => appendNestedRecord(record, this.list, 0, prepareCommentRecord));
       this.records.filter((record) => record.node.hasAttribute('data-xns-remote')).forEach((record) => addRemoteNote(record, this.info.postId));
       const loadedPages = this.pageDocs.size;
-      const status = this.failedPages.length
+      let status = this.failedPages.length
         ? `楼中楼已整理：读取 ${loadedPages} 页，${this.failedPages.length} 页失败。`
         : `楼中楼已整理：共读取 ${loadedPages} 页。`;
+      if (this.truncated) status += ` 帖子共 ${this.totalPages} 页，只读取了前 ${MAX_PAGE} 页，后面页的楼层没有显示。`;
       this.showStatus(status);
       this.updateToolbar();
     }

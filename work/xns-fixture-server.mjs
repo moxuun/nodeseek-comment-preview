@@ -66,6 +66,23 @@ const server = http.createServer((req, res) => {
   if (pathname === '/post-123-1') return sendFile(res, fixturePath('post-123-1'), 'text/html; charset=utf-8');
   if (pathname === '/post-123-2') return sendFile(res, fixturePath('post-123-2'), 'text/html; charset=utf-8');
   if (pathname === '/list') return sendFile(res, fixturePath('list'), 'text/html; charset=utf-8');
+  // 长帖分页截断回归：456 帖共 52 页，每页 1 楼；分页器链接到最后一页，
+  // 用于验证 MAX_PAGE 截断时状态栏明示“只读取了前 N 页”，而不是静默丢楼层。
+  if (/^\/post-456-(\d+)$/.test(pathname)) {
+    const page = Number(/^\/post-456-(\d+)$/.exec(pathname)[1]);
+    if (page < 1 || page > 52) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('not found');
+      return;
+    }
+    const linkAt = (p) => `<a class="pager-pos${p === page ? ' pager-cur' : ''}" href="/post-456-${p}">${p}</a>`;
+    const pager = `${linkAt(1)}${linkAt(2)}${linkAt(3)}${linkAt(52)}`;
+    const floor = `<li id="${page}" data-comment-id="${page + 600}" class="content-item"><div class="nsk-content-meta-info"><a href="/space/${page}">U${page}</a></div><article class="post-content"><p>第 ${page} 楼</p></article></li>`;
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Fixture 456 page ${page}</title></head><body><div class="nsk-post"><div class="content-item" id="0"><h1 class="post-title">长帖 Fixture</h1><article class="post-content"><p>长帖正文。</p></article></div></div><div class="comment-container"><div class="nsk-pager post-top-pager">${pager}</div><ul class="comments">${floor}</ul><div class="nsk-pager post-bottom-pager">${pager}</div></div><script src="/outputs/nodeseek-comment-preview.user.js"></script></body></html>`);
+    return;
+  }
+
   if (pathname === '/outputs/nodeseek-comment-preview.user.js') return sendFile(res, path.join(outputRoot, 'nodeseek-comment-preview.user.js'), 'application/javascript; charset=utf-8');
   res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('not found');

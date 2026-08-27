@@ -165,6 +165,24 @@ async function openPreviewModal(ctx) {
 
 // ---------- 场景 ----------
 
+scenario('长帖分页截断明示（0.5.13 回归）', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.goto(`${ctx.base}/post-456-1`, { waitUntil: 'networkidle0' });
+  // 456 帖共 52 页、每页 1 楼：MAX_PAGE 之上应截断并在状态栏明示，而不是静默丢楼层。
+  await waitFor(page, () => {
+    const status = document.querySelector('.xns-status')?.textContent || '';
+    return /只读取了前/.test(status);
+  }, 30_000, '截断状态提示');
+  const state = await page.evaluate(() => ({
+    toolbar: document.querySelector('.xns-toolbar-status')?.textContent,
+    status: document.querySelector('.xns-status')?.textContent || '',
+    items: document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length,
+  }));
+  assert(/帖子共 52 页，只读取了前 50 页/.test(state.status), `状态栏应明示截断，实际 ${state.status}`);
+  assert(state.items === 50, `截断后应只有前 50 楼，实际 ${state.items}`);
+  assert(dataOf(page).pageErrors.length === 0, `页面出现未捕获异常：${dataOf(page).pageErrors.join('; ')}`);
+  await page.close();
+});
 scenario('帖子页楼中楼构建与跨页来源链接', async (ctx) => {
   const page = await openPostPage(ctx);
   const state = await page.evaluate(() => ({
