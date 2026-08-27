@@ -1,6 +1,6 @@
 # NodeSeek 楼中楼预览
 
-NodeSeek（https://www.nodeseek.com）用户脚本：把平铺评论重建成楼中楼嵌套视图。功能参考 [V2Next](https://github.com/zyronon/V2Next)，用 Codex 辅助开发的轮子。
+[NodeSeek]（https://www.nodeseek.com）用户脚本：把平铺评论重建成楼中楼嵌套视图。功能参考 [V2Next](https://github.com/zyronon/V2Next)，用 Codex 辅助开发的轮子。
 
 ## 安装
 
