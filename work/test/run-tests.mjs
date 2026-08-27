@@ -189,7 +189,7 @@ scenario('帖子页楼中楼构建与跨页来源链接', async (ctx) => {
     toolbar: document.querySelector('.xns-toolbar-status')?.textContent,
     items: document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length,
     replyLists: document.querySelectorAll('.comment-container > ul.comments .xns-reply-list').length,
-    noteOwners: [...document.querySelectorAll('.comment-container > ul.comments .xns-remote-note')]
+    noteOwners: [...document.querySelectorAll('.comment-container > ul.comments .xns-remote-floor-link')]
       .map((note) => note.closest('.content-item')?.getAttribute('data-xns-floor')).sort(),
   }));
   assert(state.toolbar === '9 条评论', `工具栏应显示 9 条评论，实际 ${state.toolbar}`);
@@ -345,7 +345,7 @@ scenario('弹窗点赞/鸡腿/反对/收藏计数来自 SSR 状态（0.5.9 回�
 scenario('弹窗跨页来源链接只出现在跨页评论（0.5.8 回归）', async (ctx) => {
   const page = await openPreviewModal(ctx);
   const state = await page.evaluate(() => {
-    const notes = [...document.querySelectorAll('.xns-preview-thread .xns-remote-note')];
+    const notes = [...document.querySelectorAll('.xns-preview-thread .xns-remote-floor-link')];
     return {
       count: notes.length,
       owners: notes.map((note) => note.closest('.content-item')?.getAttribute('data-xns-floor')).sort(),
@@ -431,7 +431,7 @@ scenario('弹窗发送回复后重排', async (ctx) => {
   }, 15_000, '弹窗回复后重排完成');
   const state = await page.evaluate(() => ({
     items: document.querySelectorAll('.xns-preview-thread .content-item[data-xns-floor]').length,
-    notes: document.querySelectorAll('.xns-preview-thread .xns-remote-note').length,
+    notes: document.querySelectorAll('.xns-preview-thread .xns-remote-floor-link').length,
   }));
   assert(state.items === 9, `回复后应保持 9 条回复，实际 ${state.items}`);
   assert(state.notes === 2, `回复后跨页来源链接应保持 2 个，实际 ${state.notes}`);

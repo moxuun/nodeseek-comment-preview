@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.14
+// @version      0.5.15
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -366,8 +366,6 @@
       .xns-comment-root[data-xns-floor], .xns-comment-child[data-xns-floor] { position:relative; }
       .xns-comment-child { margin-top:7px !important; margin-left:clamp(8px,2vw,28px) !important; padding-left:clamp(8px,1.5vw,18px) !important; border-left:2px solid rgba(59,130,246,.35); }
       .xns-reply-list { margin:6px 0 0 !important; padding:0 !important; list-style:none !important; }
-      .xns-remote-note { position:absolute; top:7px; right:9px; z-index:1; display:flex; justify-content:flex-end; max-width:52%; overflow:hidden; gap:6px; flex-wrap:wrap; margin:0; color:#64748b; font-size:11px; white-space:nowrap; text-overflow:ellipsis; }
-      .xns-remote-note a { color:#2563eb; }
       .xns-floor-highlight { animation:xns-floor-highlight 1.8s ease both; }
       @keyframes xns-floor-highlight { 0%,100%{box-shadow:none} 20%{box-shadow:0 0 0 4px rgba(59,130,246,.3)} }
       .xns-overlay { position:fixed; z-index:2147483000; inset:0; display:flex; align-items:stretch; justify-content:center; padding:0 clamp(32px,5vw,110px); background:rgba(15,23,42,.55); }
@@ -424,8 +422,6 @@
       .xns-preview-content .nsk-content-meta-info .content-info, .xns-preview-content .nsk-content-meta-info .date-created { display:inline-flex; align-items:center; flex-wrap:wrap; gap:5px; margin:0 !important; line-height:1.25; }
       .xns-preview-content .nsk-content-meta-info .date-created time { display:inline; white-space:nowrap; }
       .xns-preview-content .user-info-display { position:static !important; display:inline-flex !important; align-items:center; transform:none !important; margin:0 !important; padding:0 !important; }
-      .xns-preview-thread .xns-remote-note { position:absolute; top:7px; right:9px; z-index:1; display:flex; justify-content:flex-end; max-width:52%; overflow:hidden; margin:0; white-space:nowrap; text-overflow:ellipsis; }
-      .xns-preview-thread .xns-remote-note a { overflow:hidden; text-overflow:ellipsis; }
       .xns-preview-thread .post-content, .xns-preview-thread article.post-content { margin:0; line-height:1.45; }
       .xns-preview-thread .post-content p, .xns-preview-thread article.post-content p { margin:2px 0 4px; }
       .xns-preview-thread .post-content > :first-child, .xns-preview-thread article.post-content > :first-child { margin-top:0; }
@@ -487,9 +483,9 @@
       .dark-layout .xns-preview-content .vote-panel button { color:#93c5fd; border-color:rgba(59,130,246,.5); }
       .dark-layout .xns-vote-results .xns-vote-bar { color:#0b1220; background:#60a5fa; }
       .dark-layout .xns-vote-results .xns-vote-mine .vote-item-text { color:#93c5fd; }
-      .dark-layout .xns-toolbar-status, .dark-layout .xns-loading, .dark-layout .xns-status, .dark-layout .xns-remote-note, .dark-layout .xns-vote-status { color:#9ca3af; }
-      @media (max-width:800px) { .xns-preview-scroll-btns { right:6px; } .xns-scroll-btn { width:30px !important; min-width:30px !important; max-width:30px !important; height:30px !important; min-height:30px !important; max-height:30px !important; flex-basis:30px; } .xns-preview-thread .xns-remote-note { max-width:62%; } }
-      @media (max-width:640px) { .xns-overlay { padding:0; } .xns-modal { width:100%; max-height:100vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-thread .xns-remote-note { top:5px; right:7px; max-width:70%; } .xns-preview-scroll-btns { right:5px; } .xns-scroll-btn { width:28px !important; min-width:28px !important; max-width:28px !important; height:28px !important; min-height:28px !important; max-height:28px !important; flex-basis:28px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; margin-left:0; } }
+      .dark-layout .xns-toolbar-status, .dark-layout .xns-loading, .dark-layout .xns-status, .dark-layout .xns-vote-status { color:#9ca3af; }
+      @media (max-width:800px) { .xns-preview-scroll-btns { right:6px; } .xns-scroll-btn { width:30px !important; min-width:30px !important; max-width:30px !important; height:30px !important; min-height:30px !important; max-height:30px !important; flex-basis:30px; } }
+      @media (max-width:640px) { .xns-overlay { padding:0; } .xns-modal { width:100%; max-height:100vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-scroll-btns { right:5px; } .xns-scroll-btn { width:28px !important; min-width:28px !important; max-width:28px !important; height:28px !important; min-height:28px !important; max-height:28px !important; flex-basis:28px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; margin-left:0; } }
     `;
     (document.head || document.documentElement || document.body)?.appendChild(style);
   }
@@ -1304,7 +1300,7 @@
     const content = getPostContent(comment);
     if (!content) return '';
     const copy = content.cloneNode(true);
-    qsa(copy, '.xns-remote-note').forEach((node) => node.remove());
+    qsa(copy, '.xns-remote-floor-link, .floor-link-wrapper').forEach((node) => node.remove());
     return (copy.innerText || copy.textContent || '').trim().slice(0, 12_000);
   }
 
@@ -1946,7 +1942,7 @@
 
   function handleFloorClick(event) {
     const link = event.target.closest?.('a[href]');
-    if (!link || !link.closest(SELECTORS.commentContainer) || link.closest('.xns-remote-note')) return;
+    if (!link || !link.closest(SELECTORS.commentContainer) || link.closest('.xns-remote-floor-link')) return;
     const rawHref = link.getAttribute('href') || '';
     const directMatch = /^#([1-9]\d*)$/.exec(rawHref);
     const linkedUrl = directMatch ? null : parseSameOriginUrl(rawHref);
@@ -2176,7 +2172,7 @@
 
   function stripRenderArtifacts(item) {
     if (!item?.classList) return;
-    qsa(item, '.xns-reply-list, .xns-remote-note').forEach((node) => node.remove());
+    qsa(item, '.xns-reply-list, .xns-remote-floor-link').forEach((node) => node.remove());
     item.classList.remove('xns-comment-root', 'xns-comment-child', 'xns-floor-highlight');
     item.removeAttribute('data-xns-floor');
     item.removeAttribute('data-xns-parent-floor');
@@ -2186,14 +2182,18 @@
 
   function addRemoteNote(record, postId) {
     if (!record.node?.hasAttribute('data-xns-remote')) return;
-    const content = getPostContent(record.node) || record.node;
-    const note = createElement('div', 'xns-remote-note');
-    const source = createElement('a', '', `打开原楼层 #${record.floor}`);
+    // 复用官方楼号结构与类名：floor-link-wrapper + floor-link，
+    // 真实站点上官方 CSS 自然生效（右上角灰色楼号）；xns-remote-floor-link
+    // 只是脚本侧标记（剥离/重建时识别），不参与视觉。
+    const meta = qs(record.node, ':scope > .nsk-content-meta-info');
+    const wrapper = createElement('div', 'floor-link-wrapper xns-remote-floor-link');
+    const source = createElement('a', 'floor-link', `#${record.floor}`);
     source.href = `/post-${postId}-${record.page}#${record.floor}`;
     source.target = '_blank';
     source.rel = 'noopener noreferrer';
-    note.appendChild(source);
-    content.appendChild(note);
+    source.title = `打开原楼层 #${record.floor}`;
+    wrapper.appendChild(source);
+    (meta || record.node).appendChild(wrapper);
   }
 
   class PostEnhancer {
