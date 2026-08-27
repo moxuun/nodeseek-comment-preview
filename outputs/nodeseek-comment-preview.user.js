@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.13
+// @version      0.5.14
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -1217,6 +1217,19 @@
     }
   }
 
+  // NodeSeek 的 /api/content/* 写接口额外要求带一个客户端随机生成的 `csrf-token` 头；
+  // 站点编辑器每次提交都用 e4(16) 现造 16 位字母数字（纯 Math.random，无服务端往返），
+  // 说明服务端只校验该头存在。缺失会被拒为 "csrf check error"（0.5.12 曾误删，回复全挂）。
+  function randomCsrfToken() {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const bytes = new Uint8Array(16);
+    if (window.crypto?.getRandomValues) window.crypto.getRandomValues(bytes);
+    else for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+    let token = '';
+    bytes.forEach((byte) => { token += alphabet[byte % alphabet.length]; });
+    return token;
+  }
+
   async function postAction(path, payload, options = {}) {
     const contextUrl = options.context?.url?.href || state.modal?.url?.href || window.location.href;
     const endpoint = parseSameOriginUrl(path, contextUrl);
@@ -1230,6 +1243,8 @@
       Accept: 'application/json, text/plain, */*',
       'Content-Type': 'application/json',
       'X-Requested-With': 'XMLHttpRequest',
+      // 站点 /api/content/* 写接口强制校验该头存在（0.5.12 曾误删导致回复全挂）。
+      'csrf-token': randomCsrfToken(),
       ...(options.headers || {}),
     };
     if (window.crypto?.subtle) requestHeaders['x-dynamic-sign'] = await dynamicSign('POST', endpoint.href, bodyText);
@@ -1401,7 +1416,8 @@
           const post = state.post;
           if (post.composer === composer) post.composer = null;
           composer.remove();
-          await post.reloadPages();
+          // refreshCurrentPage：重抓当前页把刚发的回复并入快照，楼中楼立刻可见。
+          await post.reloadPages({ refreshCurrentPage: true });
         }
       } catch (error) {
         status.textContent = `发送失败：${error.message || '网络错误'}`;
@@ -2250,6 +2266,9 @@
       const generation = ++this.generation;
       this.showLoading('正在读取评论分页…');
       try {
+        // 回复提交后活动 DOM 与初始快照都没有新楼层：先重抓当前页把新回复并入快照，
+        // 否则楼中楼里会看不到刚发的回复（当前页在 fetchPostPages 里永不重抓）。
+        if (options.refreshCurrentPage) await this.adoptNewReplies(generation);
         await this.loadPages(generation, options);
         if (generation !== this.generation) return;
         this.render();
@@ -2265,6 +2284,30 @@
           this.updateToolbar();
         }
       }
+    }
+
+    // 回复经 API 提交后，活动 DOM 与初始快照都没有新楼层，而当前页在
+    // fetchPostPages 里永不重抓 → 楼中楼看不到刚发的回复。重抓当前页，把
+    // 快照里没有的新楼层消毒导入并并入 originalChildren，后续收集自然带上。
+    async adoptNewReplies(generation) {
+      try {
+        const { html } = await fetchHtml(new URL(`/post-${this.info.postId}-${this.info.page}`, window.location.origin), { noStore: true });
+        if (generation !== this.generation) return;
+        const parsed = parseHtml(html);
+        const knownFloors = new Set(this.originalChildren
+          .filter((node) => node.nodeType === Node.ELEMENT_NODE)
+          .map((node) => getFloor(node))
+          .filter((floor) => floor !== null));
+        getCommentItems(parsed).forEach((item) => {
+          const floor = getFloor(item);
+          if (floor === null || knownFloors.has(floor)) return;
+          const imported = sanitizeImportedNode(item, { keepCommentMenu: true });
+          if (!imported) return;
+          knownFloors.add(floor);
+          this.list.appendChild(imported);
+          this.originalChildren.push(imported);
+        });
+      } catch { /* 当前页重抓失败不阻断：楼中楼仍按既有快照渲染，仅看不到新回复 */ }
     }
 
     async loadPages(generation, options = {}) {

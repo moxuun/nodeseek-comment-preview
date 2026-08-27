@@ -118,7 +118,7 @@ function createContext(browser, base) {
       const data = { posts: [], voteInfoGets: [], pageErrors: [], dialogs: [] };
       page.on('request', (request) => {
         const headers = request.headers();
-        const record = { url: request.url(), body: request.postData() || '' };
+        const record = { url: request.url(), body: request.postData() || '', headers };
         if ('x-dynamic-sign' in headers) record.signature = headers['x-dynamic-sign'];
         if (request.method() === 'POST') data.posts.push(record);
         else if (request.url().includes('/api/vote/info')) data.voteInfoGets.push(record);
@@ -287,7 +287,7 @@ scenario('帖子页点赞走 NodeSeek 接口', async (ctx) => {
     const root = document.querySelector('.comment-container > ul.comments > .xns-comment-root');
     [...root.querySelector(':scope > .comment-menu').children].find((item) => item.dataset.xnsAction === 'like').click();
   });
-  const likePost = await waitPost(page, (post) => post.url.endsWith('/aics/upvote'));
+  const likePost = await waitPost(page, (post) => post.url.endsWith('/api/statistics/upvote'));
   assert(JSON.parse(likePost.body).commentId === 101, '点赞应携带 commentId 101');
   const state = await waitFor(page, () => {
     const text = document.querySelector('.comment-container > ul.comments > .xns-comment-root > .comment-menu .xns-action-state')?.textContent;
@@ -361,7 +361,7 @@ scenario('弹窗点赞与收藏', async (ctx) => {
     const root = document.querySelector('.xns-preview-thread .xns-comment-root');
     [...root.querySelector(':scope > .comment-menu').children].find((item) => item.dataset.xnsAction === 'like').click();
   });
-  await waitPost(page, (post) => post.url.endsWith('/aics/upvote'));
+  await waitPost(page, (post) => post.url.endsWith('/api/statistics/upvote'));
   await page.evaluate(() => {
     const menu = document.querySelector('.xns-preview-post > .comment-menu');
     [...menu.children].find((item) => item.dataset.xnsAction === 'favorite').click();
@@ -435,6 +435,31 @@ scenario('弹窗发送回复后重排', async (ctx) => {
   }));
   assert(state.items === 9, `回复后应保持 9 条回复，实际 ${state.items}`);
   assert(state.notes === 2, `回复后跨页来源链接应保持 2 个，实际 ${state.notes}`);
+});
+
+scenario('帖子页回复后新楼层出现在楼中楼（0.5.14 回归）', async (ctx) => {
+  // 验证 B1：当前页在分页抓取里永不重抓，回复后若不重抓当前页，刚发的回复看不到。
+  const page = await ctx.newPage();
+  await page.goto(`${ctx.base}/post-789-1`, { waitUntil: 'networkidle0' });
+  await waitFor(page, () => /条评论/.test(document.querySelector('.xns-toolbar-status')?.textContent || ''), 15_000, '帖子页楼中楼构建');
+  await page.evaluate(() => {
+    const root = document.querySelector('.comment-container > ul.comments > .xns-comment-root');
+    [...root.querySelector(':scope > .comment-menu').children].find((item) => item.dataset.xnsAction === 'reply').click();
+    const composer = root.querySelector(':scope > .xns-preview-composer');
+    composer.querySelector('textarea').value = '帖子页新回复';
+    composer.querySelector('button').click();
+  });
+  const replyPost = await waitPost(page, (post) => post.url.endsWith('/api/content/new-comment'));
+  assert(JSON.parse(replyPost.body).postId === 789, `回复应携带 postId 789，实际 ${replyPost.body}`);
+  assert(/^[A-Za-z0-9]{16}$/.test(replyPost.headers['csrf-token'] || ''), `回复请求应带 16 位 csrf-token，实际 ${JSON.stringify(replyPost.headers)}`);
+  await waitFor(page, () => (document.querySelector('.xns-toolbar-status')?.textContent || '').includes('3 条评论'), 15_000, '回复后楼中楼含 3 条');
+  const state = await page.evaluate(() => ({
+    floors: [...document.querySelectorAll('.comment-container > ul.comments [data-xns-floor]')].map((node) => node.getAttribute('data-xns-floor')),
+    hasNewReply: document.querySelector('.comment-container')?.textContent?.includes('帖子页新回复') || false,
+  }));
+  assert(state.floors.includes('3'), `新回复应出现在楼中楼，实际楼层 ${JSON.stringify(state.floors)}`);
+  assert(state.hasNewReply, '楼中楼应包含新回复内容');
+  await page.close();
 });
 
 scenario('内容特性：标签页/ANSI/复制按钮', async (ctx) => {

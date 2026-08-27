@@ -25,6 +25,10 @@ const sendFile = (res, filePath, contentType) => {
 // 提交后接口才返回 count / voted / voters，脚本据此切换到结果视图。
 const voteState = { votedIds: new Set() };
 
+// 模拟帖子页回复契约：提交 /api/content/new-comment 后，当前页重抓（GET）应返回新增楼层。
+// 验证 B1——回复后新回复必须出现在楼中楼里，而不是因“当前页永不重抓”而丢失。
+const replyState = { addedFloors: [] };
+
 function votePayload() {
   const items = [
     { vote_item_id: 13788, text: '选项 A' },
@@ -43,6 +47,13 @@ function votePayload() {
   };
 }
 
+
+// 帖子页回复契约（B1）：回复后重抓当前页必须返回新增楼层。
+function post789Page() {
+  const extras = replyState.addedFloors.map((floor) => `<li id="${floor.floor}" data-comment-id="${floor.commentId}" class="content-item"><div class="nsk-content-meta-info"><a href="/space/9">新回复者</a></div><article class="post-content"><p>${floor.content}</p></article></li>`).join('');
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Fixture post 789</title></head><body><div class="nsk-post"><div class="content-item" id="0"><h1 class="post-title">回复契约测试帖</h1><article class="post-content"><p>用于验证帖子页回复后新楼层出现在楼中楼。</p></article></div></div><div class="comment-container"><div class="nsk-pager post-top-pager"><a class="pager-pos pager-cur" href="/post-789-1">1</a></div><ul class="comments"><li id="1" data-comment-id="801" class="content-item"><div class="nsk-content-meta-info"><a href="/space/1">楼主</a></div><article class="post-content"><p>主楼内容</p></article><div class="comment-menu"><span class="menu-item" title="点赞" data-action="like">♡ <span>0</span></span><span class="menu-item" title="加鸡腿" data-action="chicken">🍗 <span>0</span></span><span class="menu-item" title="反对" data-action="dislike">♧ <span>0</span></span><span class="menu-item" title="收藏" data-action="favorite">☆ <span>0</span></span><span class="menu-item" title="引用" data-action="quote">❝ 引用</span><span class="menu-item" title="回复" data-action="reply">↩ 回复</span></div></li><li id="2" data-comment-id="802" class="content-item"><div class="nsk-content-meta-info"><a href="/space/2">层主</a></div><article class="post-content"><p>@楼主 <a href="/post-789-1#1">#1</a> 已有回复</p></article></li>${extras}</ul><div class="nsk-pager post-bottom-pager"><a class="pager-pos pager-cur" href="/post-789-1">1</a></div></div><script src="/outputs/nodeseek-comment-preview.user.js"></script></body></html>`;
+}
+
 const server = http.createServer((req, res) => {
   const pathname = new URL(req.url, `http://${req.headers.host}`).pathname;
   if (req.method === 'POST' && ['/aics/upvote', '/api/statistics/upvote', '/api/statistics/like', '/api/statistics/dislike', '/api/statistics/collection', '/api/content/new-comment', '/api/vote/voteforitem'].includes(pathname)) {
@@ -52,6 +63,9 @@ const server = http.createServer((req, res) => {
       const parsed = body ? JSON.parse(body) : null;
       if (pathname === '/api/vote/voteforitem' && parsed && Array.isArray(parsed.ids)) {
         parsed.ids.forEach((id) => voteState.votedIds.add(Number(id)));
+      }
+      if (pathname === '/api/content/new-comment' && parsed && Number(parsed.postId) === 789) {
+        replyState.addedFloors.push({ floor: 3 + replyState.addedFloors.length, commentId: 900 + replyState.addedFloors.length, content: String(parsed.content || '') });
       }
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify({ success: true, received: parsed }));
@@ -65,6 +79,11 @@ const server = http.createServer((req, res) => {
   }
   if (pathname === '/post-123-1') return sendFile(res, fixturePath('post-123-1'), 'text/html; charset=utf-8');
   if (pathname === '/post-123-2') return sendFile(res, fixturePath('post-123-2'), 'text/html; charset=utf-8');
+  if (pathname === '/post-789-1') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(post789Page());
+    return;
+  }
   if (pathname === '/list') return sendFile(res, fixturePath('list'), 'text/html; charset=utf-8');
   // 长帖分页截断回归：456 帖共 52 页，每页 1 楼；分页器链接到最后一页，
   // 用于验证 MAX_PAGE 截断时状态栏明示“只读取了前 N 页”，而不是静默丢楼层。
