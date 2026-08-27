@@ -149,22 +149,16 @@
   function sanitizeImportedNode(sourceNode, options = {}) {
     if (!sourceNode) return null;
     const imported = document.importNode(sourceNode, true);
-    // 投票面板是 NodeSeek 官方组件（Vue SSR 输出 form + radio + 按钮），
-    // 必须整体保留，否则预览和跨页克隆里投票会消失。
-    const isVotePanel = (node) => Boolean(node.closest?.('.vote-panel, .embed-vote'));
+    // NodeSeek 的投票面板是 Vue 客户端渲染的，SSR 里只有 nsapp://vote 链接；
+    // 预览通过 /api/vote/info/{id} 重建面板。保留 a[data-href^="nsapp://vote"]，
+    // 其余 form/input/button 一律删除（防止恶意评论伪造表单外发）。
     const dangerous = 'script,style,link,meta,base,iframe,object,embed,form,input,textarea,select,option,button';
-    qsa(imported, dangerous).forEach((node) => {
-      if (node.closest?.('.vote-panel, .embed-vote')) return;
-      node.remove();
-    });
-    if (!isVotePanel(imported) && imported.matches?.(dangerous)) imported.remove();
+    qsa(imported, dangerous).forEach((node) => node.remove());
+    if (imported.matches?.(dangerous)) imported.remove();
 
     // 跨页帖子评论默认是只读克隆；预览页和新标签页统一接管楼层菜单点击。
     if (!options.keepCommentMenu) qsa(imported, '.comment-menu, .comment-actions').forEach((node) => node.remove());
-    qsa(imported, '[id]').forEach((node) => {
-      if (node.closest?.('.vote-panel, .embed-vote')) return;
-      node.removeAttribute('id');
-    });
+    qsa(imported, '[id]').forEach((node) => node.removeAttribute('id'));
     // NodeSeek 的评论头部有一个灰色楼层按钮；预览已有自己的来源链接，移除这个无效控件。
     qsa(imported, '.nsk-content-meta-info .floor-link, .nsk-content-meta-info [class*="floor-link"]').forEach((node) => node.remove());
     qsa(imported, '.nsk-content-meta-info a, .nsk-content-meta-info span').forEach((node) => {
@@ -1012,6 +1006,7 @@
     installPreviewAnsiBlocks(root);
     installPreviewImageFallback(root);
     installPreviewCodeBlocks(root);
+    installPreviewVotePanels(root);
   }
 
   function installPreviewCodeBlocks(root) {
@@ -1918,29 +1913,108 @@
     openPreviewModal(url, link);
   }
 
+  function getVoteIdFromLink(link) {
+    const href = link.getAttribute('data-href') || link.getAttribute('href') || '';
+    const match = /nsapp:\/\/vote\?id=(\d+)/.exec(href);
+    return match ? safePositiveInt(match[1]) : null;
+  }
+
+  async function fetchVoteInfo(voteId) {
+    const endpoint = parseSameOriginUrl(`/api/vote/info/${voteId}`);
+    if (!endpoint) throw new Error('投票地址非法');
+    const response = await fetch(endpoint.href, {
+      method: 'GET',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      redirect: 'error',
+      referrerPolicy: 'same-origin',
+      headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+    });
+    const text = await response.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { /* 非 JSON 响应 */ }
+    if (!response.ok || !data || data.success === false) throw new Error(data?.message || `HTTP ${response.status}`);
+    return data;
+  }
+
+  function buildVotePanel(vote) {
+    const single = vote.multiple !== true;
+    const panel = createElement('div', 'vote-panel xns-vote-panel');
+    panel.dataset.xnsVoteId = String(vote.id);
+    const title = createElement('h2', 'xns-vote-title', vote.title || '投票');
+    title.style.textAlign = 'center';
+    title.style.fontSize = '1.2rem';
+    panel.appendChild(title);
+    const wrapper = createElement('fieldset', 'vote-stat-wrapper');
+    (vote.items || []).forEach((item) => {
+      const stat = createElement('div', 'vote-stat' + (item.voted ? ' voted' : ' not-voted'));
+      const input = document.createElement('input');
+      input.type = single ? 'radio' : 'checkbox';
+      input.name = 'vote-item';
+      input.value = String(item.vote_item_id);
+      if (item.voted) input.checked = true;
+      const label = createElement('label', 'pure-checkbox');
+      label.appendChild(input);
+      label.appendChild(createElement('div', 'vote-item-text', item.text || ''));
+      stat.appendChild(label);
+      wrapper.appendChild(stat);
+    });
+    panel.appendChild(wrapper);
+    const buttons = createElement('fieldset', 'op-buttons');
+    const submit = createElement('button', 'pure-button pure-button-primary add-margin', '投票');
+    submit.type = 'button';
+    buttons.appendChild(submit);
+    panel.appendChild(buttons);
+    panel.appendChild(createElement('div', 'xns-vote-note', `nsapp://vote?id=${vote.id}${vote.isPublic ? ' (公开投票)' : ''}`));
+    return panel;
+  }
+
+  function mountVotePanel(link, data) {
+    if (!link.isConnected) return;
+    const vote = data?.vote;
+    if (!vote || !Array.isArray(vote.items)) return;
+    const panel = buildVotePanel(vote);
+    link.replaceWith(panel);
+  }
+
+  // NodeSeek 的投票面板是 Vue 客户端渲染的，SSR HTML 里只有 nsapp://vote 链接；
+  // 预览和跨页克隆通过同源接口 /api/vote/info/{id} 拉取后自建面板。
+  function installPreviewVotePanels(root) {
+    qsa(root, 'a[data-href^="nsapp://vote"], a[href^="nsapp://vote"]').forEach((link) => {
+      if (link.dataset.xnsVoteBound === 'true') return;
+      const voteId = getVoteIdFromLink(link);
+      if (voteId === null) return;
+      link.dataset.xnsVoteBound = 'true';
+      void fetchVoteInfo(voteId)
+        .then((data) => mountVotePanel(link, data))
+        .catch(() => {
+          // 未登录或接口失败时保留链接文本，不带承载面板
+          if (link.isConnected) link.textContent = link.textContent || `投票 #${voteId}（需登录）`;
+        });
+    });
+  }
+
   function getVoteStatus(panel) {
     let status = qs(panel, '.xns-vote-status');
     if (!status) {
       status = createElement('div', 'xns-vote-status');
-      const form = qs(panel, 'form') || panel;
-      form.appendChild(status);
+      panel.appendChild(status);
     }
     return status;
   }
 
-  // 只有用户点击投票按钮才发请求；原页面（非克隆）的投票交给 NodeSeek Vue 原生处理。
+  // 只拦截预览/跨页克隆里脚本自建的面板；原页面（非克隆）交给 NodeSeek Vue 原生处理。
   function handleVoteClick(event) {
-    const button = event.target.closest?.('.vote-panel button');
+    const button = event.target.closest?.('.xns-vote-panel button');
     if (!button || button.disabled) return;
-    const panel = button.closest('.vote-panel');
+    const panel = button.closest('.xns-vote-panel');
     if (!panel || panel.dataset.xnsVotePending === 'true') return;
     const inPreview = Boolean(panel.closest('.xns-overlay .xns-preview-content'));
     const inRemote = Boolean(panel.closest('[data-xns-remote]'));
     if (!inPreview && !inRemote) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    const form = qs(panel, 'form') || panel;
-    const selected = qsa(form, 'input[name="vote-item"]:checked').map((input) => input.value);
+    const selected = qsa(panel, 'input[name="vote-item"]:checked').map((input) => input.value);
     const status = getVoteStatus(panel);
     if (!selected.length) {
       status.textContent = '请先选择选项。';

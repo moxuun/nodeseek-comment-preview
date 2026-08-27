@@ -444,26 +444,33 @@ scenario('内容特性：标签页/ANSI/复制按钮', async (ctx) => {
 
 scenario('弹窗保留投票面板并提交（0.5.11 回归）', async (ctx) => {
   const page = await openPreviewModal(ctx);
+  // 等待 fetch /api/vote/info/123 完成、脚本自建投票面板
+  await waitFor(page, () => {
+    const panel = document.querySelector('.xns-preview-post .xns-vote-panel');
+    return panel && panel.querySelectorAll('input[name="vote-item"]').length === 2;
+  }, 10_000, '投票面板渲染');
   const state = await page.evaluate(() => {
-    const panel = document.querySelector('.xns-preview-post .vote-panel');
-    const radios = panel ? [...panel.querySelectorAll('input[name="vote-item"]')].map((input) => input.value) : [];
+    const panel = document.querySelector('.xns-preview-post .xns-vote-panel');
+    const radios = [...panel.querySelectorAll('input[name="vote-item"]')].map((input) => input.value);
     return {
       panelExists: !!panel,
       radioCount: radios.length,
       radios,
-      buttonText: panel?.querySelector('button')?.textContent?.trim() || null,
-      nsappText: panel?.textContent?.includes('nsapp://vote?id=123') || false,
+      title: panel.querySelector('.xns-vote-title')?.textContent?.trim() || null,
+      buttonText: panel.querySelector('button')?.textContent?.trim() || null,
+      nsappLinkGone: !document.querySelector('.xns-preview-post a[data-href*="nsapp"]'),
     };
   });
-  assert(state.panelExists, '预览弹窗应保留投票面板');
+  assert(state.panelExists, '预览弹窗应渲染投票面板');
   assert(state.radioCount === 2 && JSON.stringify(state.radios) === JSON.stringify(['13788', '13789']), `应有 2 个选项，实际 ${JSON.stringify(state.radios)}`);
+  assert(state.title === '测试投票', `应有投票标题，实际 ${state.title}`);
   assert(state.buttonText === '投票', `应有投票按钮，实际 ${state.buttonText}`);
-  assert(state.nsappText, '应保留 nsapp://vote 文本');
+  assert(state.nsappLinkGone, 'nsapp 链接应被替换为投票面板');
 
   await page.evaluate(() => {
-    const input = document.querySelector('.xns-preview-post .vote-panel input[value="13788"]');
+    const input = document.querySelector('.xns-preview-post .xns-vote-panel input[value="13788"]');
     input.click();
-    document.querySelector('.xns-preview-post .vote-panel button').click();
+    document.querySelector('.xns-preview-post .xns-vote-panel button').click();
   });
   const post = await waitPost(page, (p) => p.url.endsWith('/api/vote/voteforitem'));
   const payload = JSON.parse(post.body);
@@ -486,8 +493,9 @@ scenario('暗色模式跟随系统（0.5.11 回归）', async (ctx) => {
   const modal = await openPreviewModal(ctx);
   await modal.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]);
   await new Promise((resolve) => setTimeout(resolve, 400));
+  await waitFor(modal, () => !!document.querySelector('.xns-preview-post .xns-vote-panel'), 5_000, '暗色下投票面板渲染');
   const votePanel = await modal.evaluate(() => {
-    const style = getComputedStyle(document.querySelector('.xns-preview-post .vote-panel form'));
+    const style = getComputedStyle(document.querySelector('.xns-preview-post .xns-vote-panel'));
     return { voteBg: style.backgroundColor };
   });
   assert(votePanel.voteBg !== 'rgb(251, 251, 251)', `暗色下投票面板不应为浅色，实际 ${votePanel.voteBg}`);

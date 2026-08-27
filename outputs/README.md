@@ -65,7 +65,7 @@ Ctrl/Command 点击、鼠标中键和右键菜单保持 NodeSeek 原生行为。
 
 0.5.10 帖子页的“楼中楼/原版”评论布局切换改为右下角悬浮，固定在站点“跳回顶端/回到底部”按钮组的正上方并右对齐，新标签页打开帖子时同样可见，不再占用评论区上方的版面。
 
-0.5.11 修复帖子正文的 NodeSeek 投票面板（`nsapp://vote` 组件）在预览弹窗和跨页克隆里整组消失的问题：不再删除投票区的 `form`/`radio`/按钮，预览里点击投票按钮会通过 NodeSeek 同源接口 `/api/vote/voteforitem` 提交所选选项；界面增加跟随系统 `prefers-color-scheme` 的黑夜模式，覆盖帖子页悬浮工具栏、回复编辑器与投票面板。
+0.5.11 修复帖子正文的 NodeSeek 投票面板（`nsapp://vote` 组件）在预览弹窗和跨页克隆里不显示的问题：投票面板由 Vue 客户端渲染，SSR HTML 只有 `nsapp://vote` 链接——预览解析链接后经同源接口 `/api/vote/info/{id}` 拉取选项，由脚本重建可交互面板，提交走 `/api/vote/voteforitem`；任何外来 `form`/`input`/`button` 仍一律删除。界面增加跟随系统 `prefers-color-scheme` 的黑夜模式，覆盖帖子页悬浮工具栏、回复编辑器与投票面板。
 
 ## 安全边界
 

@@ -32,6 +32,25 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
+  if (pathname === '/api/vote/info/123') {
+    const payload = {
+      success: true,
+      vote: {
+        id: 123,
+        title: '测试投票',
+        multiple: false,
+        isPublic: true,
+        locked: false,
+        items: [
+          { vote_item_id: 13788, text: '选项 A', count: 1, voted: false },
+          { vote_item_id: 13789, text: '选项 B', count: 0, voted: false },
+        ],
+      },
+    };
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(payload));
+    return;
+  }
   if (pathname === '/post-123-1') return sendFile(res, fixturePath('post-123-1'), 'text/html; charset=utf-8');
   if (pathname === '/post-123-2') return sendFile(res, fixturePath('post-123-2'), 'text/html; charset=utf-8');
   if (pathname === '/list') return sendFile(res, fixturePath('list'), 'text/html; charset=utf-8');
