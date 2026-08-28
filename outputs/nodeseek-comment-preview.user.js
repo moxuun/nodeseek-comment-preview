@@ -14,35 +14,39 @@
 (() => {
   'use strict';
 
-  const PREFIX = 'xns';
-  const REQUEST_TIMEOUT = 8_000;
-  const MAX_RESPONSE_BYTES = 2_000_000;
-  const MAX_PAGE = 50;
-  const PAGE_CONCURRENCY = 4;
-  const STYLE_ID = `${PREFIX}-style`;
-  const DEFAULT_MODE = 'thread';
+// 运行时常量与应用状态。这里不放业务逻辑，便于各功能模块明确依赖。
+const PREFIX = 'xns';
+const REQUEST_TIMEOUT = 8_000;
+const MAX_RESPONSE_BYTES = 2_000_000;
+const MAX_PAGE = 50;
+// NodeSeek 对连续分页请求有明显的限流；保留少量并发，避免长帖读取时成批 429。
+const PAGE_CONCURRENCY = 2;
+const STYLE_ID = `${PREFIX}-style`;
+const DEFAULT_MODE = 'thread';
 
-  const SELECTORS = Object.freeze({
-    commentContainer: '.comment-container',
-    commentList: '.comment-container > ul.comments, .comment-container ul.comments',
-    commentItem: '.content-item[id], li[id].content-item',
-    postContent: 'article.post-content, .post-content',
-    postTitle: 'h1.post-title, .post-title, h1',
-  });
+const SELECTORS = Object.freeze({
+  commentContainer: '.comment-container',
+  commentList: '.comment-container > ul.comments, .comment-container ul.comments',
+  commentItem: '.content-item[id], li[id].content-item',
+  postContent: 'article.post-content, .post-content',
+  postTitle: 'h1.post-title, .post-title, h1',
+});
 
-  const ANSI_FG_HEX = ['#111827', '#dc2626', '#16a34a', '#ca8a04', '#2563eb', '#c026d3', '#0891b2', '#f8fafc'];
-  const ANSI_BG_HEX = ['#111827', '#ef4444', '#22c55e', '#facc15', '#3b82f6', '#d946ef', '#06b6d4', '#f8fafc'];
-  const ANSI_BRIGHT_HEX = ['#6b7280', '#f87171', '#4ade80', '#fde047', '#60a5fa', '#f0abfc', '#67e8f9', '#fff'];
+const ANSI_FG_HEX = ['#111827', '#dc2626', '#16a34a', '#ca8a04', '#2563eb', '#c026d3', '#0891b2', '#f8fafc'];
+const ANSI_BG_HEX = ['#111827', '#ef4444', '#22c55e', '#facc15', '#3b82f6', '#d946ef', '#06b6d4', '#f8fafc'];
+const ANSI_BRIGHT_HEX = ['#6b7280', '#f87171', '#4ade80', '#fde047', '#60a5fa', '#f0abfc', '#67e8f9', '#fff'];
+const ANSI_COLORS = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
 
-  const state = {
-    post: null,
-    modal: null,
-    lightbox: null,
-    mode: DEFAULT_MODE,
-  };
+const state = {
+  post: null,
+  modal: null,
+  lightbox: null,
+  mode: DEFAULT_MODE,
+};
 
-  const pageInfo = getPostInfo(window.location.href);
 
+// 通用 DOM 与输入安全工具；不包含 NodeSeek 业务规则。
+function createDomTools({ documentObj, windowObj, selectors, URLCtor }) {
   function safePositiveInt(value) {
     if (typeof value !== 'string' && typeof value !== 'number') return null;
     const text = String(value);
@@ -50,53 +54,17 @@
     const number = Number(text);
     return Number.isSafeInteger(number) && number > 0 ? number : null;
   }
+
   function safeCount(value) {
     const number = Number(value);
     return Number.isSafeInteger(number) && number >= 0 ? number : null;
   }
 
-  function getPostInfo(rawUrl) {
-    try {
-      const url = new URL(rawUrl, window.location.href);
-      if (url.origin !== window.location.origin) return null;
-      const match = /^\/post-(\d+)-(\d+)\/?$/.exec(url.pathname);
-      if (!match) return null;
-      const postId = safePositiveInt(match[1]);
-      const page = safePositiveInt(match[2]);
-      if (postId === null || page === null) return null;
-      return { postId: String(postId), page };
-    } catch {
-      return null;
-    }
-  }
-
-  function parseSameOriginUrl(rawUrl, base = window.location.href) {
-    if (typeof rawUrl !== 'string' || rawUrl.length > 2_048) return null;
-    try {
-      const url = new URL(rawUrl, base);
-      if (!['http:', 'https:'].includes(url.protocol)) return null;
-      if (url.origin !== window.location.origin || url.username || url.password) return null;
-      return url;
-    } catch {
-      return null;
-    }
-  }
-
-  function isAllowedPostRequest(url) {
-    const info = url instanceof URL ? getPostInfo(url.href) : null;
-    return Boolean(info && !url.search && !url.username && !url.password);
-  }
-
-  function qs(root, selector) {
-    return root?.querySelector(selector) || null;
-  }
-
-  function qsa(root, selector) {
-    return root ? Array.from(root.querySelectorAll(selector)) : [];
-  }
+  function qs(root, selector) { return root?.querySelector(selector) || null; }
+  function qsa(root, selector) { return root ? Array.from(root.querySelectorAll(selector)) : []; }
 
   function createElement(tagName, className, text) {
-    const element = document.createElement(tagName);
+    const element = documentObj.createElement(tagName);
     if (className) element.className = className;
     if (typeof text === 'string') element.textContent = text;
     return element;
@@ -106,19 +74,17 @@
     while (element.firstChild) element.removeChild(element.firstChild);
   }
 
-  function findCommentList(root = document) {
-    return qs(root, SELECTORS.commentList);
-  }
+  function findCommentList(root = documentObj) { return qs(root, selectors.commentList); }
 
-  function getCommentItems(root = document) {
+  function getCommentItems(root = documentObj) {
     const list = findCommentList(root);
     if (!list) return [];
-    return Array.from(list.children).filter((item) => item.matches?.(SELECTORS.commentItem));
+    return Array.from(list.children).filter((item) => item.matches?.(selectors.commentItem));
   }
 
-  function getFloor(item) {
-    return safePositiveInt(item?.getAttribute('id') || '');
-  }
+  function getFloor(item) { return safePositiveInt(item?.getAttribute('id') || ''); }
+
+  function getCommentId(item) { return safePositiveInt(item?.getAttribute('data-comment-id') || ''); }
 
   function getAuthorName(item) {
     const profile = qs(item, ':scope > .nsk-content-meta-info a.author-name, :scope > .nsk-content-meta-info a[href^="/space/"], :scope > .nsk-content-meta-info a[href*="/space/"]');
@@ -129,216 +95,106 @@
   }
 
   function getPostContent(item) {
-    return qs(item, ':scope > article.post-content, :scope > .post-content') || qs(item, SELECTORS.postContent);
+    return qs(item, ':scope > article.post-content, :scope > .post-content') || qs(item, selectors.postContent);
   }
 
   function getSafeUrlAttribute(name, rawValue) {
     if (typeof rawValue !== 'string' || rawValue.length > 4_096) return null;
-    if (name === 'src' && rawValue.startsWith('data:image/')) {
-      return rawValue.length <= 262_144 ? rawValue : null;
-    }
+    if (name === 'src' && rawValue.startsWith('data:image/')) return rawValue.length <= 262_144 ? rawValue : null;
     try {
-      const url = new URL(rawValue, window.location.href);
+      const url = new URLCtor(rawValue, windowObj.location.href);
       if (name === 'href') return ['http:', 'https:', 'mailto:'].includes(url.protocol) ? url.href : null;
       return ['http:', 'https:'].includes(url.protocol) ? url.href : null;
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   }
 
-  function sanitizeImportedNode(sourceNode, options = {}) {
-    if (!sourceNode) return null;
-    const imported = document.importNode(sourceNode, true);
-    // NodeSeek 的投票面板是 Vue 客户端渲染的，SSR 里只有 nsapp://vote 链接；
-    // 预览通过 /api/vote/info/{id} 重建面板。保留 a[data-href^="nsapp://vote"]，
-    // 其余 form/input/button 一律删除（防止恶意评论伪造表单外发）。
-    const dangerous = 'script,style,link,meta,base,iframe,object,embed,form,input,textarea,select,option,button';
-    qsa(imported, dangerous).forEach((node) => node.remove());
-    if (imported.matches?.(dangerous)) imported.remove();
+  return Object.freeze({
+    safePositiveInt,
+    safeCount,
+    qs,
+    qsa,
+    createElement,
+    clearElement,
+    findCommentList,
+    getCommentItems,
+    getFloor,
+    getCommentId,
+    getAuthorName,
+    getPostContent,
+    getSafeUrlAttribute,
+  });
+}
 
-    // 跨页帖子评论默认是只读克隆；预览页和新标签页统一接管楼层菜单点击。
-    if (!options.keepCommentMenu) qsa(imported, '.comment-menu, .comment-actions').forEach((node) => node.remove());
-    qsa(imported, '[id]').forEach((node) => node.removeAttribute('id'));
-    // 保留官方 .floor-link 楼号（右上角灰色 #N）：预览里当前页评论直接显示，
-    // 跨页评论由 addRemoteNote 改造 href 指向来源页。
-    const all = [imported, ...qsa(imported, '*')].filter((node) => node.nodeType === Node.ELEMENT_NODE);
-    all.forEach((node) => {
-      Array.from(node.attributes).forEach((attribute) => {
-        const name = attribute.name.toLowerCase();
-        if (name.startsWith('on') || ['style', 'srcdoc', 'srcset', 'formaction', 'contenteditable', 'ping'].includes(name)) {
-          node.removeAttribute(attribute.name);
-          return;
-        }
-        if (['href', 'src', 'poster', 'xlink:href'].includes(name)) {
-          // SVG 图标普遍用 #片段 引用雪碧图，片段引用不会发生跳转，原样保留以免误伤。
-          const safeFragment = name === 'xlink:href' && attribute.value.trim().startsWith('#');
-          const urlName = name === 'poster' ? 'src' : name === 'xlink:href' ? 'href' : name;
-          const safeValue = safeFragment ? attribute.value : getSafeUrlAttribute(urlName, attribute.value);
-          if (!safeValue) node.removeAttribute(attribute.name);
-          else node.setAttribute(attribute.name, safeValue);
-        }
-      });
-      if (node.localName === 'a' && (node.hasAttribute('href') || node.hasAttribute('xlink:href'))) {
-        node.setAttribute('target', '_blank');
-        node.setAttribute('rel', 'noopener noreferrer');
-      }
-      if (node.localName === 'img') {
-        node.setAttribute('loading', 'lazy');
-        node.setAttribute('decoding', 'async');
-        // 部分图片站会把不带来源的请求判定为直链访问，改为带站点来源的嵌入请求。
-        node.setAttribute('referrerpolicy', 'origin');
-      }
-    });
-    return imported;
-  }
+const xnsDomTools = createDomTools({
+  documentObj: document,
+  windowObj: window,
+  selectors: SELECTORS,
+  URLCtor: URL,
+});
+const safePositiveInt = (...args) => xnsDomTools.safePositiveInt(...args);
+const safeCount = (...args) => xnsDomTools.safeCount(...args);
+const qs = (...args) => xnsDomTools.qs(...args);
+const qsa = (...args) => xnsDomTools.qsa(...args);
+const createElement = (...args) => xnsDomTools.createElement(...args);
+const clearElement = (...args) => xnsDomTools.clearElement(...args);
+const findCommentList = (...args) => xnsDomTools.findCommentList(...args);
+const getCommentItems = (...args) => xnsDomTools.getCommentItems(...args);
+const getFloor = (...args) => xnsDomTools.getFloor(...args);
+const getCommentId = (...args) => xnsDomTools.getCommentId(...args);
+const getAuthorName = (...args) => xnsDomTools.getAuthorName(...args);
+const getPostContent = (...args) => xnsDomTools.getPostContent(...args);
+const getSafeUrlAttribute = (...args) => xnsDomTools.getSafeUrlAttribute(...args);
 
-  function extractReplyMetadata(item, postId) {
-    const content = getPostContent(item);
-    const firstParagraph = content?.querySelector(':scope > p:first-child');
-    const firstText = firstParagraph?.textContent?.trim() || '';
-    const match = /^@([^\s]+)\s+#([1-9]\d*)/.exec(firstText);
-    if (!match) return null;
 
-    const targetFloor = safePositiveInt(match[2]);
-    if (targetFloor === null) return null;
-    const floorLink = qsa(firstParagraph, 'a').find((link) => /^#\d+$/.test((link.textContent || '').trim()));
-    if (floorLink) {
-      const linkedUrl = parseSameOriginUrl(floorLink.getAttribute('href') || '');
-      const linkedInfo = linkedUrl ? getPostInfo(linkedUrl.href) : null;
-      if (linkedInfo && linkedInfo.postId !== String(postId)) return null;
-    }
-    return { targetFloor, targetUser: match[1].slice(0, 80) };
-  }
-
-  function isPinnedComment(item) {
-    return Boolean(qs(item, '.nsk-content-meta-info .hot-badge, .nsk-content-meta-info .pined-comment-badge, .nsk-content-meta-info [title="置顶"], .nsk-content-meta-info [title*="HOT"], .nsk-content-meta-info [class*="hot"]'));
-  }
-
-  function hasOwnEditOption(item) {
-    if (!item?.querySelector) return false;
-    const items = qsa(item, ':scope > .comment-menu > .menu-item');
-    return items.some((el) => {
-      const text = (el.textContent || '' ).trim();
-      return text === '编辑' && !el.dataset?.xnsAction;
-    });
-  }
-
-  function getCurrentUserUid() {
+// NodeSeek 帖子 URL 规则与同源请求边界。
+function createNodeSeekUrlService({ windowObj, URLCtor, safePositiveInt }) {
+  function getPostInfo(rawUrl) {
     try {
-      const m = document.cookie.match(/(?:^|;\s*)pjwt=([^;]+)/);
-      if (!m) return null;
-      const payload = m[1].split('.')[1];
-      if (!payload) return null;
-      const b64 = payload.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - payload.length % 4) % 4);
-      const data = JSON.parse(atob(b64()));
-      return typeof data.id !== 'undefined' ? String(data.id) : null;
-    } catch (e) { return null; }
+      const url = new URLCtor(rawUrl, windowObj.location.href);
+      if (url.origin !== windowObj.location.origin) return null;
+      const match = /^\/post-(\d+)-(\d+)\/?$/.exec(url.pathname);
+      if (!match) return null;
+      const postId = safePositiveInt(match[1]);
+      const page = safePositiveInt(match[2]);
+      if (postId === null || page === null) return null;
+      return { postId: String(postId), page };
+    } catch { return null; }
   }
 
-  function getCommentAuthorUid(item) {
+  function parseSameOriginUrl(rawUrl, base = windowObj.location.href) {
+    if (typeof rawUrl !== 'string' || rawUrl.length > 2_048) return null;
     try {
-      const a = qs(item, '.nsk-content-meta-info a.author-name, .author-name');
-      const href = a ? a.getAttribute('href') : null;
-      if (!href) return null;
-      const m = href.match(/\/space\/(\d+)/);
-      return m ? m[1] : null;
-    } catch (e) { return null; }
+      const url = new URLCtor(rawUrl, base);
+      if (!['http:', 'https:'].includes(url.protocol)) return null;
+      if (url.origin !== windowObj.location.origin || url.username || url.password) return null;
+      return url;
+    } catch { return null; }
   }
 
-  function getCommentRecord(item, postId, page, index, current, options = {}) {
-    const floor = getFloor(item);
-    if (floor === null) return null;
-    const node = current ? item : sanitizeImportedNode(item, options);
-    if (!node) return null;
-    const commentId = getCommentId(item);
-    return {
-      floor,
-      page,
-      postId,
-      index,
-      current,
-      // 自己的评论：NodeSeek 只在当前用户的评论菜单里渲染“编辑”项（Vue v-if，
-      // 且仅在 Vue 挂载的原版节点里存在；SSR 克隆里全是占位注释）。
-      isMine: hasOwnEditOption(item) || getCommentAuthorUid(item) === getCurrentUserUid(),
-      pinned: isPinnedComment(item),
-      author: getAuthorName(item),
-      reply: extractReplyMetadata(item, postId),
-      counts: commentId !== null && options.state ? getSsrCommentCounts(options.state, commentId) : null,
-      node,
-      parent: null,
-      children: [],
-    };
+  function isAllowedPostRequest(url) {
+    const info = url instanceof URLCtor ? getPostInfo(url.href) : null;
+    return Boolean(info && !url.search && !url.username && !url.password);
   }
 
-  function getPageNumbers(root, postId) {
-    const pages = new Set();
-    const baseUrl = typeof root?.baseURI === 'string' && /^https?:/.test(root.baseURI)
-      ? root.baseURI
-      : window.location.href;
-    qsa(root, 'a[href]').forEach((link) => {
-      const url = parseSameOriginUrl(link.getAttribute('href') || '', baseUrl);
-      const info = url ? getPostInfo(url.href) : null;
-      if (info?.postId === String(postId)) pages.add(info.page);
-    });
-    return pages;
-  }
+  return Object.freeze({ getPostInfo, parseSameOriginUrl, isAllowedPostRequest });
+}
 
-  async function fetchHtml(url, options = {}) {
-    if (!isAllowedPostRequest(url)) throw new Error('只允许读取同一站点的帖子页面');
-    const noStore = options.noStore === true;
-    const maxAttempts = 3;
-    // NodeSeek/Cloudflare 对快速连续抓取会返回 429 限流；带退避重试，
-    // 避免长帖并发拉页时整页楼层因瞬时限流而缺失。
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const controller = new AbortController();
-      const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
-      try {
-        const response = await fetch(url.href, {
-          method: 'GET',
-          credentials: 'same-origin',
-          cache: noStore ? 'no-store' : 'default',
-          redirect: 'error',
-          referrerPolicy: 'same-origin',
-          headers: { Accept: 'text/html,application/xhtml+xml' },
-          signal: controller.signal,
-        });
-        if (response.status === 429 || response.status >= 500) {
-          if (attempt < maxAttempts) {
-            await new Promise((resolve) => window.setTimeout(resolve, 600 * attempt));
-            continue;
-          }
-          throw new Error(`HTTP ${response.status}`);
-        }
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const responseUrl = parseSameOriginUrl(response.url);
-        const contentType = (response.headers.get('content-type') || '').toLowerCase();
-        const contentLength = Number(response.headers.get('content-length') || 0);
-        if (!responseUrl || !isAllowedPostRequest(responseUrl) || !contentType.includes('text/html')) throw new Error('响应不是同站帖子页面');
-        if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) throw new Error('响应过大');
-        const html = await response.text();
-        if (!html || html.length > MAX_RESPONSE_BYTES) throw new Error('响应过大或为空');
-        return { html, url: responseUrl };
-      } catch (error) {
-        if (attempt < maxAttempts && !(error instanceof DOMException && error.name === 'AbortError')) {
-          await new Promise((resolve) => window.setTimeout(resolve, 600 * attempt));
-          continue;
-        }
-        throw error;
-      } finally {
-        window.clearTimeout(timer);
-      }
-    }
-    throw new Error('抓取失败');
-  }
+const xnsNodeSeekUrlService = createNodeSeekUrlService({
+  windowObj: window,
+  URLCtor: URL,
+  safePositiveInt,
+});
+const getPostInfo = (...args) => xnsNodeSeekUrlService.getPostInfo(...args);
+const parseSameOriginUrl = (...args) => xnsNodeSeekUrlService.parseSameOriginUrl(...args);
+const isAllowedPostRequest = (...args) => xnsNodeSeekUrlService.isAllowedPostRequest(...args);
 
-  function parseHtml(html) {
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    doc.__xnsState = extractSsrState(doc);
-    return doc;
-  }
-  // NodeSeek 的 SSR HTML 把点赞/鸡腿/反对/收藏计数放在 <script id="temp-script"> 的 base64 JSON 里，
-  // 评论菜单本身由 Vue 客户端渲染（服务端只输出空的 comment-menu-mount），
-  // 预览/跨页克隆必须从这份状态里恢复真实计数。
+
+// 浏览器运行时上下文。它与静态配置分开，集中承接当前页面 URL 等环境依赖。
+const pageInfo = getPostInfo(window.location.href);
+
+
+// NodeSeek SSR 状态读取。只负责读取页面已经提供的 JSON，不访问会话存储。
+function createSsrStateService({ documentObj, qs }) {
   function extractSsrState(doc) {
     try {
       const script = qs(doc, '#temp-script[type="application/json"]');
@@ -347,37 +203,2640 @@
       const json = decodeURIComponent(escape(atob(encoded)));
       const data = JSON.parse(json);
       return data && data.postData && Array.isArray(data.postData.comments) ? data : null;
+    } catch { return null; }
+  }
+
+  function getDocState(root) { return root && root !== documentObj ? root.__xnsState || null : null; }
+
+  return Object.freeze({ extractSsrState, getDocState });
+}
+
+const xnsSsrStateService = createSsrStateService({ documentObj: document, qs });
+const extractSsrState = (...args) => xnsSsrStateService.extractSsrState(...args);
+const getDocState = (...args) => xnsSsrStateService.getDocState(...args);
+
+
+// NodeSeek 写接口适配器。
+// 这里不决定按钮如何渲染，只负责同源校验、签名、CSRF 和响应错误归一化。
+function createNodeSeekActionApi({ windowObj, navigatorObj, state, requestTimeout, parseSameOriginUrl, fetchFn, AbortControllerCtor }) {
+  const allowedPaths = new Set([
+    '/api/statistics/upvote',
+    '/api/statistics/like',
+    '/api/statistics/dislike',
+    '/api/statistics/collection',
+    '/api/content/new-comment',
+    '/api/vote/voteforitem',
+  ]);
+
+  async function dynamicSign(method, url, body) {
+    const input = `${method}\n\n${url}\n\n${navigatorObj.userAgent || ''}\n\n${body || ''}`;
+    try {
+      const digest = await windowObj.crypto.subtle.digest('SHA-1', new TextEncoder().encode(input));
+      return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
     } catch {
-      return null;
+      return 'a'.repeat(40);
     }
   }
 
-  function getDocState(root) {
-    return root && root !== document ? root.__xnsState || null : null;
+  function randomCsrfToken() {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const bytes = new Uint8Array(16);
+    if (windowObj.crypto?.getRandomValues) windowObj.crypto.getRandomValues(bytes);
+    else for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+    let token = '';
+    bytes.forEach((byte) => { token += alphabet[byte % alphabet.length]; });
+    return token;
   }
 
-  function getSsrCommentCounts(state, commentId) {
-    const comment = state?.postData?.comments?.find((item) => String(item.commentId) === String(commentId));
-    if (!comment) return null;
+  async function postAction(apiPath, payload, options = {}) {
+    const contextUrl = options.context?.url?.href || state.modal?.url?.href || windowObj.location.href;
+    const endpoint = parseSameOriginUrl(apiPath, contextUrl);
+    if (!endpoint || !allowedPaths.has(endpoint.pathname)) throw new Error('操作地址不是 NodeSeek 同源接口');
+
+    const controller = new AbortControllerCtor();
+    const timer = windowObj.setTimeout(() => controller.abort(), requestTimeout);
+    const bodyText = JSON.stringify(payload);
+    const requestHeaders = {
+      Accept: 'application/json, text/plain, */*',
+      'Content-Type': 'application/json',
+      'X-Requested-With': 'XMLHttpRequest',
+      'csrf-token': randomCsrfToken(),
+      ...(options.headers || {}),
+    };
+    if (windowObj.crypto?.subtle) requestHeaders['x-dynamic-sign'] = await dynamicSign('POST', endpoint.href, bodyText);
+    try {
+      const response = await fetchFn(endpoint.href, {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        redirect: 'error',
+        referrer: contextUrl,
+        referrerPolicy: 'same-origin',
+        headers: requestHeaders,
+        body: bodyText,
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch { /* 某些接口成功时不返回 JSON。 */ }
+      const contentType = (response.headers.get('content-type') || '').toLowerCase();
+      const explicitFailure = data && typeof data === 'object' && (
+        data.success === false || data.ok === false || data.error === true
+        || (typeof data.status === 'string' && /fail|error|unauthor|denied/i.test(data.status))
+        || (typeof data.code === 'string' && /fail|error|unauthor|denied/i.test(data.code))
+      );
+      if (!response.ok || explicitFailure || (!data && /text\/html|<html[\s>]|登录|禁止访问/i.test(`${contentType} ${text.slice(0, 500)}`))) {
+        const message = data?.message || data?.msg || text.replace(/<[^>]+>/g, ' ').trim().slice(0, 120);
+        throw new Error(message || `HTTP ${response.status}`);
+      }
+      return data;
+    } finally {
+      windowObj.clearTimeout(timer);
+    }
+  }
+
+  return Object.freeze({ dynamicSign, randomCsrfToken, postAction });
+}
+
+const xnsNodeSeekActionApi = createNodeSeekActionApi({
+  windowObj: window,
+  navigatorObj: navigator,
+  state,
+  requestTimeout: REQUEST_TIMEOUT,
+  parseSameOriginUrl,
+  fetchFn: window.fetch.bind(window),
+  AbortControllerCtor: window.AbortController,
+});
+const dynamicSign = (...args) => xnsNodeSeekActionApi.dynamicSign(...args);
+const randomCsrfToken = (...args) => xnsNodeSeekActionApi.randomCsrfToken(...args);
+const postAction = (...args) => xnsNodeSeekActionApi.postAction(...args);
+
+
+// 当前用户身份读取服务。
+// 只读取页面已经提供的 SSR 状态或用户菜单，不读取 Cookie、Storage 或浏览器会话。
+function createIdentityService({ documentObj, extractSsrState }) {
+  let resolved = false;
+  let uid = null;
+
+  function uidFromHref(href) {
+    const match = String(href || '').match(/\/space\/(\d+)/);
+    return match ? String(match[1]) : null;
+  }
+
+  function fromPageState() {
+    const user = extractSsrState(documentObj)?.user;
+    const value = user && (user.id ?? user.uid ?? user.userId ?? user.memberId);
+    return value === undefined || value === null ? null : String(value);
+  }
+
+  function fromUserMenu() {
+    const selectors = [
+      '[data-user-id]',
+      '.user-menu a[href^="/space/"]',
+      '.user-profile a[href^="/space/"]',
+      '.member-profile a[href^="/space/"]',
+      'header a[href^="/space/"][title]',
+      'aside a[href^="/space/"][title]',
+    ];
+    for (const selector of selectors) {
+      const nodes = documentObj.querySelectorAll(selector);
+      for (const node of nodes) {
+        const value = node.getAttribute('data-user-id') || node.getAttribute('href');
+        const result = uidFromHref(value) || (/^\d+$/.test(value || '') ? String(value) : null);
+        if (result) return result;
+      }
+    }
+    return null;
+  }
+
+  function currentUserUid() {
+    if (resolved) return uid;
+    resolved = true;
+    uid = fromPageState() || fromUserMenu();
+    return uid;
+  }
+
+  return Object.freeze({ currentUserUid });
+}
+
+const xnsIdentityService = createIdentityService({
+  documentObj: document,
+  extractSsrState,
+});
+const getCurrentUserUid = () => xnsIdentityService.currentUserUid();
+
+
+// NodeSeek 页面内容解析与安全克隆；输出供预览和帖子页共用的评论记录。
+function createContentParser({
+  documentObj,
+  qs,
+  qsa,
+  getSafeUrlAttribute,
+  parseSameOriginUrl,
+  getPostInfo,
+  safePositiveInt,
+  getFloor,
+  getCommentId,
+  getAuthorName,
+  getPostContent,
+  getCurrentUserUid,
+}) {
+function sanitizeImportedNode(sourceNode, options = {}) {
+  if (!sourceNode) return null;
+  const imported = documentObj.importNode(sourceNode, true);
+  const dangerous = 'script,style,link,meta,base,iframe,object,embed,form,input,textarea,select,option,button';
+  qsa(imported, dangerous).forEach((node) => node.remove());
+  if (imported.matches?.(dangerous)) imported.remove();
+  if (!options.keepCommentMenu) qsa(imported, '.comment-menu, .comment-actions').forEach((node) => node.remove());
+  qsa(imported, '[id]').forEach((node) => node.removeAttribute('id'));
+  const all = [imported, ...qsa(imported, '*')].filter((node) => node.nodeType === 1);
+  all.forEach((node) => {
+    Array.from(node.attributes).forEach((attribute) => {
+      const name = attribute.name.toLowerCase();
+      if (name.startsWith('on') || ['style', 'srcdoc', 'srcset', 'formaction', 'contenteditable', 'ping'].includes(name)) {
+        node.removeAttribute(attribute.name);
+        return;
+      }
+      if (['href', 'src', 'poster', 'xlink:href'].includes(name)) {
+        const safeFragment = name === 'xlink:href' && attribute.value.trim().startsWith('#');
+        const urlName = name === 'poster' ? 'src' : name === 'xlink:href' ? 'href' : name;
+        const safeValue = safeFragment ? attribute.value : getSafeUrlAttribute(urlName, attribute.value);
+        if (!safeValue) node.removeAttribute(attribute.name);
+        else node.setAttribute(attribute.name, safeValue);
+      }
+    });
+    if (node.localName === 'a' && (node.hasAttribute('href') || node.hasAttribute('xlink:href'))) {
+      node.setAttribute('target', '_blank');
+      node.setAttribute('rel', 'noopener noreferrer');
+    }
+    if (node.localName === 'img') {
+      node.setAttribute('loading', 'lazy');
+      node.setAttribute('decoding', 'async');
+      node.setAttribute('referrerpolicy', 'origin');
+    }
+  });
+  return imported;
+}
+
+function extractReplyMetadata(item, postId) {
+  const content = getPostContent(item);
+  const firstParagraph = content?.querySelector(':scope > p:first-child');
+  const firstText = firstParagraph?.textContent?.trim() || '';
+  const match = /^@([^\s]+)\s+#([1-9]\d*)/.exec(firstText);
+  if (!match) return null;
+  const targetFloor = safePositiveInt(match[2]);
+  if (targetFloor === null) return null;
+  const floorLink = qsa(firstParagraph, 'a').find((link) => /^#\d+$/.test((link.textContent || '').trim()));
+  if (floorLink) {
+    const linkedUrl = parseSameOriginUrl(floorLink.getAttribute('href') || '');
+    const linkedInfo = linkedUrl ? getPostInfo(linkedUrl.href) : null;
+    if (linkedInfo && linkedInfo.postId !== String(postId)) return null;
+  }
+  return { targetFloor, targetUser: match[1].slice(0, 80) };
+}
+
+function isPinnedComment(item) {
+  return Boolean(qs(item, '.nsk-content-meta-info .hot-badge, .nsk-content-meta-info .pined-comment-badge, .nsk-content-meta-info [title="置顶"], .nsk-content-meta-info [title*="HOT"], .nsk-content-meta-info [class*="hot"]'));
+}
+
+function hasOwnEditOption(item) {
+  if (!item?.querySelector) return false;
+  return qsa(item, ':scope > .comment-menu > .menu-item').some((el) => (el.textContent || '').trim() === '编辑' && !el.dataset?.xnsAction);
+}
+
+function getCommentAuthorUid(item) {
+  try {
+    const author = qs(item, '.nsk-content-meta-info a.author-name, .author-name');
+    const match = (author?.getAttribute('href') || '').match(/\/space\/(\d+)/);
+    return match ? match[1] : null;
+  } catch { return null; }
+}
+
+function getCommentRecord(item, postId, page, index, current, options = {}) {
+  const floor = getFloor(item);
+  if (floor === null) return null;
+  const node = current ? item : sanitizeImportedNode(item, options);
+  if (!node) return null;
+  const commentId = getCommentId(item);
+  const currentUserUid = typeof options.getCurrentUserUid === 'function' ? options.getCurrentUserUid() : getCurrentUserUid();
+  return {
+    floor, page, postId, index, current,
+    isMine: hasOwnEditOption(item) || (currentUserUid !== null && getCommentAuthorUid(item) === currentUserUid),
+    pinned: isPinnedComment(item),
+    author: getAuthorName(item),
+    reply: extractReplyMetadata(item, postId),
+    counts: commentId !== null && options.state ? getSsrCommentCounts(options.state, commentId) : null,
+    node, parent: null, children: [],
+  };
+}
+
+function getSsrCommentCounts(stateValue, commentId) {
+  const comment = stateValue?.postData?.comments?.find((item) => String(item.commentId) === String(commentId));
+  if (!comment) return null;
+  return {
+    like: safeCount(comment.upvoteCount), chicken: safeCount(comment.likeCount), dislike: safeCount(comment.dislikeCount),
+    liked: Boolean(comment.upvoted), chickened: Boolean(comment.liked), disliked: Boolean(comment.disliked),
+  };
+}
+
+  return Object.freeze({
+    sanitizeImportedNode,
+    extractReplyMetadata,
+    isPinnedComment,
+    hasOwnEditOption,
+    getCommentAuthorUid,
+    getCommentRecord,
+    getSsrCommentCounts,
+  });
+}
+
+const xnsContentParser = createContentParser({
+  documentObj: document,
+  qs,
+  qsa,
+  getSafeUrlAttribute,
+  parseSameOriginUrl,
+  getPostInfo,
+  safePositiveInt,
+  getFloor,
+  getCommentId,
+  getAuthorName,
+  getPostContent,
+  getCurrentUserUid,
+});
+const sanitizeImportedNode = (...args) => xnsContentParser.sanitizeImportedNode(...args);
+const extractReplyMetadata = (...args) => xnsContentParser.extractReplyMetadata(...args);
+const isPinnedComment = (...args) => xnsContentParser.isPinnedComment(...args);
+const hasOwnEditOption = (...args) => xnsContentParser.hasOwnEditOption(...args);
+const getCommentAuthorUid = (...args) => xnsContentParser.getCommentAuthorUid(...args);
+const getCommentRecord = (...args) => xnsContentParser.getCommentRecord(...args);
+const getSsrCommentCounts = (...args) => xnsContentParser.getSsrCommentCounts(...args);
+
+
+// 从页面链接发现同一帖子的分页。
+function createPaginationService({ windowObj, qsa, parseSameOriginUrl, getPostInfo }) {
+  function getPageNumbers(root, postId) {
+    const pages = new Set();
+    const baseUrl = typeof root?.baseURI === 'string' && /^https?:/.test(root.baseURI) ? root.baseURI : windowObj.location.href;
+    qsa(root, 'a[href]').forEach((link) => {
+      const url = parseSameOriginUrl(link.getAttribute('href') || '', baseUrl);
+      const info = url ? getPostInfo(url.href) : null;
+      if (info?.postId === String(postId)) pages.add(info.page);
+    });
+    return pages;
+  }
+
+  return Object.freeze({ getPageNumbers });
+}
+
+const xnsPaginationService = createPaginationService({
+  windowObj: window,
+  qsa,
+  parseSameOriginUrl,
+  getPostInfo,
+});
+const getPageNumbers = (...args) => xnsPaginationService.getPageNumbers(...args);
+
+
+// NodeSeek 同源帖子读取与 HTML -> Document 转换。
+function createHttpClient({
+  windowObj,
+  fetchFn,
+  AbortControllerCtor,
+  DOMParserCtor,
+  requestTimeout,
+  maxResponseBytes,
+  isAllowedPostRequest,
+  parseSameOriginUrl,
+  extractSsrState,
+}) {
+  async function fetchHtml(url, options = {}) {
+    if (!isAllowedPostRequest(url)) throw new Error('只允许读取同一站点的帖子页面');
+    const noStore = options.noStore === true;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const controller = new AbortControllerCtor();
+      const timer = windowObj.setTimeout(() => controller.abort(), requestTimeout);
+      try {
+        const response = await fetchFn(url.href, {
+          method: 'GET', credentials: 'same-origin', cache: noStore ? 'no-store' : 'default', redirect: 'error',
+          referrerPolicy: 'same-origin', headers: { Accept: 'text/html,application/xhtml+xml' }, signal: controller.signal,
+        });
+        if (response.status === 429 || response.status >= 500) {
+          if (attempt < 3) { await new Promise((resolve) => windowObj.setTimeout(resolve, 600 * attempt)); continue; }
+          throw new Error(`HTTP ${response.status}`);
+        }
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const responseUrl = parseSameOriginUrl(response.url);
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+        const contentLength = Number(response.headers.get('content-length') || 0);
+        if (!responseUrl || !isAllowedPostRequest(responseUrl) || !contentType.includes('text/html')) throw new Error('响应不是同站帖子页面');
+        if (Number.isFinite(contentLength) && contentLength > maxResponseBytes) throw new Error('响应过大');
+        const html = await response.text();
+        if (!html || html.length > maxResponseBytes) throw new Error('响应过大或为空');
+        return { html, url: responseUrl };
+      } catch (error) {
+        if (attempt < 3 && error?.name !== 'AbortError') {
+          await new Promise((resolve) => windowObj.setTimeout(resolve, 600 * attempt));
+          continue;
+        }
+        throw error;
+      } finally { windowObj.clearTimeout(timer); }
+    }
+    throw new Error('抓取失败');
+  }
+
+  function parseHtml(html) {
+    const doc = new DOMParserCtor().parseFromString(html, 'text/html');
+    doc.__xnsState = extractSsrState(doc);
+    return doc;
+  }
+
+  return Object.freeze({ fetchHtml, parseHtml });
+}
+
+const xnsHttpClient = createHttpClient({
+  windowObj: window,
+  fetchFn: window.fetch.bind(window),
+  AbortControllerCtor: window.AbortController,
+  DOMParserCtor: window.DOMParser,
+  requestTimeout: REQUEST_TIMEOUT,
+  maxResponseBytes: MAX_RESPONSE_BYTES,
+  isAllowedPostRequest,
+  parseSameOriginUrl,
+  extractSsrState,
+});
+const fetchHtml = (...args) => xnsHttpClient.fetchHtml(...args);
+const parseHtml = (...args) => xnsHttpClient.parseHtml(...args);
+
+
+// 纯评论关系模型：不访问 DOM、不发请求，只根据楼层引用建立树。
+function createCommentThreadModel() {
+  function build(records) {
+    const byFloor = new Map(records.map((record) => [record.floor, record]));
+    records.forEach((record) => {
+      record.parent = null;
+      record.children = [];
+    });
+    records.forEach((record) => {
+      const target = record.reply?.targetFloor ? byFloor.get(record.reply.targetFloor) : null;
+      if (target && target !== record && !record.pinned) {
+        record.parent = target;
+        target.children.push(record);
+      }
+    });
+    const order = (record) => record.page * 100_000 + record.index;
+    records.forEach((record) => record.children.sort((a, b) => order(a) - order(b)));
+    return records.filter((record) => !record.parent).sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      return order(a) - order(b);
+    });
+  }
+
+  return Object.freeze({ build });
+}
+
+const xnsCommentThreadModel = createCommentThreadModel();
+const buildReplyTree = (records) => xnsCommentThreadModel.build(records);
+
+
+// 帖子分页读取服务。
+// 只负责“读哪些页、如何并发、如何合并”，不创建 DOM，也不决定如何展示失败。
+function createPageLoader({ windowObj, maxPage, concurrency, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid }) {
+  function collectPageRecords(info, root, page) {
+    const state = getDocState(root);
+    return getCommentItems(root)
+      .map((item, index) => getCommentRecord(item, info.postId, page, index, false, { keepCommentMenu: true, state, getCurrentUserUid }))
+      .filter(Boolean);
+  }
+
+  async function fetchPostPages(info, firstDocument, options = {}) {
+    const noStore = options.noStore !== false;
+    const pageDocs = new Map([[info.page, firstDocument]]);
+    const failedPages = [];
+    const pages = new Set([info.page]);
+    const discovered = getPageNumbers(firstDocument, info.postId);
+    const totalPages = discovered.size ? Math.max(...discovered, info.page) : info.page;
+    const truncated = totalPages > maxPage;
+
+    discovered.forEach((page) => {
+      if (page <= maxPage) pages.add(page);
+    });
+    const maxSeed = truncated ? maxPage : Math.min(maxPage, Math.max(...pages));
+    for (let page = 1; page <= maxSeed; page += 1) pages.add(page);
+    pages.delete(info.page);
+
+    const pending = Array.from(pages).sort((a, b) => a - b);
+    const worker = async () => {
+      while (pending.length) {
+        if (options.isAborted?.()) return;
+        const page = pending.shift();
+        if (page === undefined || pageDocs.has(page)) continue;
+        try {
+          const { html } = await fetchHtml(new URL(`/post-${info.postId}-${page}`, windowObj.location.origin), { noStore });
+          const parsed = parseHtml(html);
+          pageDocs.set(page, parsed);
+          getPageNumbers(parsed, info.postId).forEach((foundPage) => {
+            if (foundPage <= maxPage && !pages.has(foundPage) && foundPage !== info.page) {
+              pages.add(foundPage);
+              pending.push(foundPage);
+            }
+          });
+        } catch {
+          failedPages.push(page);
+        }
+      }
+    };
+
+    const workerCount = Math.min(concurrency, Math.max(1, pending.length));
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    return { pageDocs, failedPages, truncated, totalPages };
+  }
+
+  async function loadPreviewRecords(info, firstDocument, options = {}) {
+    const { pageDocs, failedPages, truncated, totalPages } = await fetchPostPages(info, firstDocument, options);
+    const allRecords = [];
+    pageDocs.forEach((root, page) => allRecords.push(...collectPageRecords(info, root, page)));
+    const unique = new Map();
+    allRecords.forEach((record) => {
+      if (!unique.has(record.floor)) unique.set(record.floor, record);
+    });
     return {
-      like: safeCount(comment.upvoteCount),
-      chicken: safeCount(comment.likeCount),
-      dislike: safeCount(comment.dislikeCount),
-      liked: Boolean(comment.upvoted),
-      chickened: Boolean(comment.liked),
-      disliked: Boolean(comment.disliked),
+      records: Array.from(unique.values()),
+      loadedPages: pageDocs.size,
+      failedPages,
+      truncated,
+      totalPages,
     };
   }
 
-  function ansiRulesFor(prefix, property, hexes) {
-    return ANSI_COLORS.map((name, index) => `.xns-preview-content .xns-ansi-${prefix}-${name} { ${property}:${hexes[index]}; }`).join(' ');
+  return Object.freeze({ collectPageRecords, fetchPostPages, loadPreviewRecords });
+}
+
+const xnsPageLoader = createPageLoader({
+  windowObj: window,
+  maxPage: MAX_PAGE,
+  concurrency: PAGE_CONCURRENCY,
+  fetchHtml,
+  parseHtml,
+  getPageNumbers,
+  getCommentItems,
+  getCommentRecord,
+  getDocState,
+  getCurrentUserUid,
+});
+const collectPageRecords = (...args) => xnsPageLoader.collectPageRecords(...args);
+const fetchPostPages = (...args) => xnsPageLoader.fetchPostPages(...args);
+const loadPreviewRecords = (...args) => xnsPageLoader.loadPreviewRecords(...args);
+
+
+// 预览入口只负责识别“列表里的帖子标题”。
+// 它不处理请求、弹窗内容或任何写操作，便于单独验证拦截范围。
+function createPreviewEntryController({ document, location, parseSameOriginUrl, getPostInfo, openPreviewModal }) {
+  const titleSelectors = [
+    'h3 a[href]',
+    '.post-item > a[href]',
+    '.post-item h3 a[href]',
+    '.post-list-item > a[href]',
+    '.post-list-item h3 a[href]',
+    '.post-list-item .post-title a[href]',
+    '.topic-item h3 a[href]',
+    '.topic-title a[href]',
+  ];
+
+  function isListTitle(link) {
+    if (!link?.matches?.(titleSelectors.join(', '))) return false;
+    return Boolean(link.closest('main, .post-list, .post-item, .post-list-item, .topic-item, .topic-title, h3'));
   }
 
-  function installStyle() {
-    if (document.getElementById(STYLE_ID)) return;
-    const style = document.createElement('style');
-    style.id = STYLE_ID;
-    style.textContent = `
+  function handle(event) {
+    if (event.defaultPrevented || event.button !== 0) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (getPostInfo(location.href) || event.target.closest?.('.xns-overlay')) return;
+
+    const link = event.target.closest?.('a[href]');
+    if (!link || !isListTitle(link)) return;
+    const url = parseSameOriginUrl(link.getAttribute('href') || '');
+    if (!url || !getPostInfo(url.href)) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    openPreviewModal(url, link);
+  }
+
+  return Object.freeze({ handle, isListTitle });
+}
+
+function createFloorNavigationController({ enabled, handleFloorClick }) {
+  function handle(event) {
+    if (!enabled || event.defaultPrevented) return;
+    handleFloorClick(event);
+  }
+
+  return Object.freeze({ handle });
+}
+
+
+// 楼层导航：只拦截当前帖子的楼层链接，并负责滚动与高亮。
+function createFloorNavigation({ windowObj, documentObj, selectors, enabled, parseSameOriginUrl, getPostInfo, safePositiveInt }) {
+  function scrollToFloor(floor) {
+    const target = documentObj.querySelector(`[data-xns-floor="${CSS.escape(String(floor))}"]`);
+    if (!target) return false;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.remove('xns-floor-highlight');
+    windowObj.requestAnimationFrame(() => target.classList.add('xns-floor-highlight'));
+    return true;
+  }
+
+  function handleFloorClick(event) {
+    const link = event.target.closest?.('a[href]');
+    if (!link || !link.closest(selectors.commentContainer) || link.closest('.xns-remote-floor-link')) return;
+    const rawHref = link.getAttribute('href') || '';
+    const directMatch = /^#([1-9]\d*)$/.exec(rawHref);
+    const linkedUrl = directMatch ? null : parseSameOriginUrl(rawHref);
+    const linkedInfo = linkedUrl ? getPostInfo(linkedUrl.href) : null;
+    if (linkedInfo && enabled && linkedInfo.postId !== getPostInfo(windowObj.location.href)?.postId) return;
+    const match = directMatch || (linkedUrl ? /^#([1-9]\d*)$/.exec(linkedUrl.hash || '') : null);
+    if (!match) return;
+    const floor = safePositiveInt(match[1]);
+    if (floor === null || !scrollToFloor(floor)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+
+  return Object.freeze({ scrollToFloor, handleFloorClick });
+}
+
+function createFloorNavigationFeature(options) {
+  const navigation = createFloorNavigation(options);
+  return { handle: navigation.handleFloorClick };
+}
+
+const xnsFloorNavigation = createFloorNavigationFeature({
+  windowObj: window,
+  documentObj: document,
+  selectors: SELECTORS,
+  enabled: Boolean(pageInfo),
+  parseSameOriginUrl,
+  getPostInfo,
+  safePositiveInt,
+});
+const handleFloorClick = (...args) => xnsFloorNavigation.handle(...args);
+
+
+// 评论动作功能：菜单、点赞/鸡腿/反对/收藏，以及预览中的回复/引用编辑器。
+function createCommentActions({
+  windowObj,
+  documentObj,
+  state,
+  pageInfo,
+  qs,
+  qsa,
+  createElement,
+  getPostInfo,
+  parseSameOriginUrl,
+  safePositiveInt,
+  getFloor,
+  getCommentId,
+  getAuthorName,
+  getPostContent,
+  findCommentList,
+  postAction,
+  loadPreviewModal,
+}) {
+  function getDirectCommentMenu(comment) {
+    return Array.from(comment?.children || []).find((child) => child.matches?.('.comment-menu, .comment-actions')) || null;
+  }
+
+  function getMenuActionKey(menuItem) {
+    const values = [
+      menuItem?.dataset?.action,
+      menuItem?.dataset?.type,
+      menuItem?.getAttribute?.('title'),
+      menuItem?.getAttribute?.('aria-label'),
+      menuItem?.textContent,
+    ].filter(Boolean).join(' ').toLowerCase();
+    if (/\b(like|upvote)\b|点赞/.test(values)) return 'like';
+    if (/\b(chicken|freelike)\b|鸡腿|投喂/.test(values)) return 'chicken';
+    if (/\b(dislike|downvote)\b|反对|踩/.test(values)) return 'dislike';
+    if (/\b(favorite|favourite|collection)\b|收藏/.test(values)) return 'favorite';
+    if (/\bquote\b|引用/.test(values)) return 'quote';
+    if (/\breply\b|回复/.test(values)) return 'reply';
+    return '';
+  }
+
+  function createPreviewMenu(includeFavorite = true) {
+    const menu = createElement('div', 'comment-menu xns-preview-menu');
+    const actions = [
+      ['like', '点赞', '♡', true],
+      ['chicken', '加鸡腿', '🍗', true],
+      ['dislike', '反对', '♧', true],
+      ['favorite', '收藏', '☆', true],
+      ['quote', '引用', '❝', false],
+      ['reply', '回复', '↩', false],
+    ].filter(([key]) => includeFavorite || key !== 'favorite');
+    actions.forEach(([key, label, icon, withCount]) => {
+      const item = createElement('span', 'menu-item');
+      item.dataset.xnsAction = key;
+      item.title = label;
+      item.setAttribute('role', 'button');
+      item.tabIndex = 0;
+      const iconNode = createElement('span', 'xns-action-icon', icon);
+      iconNode.setAttribute('aria-hidden', 'true');
+      item.appendChild(iconNode);
+      if (withCount) item.appendChild(createElement('span', 'xns-action-count', '0'));
+      item.appendChild(createElement('span', 'xns-action-label', label));
+      menu.appendChild(item);
+    });
+    return menu;
+  }
+
+  function getMenuCountElement(menuItem) {
+    return qsa(menuItem, ':scope > span').find((node) => /^\d+$/.test((node.textContent || '').trim())) || null;
+  }
+
+  function ensurePreviewMenu(comment, options = {}) {
+    const includeFavorite = options.includeFavorite !== false;
+    let menu = getDirectCommentMenu(comment);
+    if (!menu) {
+      menu = createPreviewMenu(includeFavorite);
+      comment.appendChild(menu);
+    } else {
+      menu.classList.add('comment-menu', 'xns-preview-menu');
+      if (!includeFavorite) qsa(menu, ':scope > .menu-item').filter((item) => getMenuActionKey(item) === 'favorite').forEach((item) => item.remove());
+      const existingActions = new Set(qsa(menu, ':scope > .menu-item').map(getMenuActionKey).filter(Boolean));
+      qsa(createPreviewMenu(includeFavorite), ':scope > .menu-item').forEach((item) => {
+        const action = item.dataset.xnsAction;
+        if (action && !existingActions.has(action)) menu.appendChild(item);
+      });
+    }
+    qsa(menu, ':scope > .menu-item').forEach((item) => {
+      const action = getMenuActionKey(item);
+      if (action) {
+        item.dataset.xnsAction = action;
+        if (action === 'favorite' && /已收藏|取消收藏/.test(`${item.title} ${item.textContent}`)) item.dataset.xnsFavoriteState = 'added';
+      }
+      if (!item.hasAttribute('role')) item.setAttribute('role', 'button');
+      if (!item.hasAttribute('tabindex')) item.tabIndex = 0;
+      if (item.dataset.xnsKeyBound !== 'true') {
+        item.dataset.xnsKeyBound = 'true';
+        item.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          item.click();
+        });
+      }
+    });
+    const counts = options.counts || null;
+    if (counts) {
+      qsa(menu, ':scope > .menu-item').forEach((item) => {
+        const action = getMenuActionKey(item);
+        const value = counts[action];
+        const countNode = qs(item, ':scope > .xns-action-count') || getMenuCountElement(item);
+        if (countNode && Number.isFinite(value) && value >= 0) countNode.textContent = String(value);
+        if (action === 'favorite' && counts.collected && item.dataset.xnsFavoriteState !== 'removed') item.dataset.xnsFavoriteState = 'added';
+      });
+    }
+    return menu;
+  }
+
+  function getDisplayFloor(comment) {
+    const raw = comment?.getAttribute('data-xns-floor') || comment?.getAttribute('id') || '';
+    if (raw === '0') return 0;
+    return getFloor(comment);
+  }
+
+  function getActionTargetId(comment) {
+    const commentId = getCommentId(comment);
+    if (commentId !== null) return commentId;
+    if (comment?.getAttribute('data-xns-target-type') === 'post') {
+      return safePositiveInt(comment.getAttribute('data-xns-post-id') || '') || safePositiveInt(state.modal?.postId || '');
+    }
+    return null;
+  }
+
+  function getPageActionContext() {
+    const info = pageInfo || getPostInfo(windowObj.location.href);
+    return { modal: null, postId: info?.postId || '', url: parseSameOriginUrl(windowObj.location.href) };
+  }
+
+  function getActionContext(menuItem) {
+    const modal = menuItem?.closest?.('.xns-overlay') ? state.modal : null;
+    if (modal) return { modal, postId: modal.postId, url: modal.url };
+    return getPageActionContext();
+  }
+
+  function setActionState(menuItem, text, failed = false) {
+    menuItem.classList.toggle('xns-action-failed', failed);
+    let stateNode = qs(menuItem, ':scope > .xns-action-state');
+    if (!stateNode) {
+      stateNode = createElement('span', 'xns-action-state');
+      menuItem.appendChild(stateNode);
+    }
+    stateNode.textContent = text;
+  }
+
+  function bumpMenuCount(menuItem, delta) {
+    const count = getMenuCountElement(menuItem);
+    if (!count) return;
+    const value = Number(count.textContent || 0);
+    count.textContent = String(Math.max(0, value + delta));
+  }
+
+  function getPreviewCommentText(comment) {
+    const content = getPostContent(comment);
+    if (!content) return '';
+    const copy = content.cloneNode(true);
+    qsa(copy, '.xns-remote-floor-link, .floor-link-wrapper').forEach((node) => node.remove());
+    return (copy.innerText || copy.textContent || '').trim().slice(0, 12_000);
+  }
+
+  function getPreviewSourceUrl(comment, context = null) {
+    const contextUrl = context?.url?.href || state.modal?.url?.href || windowObj.location.href;
+    if (!comment) return contextUrl;
+    const contextInfo = getPostInfo(contextUrl);
+    const modalInfo = context?.postId
+      ? { postId: String(context.postId), page: contextInfo?.page || 1 }
+      : (contextInfo || (state.modal?.postId ? { postId: state.modal.postId, page: 1 } : null));
+    if (!modalInfo) return contextUrl;
+    const page = safePositiveInt(comment?.getAttribute('data-xns-source-page')) || modalInfo.page;
+    const floor = getDisplayFloor(comment);
+    const url = new URL(`/post-${modalInfo.postId}-${page}`, windowObj.location.origin);
+    if (floor !== null) url.hash = String(floor);
+    return url.href;
+  }
+
+  function getDirectComposer(comment) {
+    return Array.from(comment?.children || []).find((child) => child.matches?.(':scope.xns-preview-composer')) || null;
+  }
+
+  function openPreviewComposer(action, comment, context = null) {
+    const modal = context?.modal || state.modal;
+    const actionContext = context || {
+      modal,
+      postId: modal?.postId || pageInfo?.postId || '',
+      url: modal?.url || parseSameOriginUrl(windowObj.location.href),
+    };
+    const host = modal?.body || (comment ? comment : findCommentList());
+    if (!host) return;
+    const isPostReply = !comment || action === 'post-reply';
+    const previousComposer = isPostReply ? (modal?.composer || state.post?.composer) : getDirectComposer(comment);
+    previousComposer?.remove();
+    const floor = isPostReply ? null : getDisplayFloor(comment);
+    const author = isPostReply ? '' : getAuthorName(comment);
+    const isReply = action === 'reply' && !isPostReply;
+    const composer = createElement('section', 'xns-preview-composer');
+    const floorLabel = floor === null ? '' : floor;
+    const composerTitle = isPostReply ? '回复帖子' : `${isReply ? '回复' : '引用'} #${floorLabel} · ${author}`;
+    composer.appendChild(createElement('h3', 'xns-preview-composer-title', composerTitle));
+    const textarea = documentObj.createElement('textarea');
+    textarea.setAttribute('aria-label', isPostReply || isReply ? '回复内容' : '引用内容');
+    const sourceUrl = isPostReply ? (actionContext.url?.href || windowObj.location.href) : getPreviewSourceUrl(comment, actionContext);
+    if (isPostReply) {
+      textarea.placeholder = '输入对帖子的回复内容…';
+      textarea.value = '';
+    } else {
+      const replyToken = `@${author} [#${floorLabel}](${sourceUrl})`;
+      const quoted = getPreviewCommentText(comment).split(/\r?\n/).slice(0, 80).map((line) => `> ${line}`).join('\n');
+      textarea.value = isReply ? `${replyToken} ` : `> ${replyToken}\n${quoted}\n\n`;
+    }
+    composer.appendChild(textarea);
+    const actions = createElement('div', 'xns-preview-composer-actions');
+    const submit = createElement('button', '', '发送回复');
+    submit.type = 'button';
+    const original = createElement('a', '', '打开原帖回复');
+    original.href = getPreviewSourceUrl(comment, actionContext);
+    original.target = '_blank';
+    original.rel = 'noopener noreferrer';
+    const cancel = createElement('button', '', '取消');
+    cancel.type = 'button';
+    const status = createElement('span', 'xns-preview-composer-status');
+    actions.append(submit, original, cancel, status);
+    composer.appendChild(actions);
+    if (isPostReply && modal?.body) {
+      modal.body.appendChild(composer);
+      modal.composer = composer;
+    } else {
+      const menu = qs(comment, '.xns-preview-menu');
+      if (menu) menu.insertAdjacentElement('afterend', composer);
+      else host.appendChild(composer);
+      if (isPostReply && state.post) state.post.composer = composer;
+    }
+    textarea.focus();
+    composer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    cancel.addEventListener('click', () => {
+      composer.remove();
+      if (modal?.composer === composer) modal.composer = null;
+      if (!modal && state.post?.composer === composer) state.post.composer = null;
+    });
+    submit.addEventListener('click', async () => {
+      const content = textarea.value.trim();
+      if (!content) {
+        status.textContent = '请输入内容。';
+        textarea.focus();
+        return;
+      }
+      submit.disabled = true;
+      status.textContent = '正在发送…';
+      try {
+        await postAction('/api/content/new-comment', { content, mode: 'new-comment', postId: Number(actionContext.postId) }, { context: actionContext });
+        status.textContent = '回复已发送，正在更新楼中楼…';
+        textarea.readOnly = true;
+        submit.remove();
+        if (actionContext.modal && state.modal === actionContext.modal) {
+          if (actionContext.modal.composer === composer) actionContext.modal.composer = null;
+          const refreshed = await loadPreviewModal(actionContext.modal, '正在更新回复…', { preserveContent: true });
+          if (refreshed) composer.remove();
+          else status.textContent = '回复已发送。帖子正在刷新中，楼中楼可能暂未包含新回复，请稍后再点刷新。';
+        } else if (state.post) {
+          const post = state.post;
+          if (post.composer === composer) post.composer = null;
+          composer.remove();
+          await post.reloadPages({ refreshCurrentPage: true });
+        }
+      } catch (error) {
+        status.textContent = `发送失败：${error.message || '网络错误'}`;
+        submit.disabled = false;
+      }
+    });
+  }
+
+  async function runPreviewAction(action, menuItem, comment, context = null) {
+    const actionContext = context || getActionContext(menuItem);
+    if (action === 'quote' || action === 'reply') {
+      openPreviewComposer(action, comment, actionContext);
+      return;
+    }
+    const postId = safePositiveInt(actionContext?.postId || '');
+    const targetId = getActionTargetId(comment);
+    if ((action !== 'favorite' && targetId === null) || (action === 'favorite' && postId === null)) {
+      setActionState(menuItem, action === 'favorite' ? '缺少帖子ID' : '缺少目标ID', true);
+      return;
+    }
+    if (action !== 'favorite' && menuItem.dataset.xnsActionDone === 'true') {
+      setActionState(menuItem, '已操作');
+      return;
+    }
+    if (menuItem.classList.contains('xns-action-pending')) return;
+    if (action === 'chicken' && !windowObj.confirm('确认给这条评论加鸡腿？NodeSeek 可能会消耗鸡腿。')) return;
+    if (action === 'dislike' && !windowObj.confirm('确认反对这条评论？NodeSeek 可能会消耗两个鸡腿。')) return;
+    const isFavoriteRemoval = action === 'favorite' && menuItem.dataset.xnsFavoriteState === 'added';
+    menuItem.classList.add('xns-action-pending');
+    menuItem.classList.remove('xns-action-failed');
+    setActionState(menuItem, '处理中…');
+    try {
+      if (action === 'like') await postAction('/api/statistics/upvote', { commentId: targetId, action: 'add' }, { context: actionContext });
+      else if (action === 'chicken') await postAction('/api/statistics/like', { commentId: targetId, action: 'add' }, { context: actionContext });
+      else if (action === 'dislike') await postAction('/api/statistics/dislike', { commentId: targetId, action: 'add' }, { context: actionContext });
+      else if (action === 'favorite') await postAction('/api/statistics/collection', { action: isFavoriteRemoval ? 'del' : 'add', postId }, { context: actionContext });
+      if (action === 'favorite') {
+        menuItem.dataset.xnsFavoriteState = isFavoriteRemoval ? 'removed' : 'added';
+        bumpMenuCount(menuItem, isFavoriteRemoval ? -1 : 1);
+      } else {
+        menuItem.dataset.xnsActionDone = 'true';
+        bumpMenuCount(menuItem, 1);
+      }
+      setActionState(menuItem, '✓');
+      windowObj.setTimeout(() => {
+        if (menuItem.isConnected && !menuItem.classList.contains('xns-action-failed')) qs(menuItem, ':scope > .xns-action-state')?.remove();
+      }, 1_800);
+    } catch (error) {
+      setActionState(menuItem, `失败：${error.message || '操作未完成'}`, true);
+    } finally {
+      menuItem.classList.remove('xns-action-pending');
+    }
+  }
+
+  return Object.freeze({
+    getDirectCommentMenu,
+    getMenuActionKey,
+    ensurePreviewMenu,
+    getActionContext,
+    openPreviewComposer,
+    runPreviewAction,
+  });
+}
+
+const xnsCommentActions = createCommentActions({
+  windowObj: window,
+  documentObj: document,
+  state,
+  pageInfo,
+  qs,
+  qsa,
+  createElement,
+  getPostInfo,
+  parseSameOriginUrl,
+  safePositiveInt,
+  getFloor,
+  getCommentId,
+  getAuthorName,
+  getPostContent,
+  findCommentList,
+  postAction,
+  loadPreviewModal: (...args) => loadPreviewModal(...args),
+});
+const getDirectCommentMenu = (...args) => xnsCommentActions.getDirectCommentMenu(...args);
+const getMenuActionKey = (...args) => xnsCommentActions.getMenuActionKey(...args);
+const ensurePreviewMenu = (...args) => xnsCommentActions.ensurePreviewMenu(...args);
+const getActionContext = (...args) => xnsCommentActions.getActionContext(...args);
+const openPreviewComposer = (...args) => xnsCommentActions.openPreviewComposer(...args);
+const runPreviewAction = (...args) => xnsCommentActions.runPreviewAction(...args);
+
+
+// 预览渲染辅助：只处理克隆节点的清理和跨页来源楼层链接。
+function createPreviewRenderUtils({ qs, qsa, createElement }) {
+  function stripRenderArtifacts(item) {
+    if (!item?.classList) return;
+    qsa(item, '.xns-reply-list, .xns-remote-floor-link').forEach((node) => node.remove());
+    item.classList.remove('xns-comment-root', 'xns-comment-child', 'xns-floor-highlight');
+    item.removeAttribute('data-xns-floor');
+    item.removeAttribute('data-xns-parent-floor');
+    item.removeAttribute('data-xns-remote');
+    item.removeAttribute('data-xns-source-page');
+  }
+
+  function addRemoteNote(record, postId) {
+    if (!record.node?.hasAttribute('data-xns-remote')) return;
+    const meta = qs(record.node, ':scope > .nsk-content-meta-info');
+    let source = qs(record.node, '.floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link');
+    let wrapper = source?.closest('.floor-link-wrapper');
+    if (!source) {
+      wrapper = createElement('div', 'floor-link-wrapper');
+      source = createElement('a', 'floor-link', `#${record.floor}`);
+      wrapper.appendChild(source);
+      (meta || record.node).appendChild(wrapper);
+    } else {
+      source.textContent = `#${record.floor}`;
+      wrapper = wrapper || (() => {
+        const created = createElement('div', 'floor-link-wrapper');
+        source.replaceWith(created);
+        created.appendChild(source);
+        return created;
+      })();
+    }
+    source.href = `/post-${postId}-${record.page}#${record.floor}`;
+    source.target = '_blank';
+    source.rel = 'noopener noreferrer';
+    source.title = `打开原楼层 #${record.floor}`;
+    wrapper?.classList.add('xns-remote-floor-link');
+  }
+
+  return Object.freeze({ stripRenderArtifacts, addRemoteNote });
+}
+
+const xnsPreviewRenderUtils = createPreviewRenderUtils({ qs, qsa, createElement });
+const stripRenderArtifacts = (...args) => xnsPreviewRenderUtils.stripRenderArtifacts(...args);
+const addRemoteNote = (...args) => xnsPreviewRenderUtils.addRemoteNote(...args);
+
+
+// 预览内容渲染服务。
+// 这里仅负责把已加载的帖子记录转换成官方风格的楼层节点；网络读取由 page-loader 负责。
+function createPreviewRenderer({
+  document,
+  windowObj,
+  pageInfo,
+  selectors,
+  maxPage,
+  qs,
+  qsa,
+  createElement,
+  clearElement,
+  getPostInfo,
+  getDocState,
+  getCommentId,
+  getSsrCommentCounts,
+  safeCount,
+  sanitizeImportedNode,
+  getDirectCommentMenu,
+  ensurePreviewMenu,
+  stripRenderArtifacts,
+  buildReplyTree,
+  addRemoteNote,
+}) {
+  function ensurePreviewEditOption(node, record) {
+    if (!node || !record?.isMine) return;
+    const menu = getDirectCommentMenu(node);
+    if (!menu) return;
+    let item = qsa(menu, ':scope > .menu-item').find((el) => (el.textContent || '').trim() === '编辑' && !el.dataset?.xnsAction);
+    if (!item) {
+      item = createElement('span', 'menu-item');
+      item.setAttribute('role', 'button');
+      item.tabIndex = 0;
+      item.innerHTML = '<svg class="iconpark-icon" aria-hidden="true"><use href="#edit"></use></svg><span>编辑</span>';
+      menu.appendChild(item);
+    }
+    if (item.dataset.xnsEditBound === 'true') return;
+    item.dataset.xnsEditBound = 'true';
+    item.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const postId = record.postId || pageInfo?.postId || getPostInfo(windowObj.location.href)?.postId || '';
+      const floor = record.floor;
+      const url = `/post-${postId}-${record.page || 1}${floor >= 0 ? `#${floor}` : ''}`;
+      windowObj.open(url, '_blank', 'noopener');
+    });
+  }
+
+  function prepareCommentRecord(record, depth) {
+    stripRenderArtifacts(record.node);
+    record.node.setAttribute('data-xns-floor', String(record.floor));
+    if (!record.current) {
+      record.node.setAttribute('data-xns-remote', 'true');
+      record.node.setAttribute('data-xns-source-page', String(record.page));
+    }
+    record.node.classList.add(depth === 0 ? 'xns-comment-root' : 'xns-comment-child');
+    if (depth > 0 && record.parent) record.node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
+    ensurePreviewMenu(record.node, { includeFavorite: false, counts: record.counts || undefined });
+    ensurePreviewEditOption(record.node, record);
+  }
+
+  function appendNestedRecord(record, container, depth) {
+    prepareCommentRecord(record, depth);
+    container.appendChild(record.node);
+    if (!record.children.length) return;
+    const replyList = createElement('ul', 'xns-reply-list');
+    record.children.forEach((child) => appendNestedRecord(child, replyList, depth + 1));
+    record.node.appendChild(replyList);
+  }
+
+  function buildPreviewPostNode(parsed, info) {
+    const postRoot = qs(parsed, '.nsk-post');
+    const source = postRoot?.matches?.('.content-item')
+      ? postRoot
+      : qs(postRoot, ':scope > .content-item, .content-item') || postRoot || qs(parsed, selectors.postContent);
+    let node = sanitizeImportedNode(source, { keepCommentMenu: true });
+    if (!node) return null;
+    if (node.matches?.('article.post-content')) {
+      const wrapper = createElement('div', 'content-item');
+      wrapper.appendChild(node);
+      node = wrapper;
+    }
+    node.classList.add('content-item', 'xns-preview-post', 'xns-comment-root');
+    node.setAttribute('data-xns-floor', '0');
+    node.setAttribute('data-xns-target-type', 'post');
+    node.setAttribute('data-xns-post-id', info.postId);
+    const postState = getDocState(parsed);
+    const postCommentId = getCommentId(node);
+    const counts = postCommentId !== null && postState ? getSsrCommentCounts(postState, postCommentId) : null;
+    if (counts) {
+      const collectionCount = safeCount(postState?.postData?.collectionCount);
+      if (collectionCount !== null) counts.favorite = collectionCount;
+      if (postState?.postData?.collected) counts.collected = true;
+    }
+    ensurePreviewMenu(node, { includeFavorite: true, counts });
+    return node;
+  }
+
+  function renderPreviewRecords(section, info, records, options = {}) {
+    const heading = qs(section, ':scope > h3');
+    const thread = qs(section, ':scope > .xns-preview-thread');
+    if (!heading || !thread) return;
+    heading.textContent = `楼中楼预览 · ${records.length} 条回复`;
+    clearElement(thread);
+    qs(section, ':scope > .xns-preview-empty')?.remove();
+    qsa(section, ':scope > .xns-page-loading, :scope > .xns-page-failed').forEach((node) => node.remove());
+    if (records.length) {
+      buildReplyTree(records).forEach((record) => appendNestedRecord(record, thread, 0));
+      records.forEach((record) => {
+        if (record.page !== info.page) addRemoteNote(record, info.postId);
+      });
+    } else {
+      section.appendChild(createElement('p', 'xns-status xns-preview-empty', '没有读取到评论。'));
+    }
+    if (options.loading) section.appendChild(createElement('p', 'xns-status xns-page-loading', '正在加载其他分页…'));
+    if (options.failedPages?.length) {
+      section.appendChild(createElement('p', 'xns-status xns-page-failed', `已读取 ${options.loadedPages} 页，${options.failedPages.length} 页读取失败。`));
+    }
+    if (options.truncated) {
+      section.appendChild(createElement('p', 'xns-status xns-page-truncated', `帖子共 ${options.totalPages} 页，只读取了前 ${maxPage} 页，后面页的楼层没有显示。`));
+    }
+  }
+
+  return Object.freeze({
+    ensurePreviewEditOption,
+    prepareCommentRecord,
+    appendNestedRecord,
+    buildPreviewPostNode,
+    renderPreviewRecords,
+  });
+}
+
+const xnsPreviewRenderer = createPreviewRenderer({
+  document,
+  windowObj: window,
+  pageInfo,
+  selectors: SELECTORS,
+  maxPage: MAX_PAGE,
+  qs,
+  qsa,
+  createElement,
+  clearElement,
+  getPostInfo,
+  getDocState,
+  getCommentId,
+  getSsrCommentCounts,
+  safeCount,
+  sanitizeImportedNode,
+  getDirectCommentMenu,
+  ensurePreviewMenu,
+  stripRenderArtifacts,
+  buildReplyTree,
+  addRemoteNote,
+});
+
+const ensurePreviewEditOption = (...args) => xnsPreviewRenderer.ensurePreviewEditOption(...args);
+const prepareCommentRecord = (...args) => xnsPreviewRenderer.prepareCommentRecord(...args);
+const appendNestedRecord = (...args) => xnsPreviewRenderer.appendNestedRecord(...args);
+const buildPreviewPostNode = (...args) => xnsPreviewRenderer.buildPreviewPostNode(...args);
+const renderPreviewRecords = (...args) => xnsPreviewRenderer.renderPreviewRecords(...args);
+
+
+// 投票功能模块。
+// 投票的读取、选择态、结果态和提交由这里管理；普通评论 reaction 不与它共享 UI 状态。
+function createVoteFeature({
+  windowObj,
+  documentObj,
+  qs,
+  qsa,
+  createElement,
+  parseSameOriginUrl,
+  safePositiveInt,
+  dynamicSign,
+  postAction,
+  getActionContext,
+  fetchFn,
+}) {
+  function getVoteIdFromLink(link) {
+    const href = link.getAttribute('data-href') || link.getAttribute('href') || '';
+    const match = /nsapp:\/\/vote\?id=(\d+)/.exec(href);
+    return match ? safePositiveInt(match[1]) : null;
+  }
+
+  async function fetchVoteInfo(voteId) {
+    const endpoint = parseSameOriginUrl(`/api/vote/info/${voteId}`);
+    if (!endpoint) throw new Error('投票地址非法');
+    const headers = { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' };
+    if (windowObj.crypto?.subtle) headers['x-dynamic-sign'] = await dynamicSign('GET', endpoint.href, '');
+    const response = await fetchFn(endpoint.href, {
+      method: 'GET',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      redirect: 'error',
+      referrerPolicy: 'same-origin',
+      headers,
+    });
+    const text = await response.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { /* 非 JSON 响应 */ }
+    if (!response.ok || !data || data.success === false) throw new Error(data?.message || `HTTP ${response.status}`);
+    return data;
+  }
+
+  function hasVoteResults(vote) {
+    return (vote.items || []).some((item) => typeof item.count === 'number');
+  }
+
+  function buildVoteResults(vote) {
+    const items = vote.items || [];
+    const total = items.reduce((sum, item) => sum + (typeof item.count === 'number' ? item.count : 0), 0);
+    const box = createElement('div', 'xns-vote-results');
+    items.forEach((item) => {
+      const count = typeof item.count === 'number' ? item.count : 0;
+      const percent = total > 0 ? Math.round((count / total) * 100) : 0;
+      const row = createElement('div', `xns-vote-result${item.voted ? ' xns-vote-mine' : ''}`);
+      row.appendChild(createElement('div', 'vote-item-text', item.text || ''));
+      const barWrap = createElement('div', 'xns-vote-bar-wrap');
+      const bar = createElement('div', 'xns-vote-bar');
+      bar.style.width = `${percent}%`;
+      bar.appendChild(documentObj.createTextNode(`${percent}%`));
+      barWrap.appendChild(bar);
+      row.appendChild(barWrap);
+      row.appendChild(createElement('div', 'xns-vote-result-meta', `${count} 票${item.voted ? '（已选）' : ''}`));
+      box.appendChild(row);
+    });
+    box.appendChild(createElement('div', 'xns-vote-total', `共 ${total} 票${vote.locked ? ' · 已结束' : ''}`));
+    return box;
+  }
+
+  function buildVotePanel(vote) {
+    const panel = createElement('div', 'vote-panel xns-vote-panel');
+    panel.dataset.xnsVoteId = String(vote.id);
+    const title = createElement('h2', 'xns-vote-title', vote.title || '投票');
+    title.style.textAlign = 'center';
+    title.style.fontSize = '1.2rem';
+    panel.appendChild(title);
+    if (hasVoteResults(vote)) {
+      panel.appendChild(buildVoteResults(vote));
+      panel.appendChild(createElement('div', 'xns-vote-note', `nsapp://vote?id=${vote.id}${vote.isPublic ? ' (公开投票)' : ''}${vote.locked ? ' · 已结束' : ''}`));
+      return panel;
+    }
+    const single = vote.multiple !== true;
+    const wrapper = createElement('fieldset', 'vote-stat-wrapper');
+    (vote.items || []).forEach((item) => {
+      const stat = createElement('div', `vote-stat${item.voted ? ' voted' : ' not-voted'}`);
+      const input = documentObj.createElement('input');
+      input.type = single ? 'radio' : 'checkbox';
+      input.name = 'vote-item';
+      input.value = String(item.vote_item_id);
+      if (item.voted) input.checked = true;
+      const label = createElement('label', 'pure-checkbox');
+      label.appendChild(input);
+      label.appendChild(createElement('div', 'vote-item-text', item.text || ''));
+      stat.appendChild(label);
+      wrapper.appendChild(stat);
+    });
+    panel.appendChild(wrapper);
+    const buttons = createElement('fieldset', 'op-buttons');
+    const submit = createElement('button', 'pure-button pure-button-primary add-margin', vote.locked ? '已结束' : '投票');
+    submit.type = 'button';
+    if (vote.locked) submit.setAttribute('disabled', '');
+    buttons.appendChild(submit);
+    panel.appendChild(buttons);
+    panel.appendChild(createElement('div', 'xns-vote-note', `nsapp://vote?id=${vote.id}${vote.isPublic ? ' (公开投票)' : ''}`));
+    return panel;
+  }
+
+  function mountVotePanel(link, data) {
+    if (!link.isConnected) return;
+    const vote = data?.vote;
+    if (!vote || !Array.isArray(vote.items)) return;
+    link.replaceWith(buildVotePanel(vote));
+  }
+
+  function installPreviewVotePanels(root) {
+    qsa(root, 'a[data-href^="nsapp://vote"], a[href^="nsapp://vote"]').forEach((link) => {
+      if (link.dataset.xnsVoteBound === 'true') return;
+      const voteId = getVoteIdFromLink(link);
+      if (voteId === null) return;
+      link.dataset.xnsVoteBound = 'true';
+      void fetchVoteInfo(voteId)
+        .then((data) => mountVotePanel(link, data))
+        .catch(() => {
+          if (link.isConnected) link.textContent = link.textContent || `投票 #${voteId}（需登录）`;
+        });
+    });
+  }
+
+  function getVoteStatus(panel) {
+    let status = qs(panel, '.xns-vote-status');
+    if (!status) {
+      status = createElement('div', 'xns-vote-status');
+      panel.appendChild(status);
+    }
+    return status;
+  }
+
+  function handleVoteClick(event) {
+    const button = event.target.closest?.('.xns-vote-panel button');
+    if (!button || button.disabled) return;
+    const panel = button.closest('.xns-vote-panel');
+    if (!panel || panel.dataset.xnsVotePending === 'true') return;
+    const inPreview = Boolean(panel.closest('.xns-overlay .xns-preview-content'));
+    const inRemote = Boolean(panel.closest('[data-xns-remote]'));
+    if (!inPreview && !inRemote) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const selected = qsa(panel, 'input[name="vote-item"]:checked').map((input) => input.value);
+    const status = getVoteStatus(panel);
+    if (!selected.length) {
+      status.textContent = '请先选择选项。';
+      return;
+    }
+    panel.dataset.xnsVotePending = 'true';
+    button.setAttribute('disabled', '');
+    status.textContent = '正在投票…';
+    const voteId = safePositiveInt(panel.dataset.xnsVoteId || '');
+    void postAction('/api/vote/voteforitem', { ids: selected.map((value) => Number(value)) }, { context: getActionContext(button) })
+      .then(async () => {
+        let refreshed = null;
+        if (voteId !== null) {
+          try { refreshed = await fetchVoteInfo(voteId); } catch { /* 保留成功提示 */ }
+        }
+        if (!panel.isConnected) return;
+        if (refreshed?.vote) {
+          panel.replaceWith(buildVotePanel(refreshed.vote));
+        } else {
+          status.textContent = '投票成功，感谢参与。';
+          button.textContent = '已投票';
+        }
+      })
+      .catch((error) => {
+        status.textContent = `投票失败：${error.message || '网络错误'}`;
+        button.removeAttribute('disabled');
+        panel.dataset.xnsVotePending = '';
+      });
+  }
+
+  return Object.freeze({ installPreviewVotePanels, handleVoteClick, fetchVoteInfo });
+}
+
+const xnsVoteFeature = createVoteFeature({
+  windowObj: window,
+  documentObj: document,
+  qs,
+  qsa,
+  createElement,
+  parseSameOriginUrl,
+  safePositiveInt,
+  dynamicSign,
+  postAction,
+  getActionContext,
+  fetchFn: window.fetch.bind(window),
+});
+const installPreviewVotePanels = (...args) => xnsVoteFeature.installPreviewVotePanels(...args);
+const handleVoteClick = (...args) => xnsVoteFeature.handleVoteClick(...args);
+const fetchVoteInfo = (...args) => xnsVoteFeature.fetchVoteInfo(...args);
+
+
+// 预览图片灯箱：只负责图片交互，不负责帖子弹窗或内容渲染。
+function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createElement, getSafeUrlAttribute }) {
+  function getPreviewImageSource(image) {
+    const link = image?.closest?.('a[href]');
+    const candidates = [
+      image?.currentSrc,
+      image?.getAttribute?.('src'),
+      image?.getAttribute?.('data-src'),
+      image?.getAttribute?.('data-original'),
+      link?.getAttribute?.('href'),
+    ];
+    for (const candidate of candidates) {
+      const safe = getSafeUrlAttribute('src', candidate);
+      if (safe) return safe;
+    }
+    return null;
+  }
+
+  function closeImageLightbox() {
+    const lightbox = state.lightbox;
+    if (!lightbox) return;
+    lightbox.cleanup?.();
+    lightbox.overlay?.remove();
+    state.lightbox = null;
+  }
+
+  function openImageLightbox(image) {
+    const source = getPreviewImageSource(image);
+    if (!source) return;
+    closeImageLightbox();
+
+    const overlay = createElement('div', 'xns-lightbox');
+    overlay.tabIndex = -1;
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', '图片预览');
+    const stage = createElement('div', 'xns-lightbox-stage');
+    const preview = documentObj.createElement('img');
+    preview.className = 'xns-lightbox-image';
+    preview.src = source;
+    preview.alt = image.getAttribute('alt') || '图片预览';
+    preview.setAttribute('referrerpolicy', 'origin');
+    preview.setAttribute('draggable', 'false');
+    const close = createElement('button', 'xns-lightbox-close', '×');
+    close.type = 'button';
+    close.setAttribute('aria-label', '关闭图片预览');
+    const original = createElement('a', 'xns-lightbox-open', '打开原图');
+    original.href = source;
+    original.target = '_blank';
+    original.rel = 'noopener noreferrer';
+    stage.appendChild(preview);
+    overlay.append(stage, close, original);
+
+    let scale = 1;
+    let offsetX = 0;
+    let offsetY = 0;
+    let dragging = false;
+    let pointerId = null;
+    let startX = 0;
+    let startY = 0;
+    let startOffsetX = 0;
+    let startOffsetY = 0;
+    const render = () => {
+      preview.style.transform = `translate3d(${offsetX}px, ${offsetY}px, 0) scale(${scale})`;
+    };
+    const onWheel = (event) => {
+      event.preventDefault();
+      scale = Math.min(4, Math.max(0.5, scale * (event.deltaY < 0 ? 1.12 : 0.89)));
+      if (scale <= 1) {
+        scale = 1;
+        offsetX = 0;
+        offsetY = 0;
+      }
+      render();
+    };
+    const onPointerDown = (event) => {
+      if (event.button !== 0) return;
+      dragging = true;
+      pointerId = event.pointerId;
+      startX = event.clientX;
+      startY = event.clientY;
+      startOffsetX = offsetX;
+      startOffsetY = offsetY;
+      stage.classList.add('xns-dragging');
+      stage.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    };
+    const onPointerMove = (event) => {
+      if (!dragging || event.pointerId !== pointerId) return;
+      offsetX = startOffsetX + event.clientX - startX;
+      offsetY = startOffsetY + event.clientY - startY;
+      render();
+    };
+    const onPointerUp = (event) => {
+      if (event.pointerId !== pointerId) return;
+      dragging = false;
+      pointerId = null;
+      stage.classList.remove('xns-dragging');
+      stage.releasePointerCapture?.(event.pointerId);
+    };
+    const cleanup = () => {
+      stage.removeEventListener('wheel', onWheel);
+      stage.removeEventListener('pointerdown', onPointerDown);
+      stage.removeEventListener('pointermove', onPointerMove);
+      stage.removeEventListener('pointerup', onPointerUp);
+      stage.removeEventListener('pointercancel', onPointerUp);
+    };
+    stage.addEventListener('wheel', onWheel, { passive: false });
+    stage.addEventListener('pointerdown', onPointerDown);
+    stage.addEventListener('pointermove', onPointerMove);
+    stage.addEventListener('pointerup', onPointerUp);
+    stage.addEventListener('pointercancel', onPointerUp);
+    stage.addEventListener('click', (event) => { if (event.target === stage) closeImageLightbox(); });
+    preview.addEventListener('click', (event) => event.stopPropagation());
+    close.addEventListener('click', closeImageLightbox);
+    overlay.addEventListener('click', (event) => { if (event.target === overlay) closeImageLightbox(); });
+    documentObj.body.appendChild(overlay);
+    state.lightbox = { overlay, cleanup };
+    render();
+    overlay.focus();
+  }
+
+  function installPreviewImageFallback(root) {
+    qsa(root, 'img').forEach((image) => {
+      if (image.dataset.xnsImageBound === 'true') return;
+      image.dataset.xnsImageBound = 'true';
+      image.setAttribute('tabindex', '0');
+      image.setAttribute('role', 'button');
+      image.setAttribute('title', '点击放大图片');
+      const open = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openImageLightbox(image);
+      };
+      image.addEventListener('click', open);
+      image.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') open(event);
+      });
+      image.addEventListener('error', () => {
+        if (image.nextElementSibling?.matches('.xns-image-error')) return;
+        const message = createElement('span', 'xns-image-error', '图片加载失败：图片站拒绝了当前嵌入来源。仍可点击“打开原图”尝试查看。');
+        image.insertAdjacentElement('afterend', message);
+      }, { once: true });
+    });
+  }
+
+  return Object.freeze({ closeImageLightbox, openImageLightbox, installPreviewImageFallback });
+}
+
+const xnsPreviewLightbox = createPreviewLightbox({
+  windowObj: window,
+  documentObj: document,
+  state,
+  qs,
+  qsa,
+  createElement,
+  getSafeUrlAttribute,
+});
+const closeImageLightbox = (...args) => xnsPreviewLightbox.closeImageLightbox(...args);
+const openImageLightbox = (...args) => xnsPreviewLightbox.openImageLightbox(...args);
+const installPreviewImageFallback = (...args) => xnsPreviewLightbox.installPreviewImageFallback(...args);
+
+
+// 预览弹窗 UI 基础设施：锁定页面、滚动控制、关闭操作。
+function createPreviewModalUi({ windowObj, documentObj, state, createElement, closeImageLightbox, refreshPreviewModal }) {
+  function removeBodyLock() {
+    if (!state.modal) documentObj.documentElement.style.removeProperty('overflow');
+  }
+
+  function createScrollArrow(points) {
+    const svg = documentObj.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const polyline = documentObj.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    polyline.setAttribute('points', points);
+    svg.appendChild(polyline);
+    return svg;
+  }
+
+  function createRefreshArrow() {
+    const svg = documentObj.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = documentObj.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M20 11a8 8 0 1 1-2.34-5.66');
+    const polyline = documentObj.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    polyline.setAttribute('points', '20 4 20 11 13 11');
+    svg.append(path, polyline);
+    return svg;
+  }
+
+  function installPreviewScrollButtons(dialog, body) {
+    const group = createElement('div', 'xns-preview-scroll-btns');
+    const refresh = createElement('button', 'xns-scroll-btn xns-refresh-post');
+    refresh.type = 'button';
+    refresh.title = '刷新帖子';
+    refresh.setAttribute('aria-label', '刷新帖子');
+    refresh.appendChild(createRefreshArrow());
+    const top = createElement('button', 'xns-scroll-btn xns-to-top');
+    top.type = 'button';
+    top.title = '回到顶部';
+    top.setAttribute('aria-label', '回到顶部');
+    top.appendChild(createScrollArrow('18 15 12 9 6 15'));
+    const bottom = createElement('button', 'xns-scroll-btn xns-to-bottom');
+    bottom.type = 'button';
+    bottom.title = '回到底部';
+    bottom.setAttribute('aria-label', '回到底部');
+    bottom.appendChild(createScrollArrow('6 9 12 15 18 9'));
+    const scrollTo = (edge) => {
+      const topPosition = edge === 'bottom' ? Math.max(0, body.scrollHeight - body.clientHeight) : 0;
+      body.scrollTo({ top: topPosition, behavior: 'smooth' });
+    };
+    top.addEventListener('click', () => scrollTo('top'));
+    bottom.addEventListener('click', () => scrollTo('bottom'));
+    refresh.addEventListener('click', () => { void refreshPreviewModal(); });
+    group.append(refresh, top, bottom);
+    dialog.appendChild(group);
+    const update = () => {
+      const distanceFromBottom = body.scrollHeight - (body.scrollTop + body.clientHeight);
+      top.classList.toggle('hidden', body.scrollTop <= 300);
+      bottom.classList.toggle('hidden', distanceFromBottom <= 300);
+    };
+    const cleanup = () => {
+      body.removeEventListener('scroll', update);
+      windowObj.removeEventListener('resize', update);
+      mutationObserver?.disconnect();
+      resizeObserver?.disconnect();
+      group.remove();
+    };
+    const mutationObserver = windowObj.MutationObserver ? new windowObj.MutationObserver(update) : null;
+    const resizeObserver = windowObj.ResizeObserver ? new windowObj.ResizeObserver(update) : null;
+    body.addEventListener('scroll', update, { passive: true });
+    windowObj.addEventListener('resize', update, { passive: true });
+    mutationObserver?.observe(body, { childList: true, subtree: true });
+    resizeObserver?.observe(body);
+    windowObj.setTimeout(update, 0);
+    update();
+    return cleanup;
+  }
+
+  function closeModal() {
+    closeImageLightbox();
+    state.modal?.refreshScrollCleanup?.();
+    state.modal?.scrollCleanup?.();
+    state.modal?.overlay?.remove();
+    state.modal = null;
+    removeBodyLock();
+  }
+
+  function createCloseButton(onClick) {
+    const button = createElement('button', 'xns-modal-close', '×');
+    button.type = 'button';
+    button.setAttribute('aria-label', '关闭');
+    button.addEventListener('click', onClick);
+    return button;
+  }
+
+  return Object.freeze({ removeBodyLock, installPreviewScrollButtons, closeModal, createCloseButton });
+}
+
+const xnsPreviewModalUi = createPreviewModalUi({
+  windowObj: window,
+  documentObj: document,
+  state,
+  createElement,
+  closeImageLightbox,
+  refreshPreviewModal: (...args) => refreshPreviewModal(...args),
+});
+const removeBodyLock = (...args) => xnsPreviewModalUi.removeBodyLock(...args);
+const installPreviewScrollButtons = (...args) => xnsPreviewModalUi.installPreviewScrollButtons(...args);
+const closeModal = (...args) => xnsPreviewModalUi.closeModal(...args);
+const createCloseButton = (...args) => xnsPreviewModalUi.createCloseButton(...args);
+
+
+// 预览内容增强：ANSI、官方魔法标签页、Markdown 标签页、图片和代码复制。
+function createContentFeatures({
+  windowObj,
+  documentObj,
+  navigatorObj,
+  qs,
+  qsa,
+  createElement,
+  clearElement,
+  installPreviewImageFallback,
+  installPreviewVotePanels,
+}) {
+  const ANSI_COLORS = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
+  const NodeCtor = windowObj.Node;
+
+  function createAnsiState() {
+    return { fg: '', bg: '', bold: false, dim: false, italic: false, underline: false, strike: false, hidden: false, inverse: false };
+  }
+
+  function applyAnsiCodes(state, rawCodes) {
+    const codes = rawCodes.length ? rawCodes : [0];
+    for (let index = 0; index < codes.length; index += 1) {
+      const code = Number(codes[index]);
+      if (!Number.isFinite(code)) continue;
+      if (code === 0) Object.assign(state, createAnsiState());
+      else if (code === 1) state.bold = true;
+      else if (code === 2) state.dim = true;
+      else if (code === 3) state.italic = true;
+      else if (code === 4) state.underline = true;
+      else if (code === 7) state.inverse = true;
+      else if (code === 8) state.hidden = true;
+      else if (code === 9) state.strike = true;
+      else if (code === 22) { state.bold = false; state.dim = false; }
+      else if (code === 23) state.italic = false;
+      else if (code === 24) state.underline = false;
+      else if (code === 27) state.inverse = false;
+      else if (code === 28) state.hidden = false;
+      else if (code === 29) state.strike = false;
+      else if (code === 39) state.fg = '';
+      else if (code === 49) state.bg = '';
+      else if (code >= 30 && code <= 37) state.fg = ANSI_COLORS[code - 30];
+      else if (code >= 40 && code <= 47) state.bg = ANSI_COLORS[code - 40];
+      else if (code >= 90 && code <= 97) state.fg = `bright-${ANSI_COLORS[code - 90]}`;
+      else if (code >= 100 && code <= 107) state.bg = `bright-${ANSI_COLORS[code - 100]}`;
+      else if (code === 38 || code === 48) {
+        const mode = Number(codes[index + 1]);
+        index += mode === 5 ? 2 : mode === 2 ? 4 : 0;
+      }
+    }
+  }
+
+  function getAnsiClasses(state) {
+    return [
+      state.fg && `xns-ansi-fg-${state.fg}`,
+      state.bg && `xns-ansi-bg-${state.bg}`,
+      state.bold && 'xns-ansi-bold',
+      state.dim && 'xns-ansi-dim',
+      state.italic && 'xns-ansi-italic',
+      state.underline && 'xns-ansi-underline',
+      state.strike && 'xns-ansi-strike',
+      state.hidden && 'xns-ansi-hidden',
+      state.inverse && 'xns-ansi-inverse',
+    ].filter(Boolean);
+  }
+
+  function appendAnsiText(code, text, state) {
+    if (!text) return;
+    const classes = getAnsiClasses(state);
+    if (!classes.length) {
+      code.appendChild(documentObj.createTextNode(text));
+      return;
+    }
+    const span = createElement('span', classes.join(' '));
+    span.textContent = text;
+    code.appendChild(span);
+  }
+
+  function isAnsiCodeBlock(pre) {
+    const code = qs(pre, ':scope > code') || qs(pre, 'code');
+    const className = `${String(pre.className || '')} ${String(code?.className || '')}`;
+    return Boolean(code && /(?:^|\s)(?:language-ansi|lang-ansi|ansi)(?:\s|$)/i.test(className));
+  }
+
+  function serializeAnsiNode(node) {
+    if (node.nodeType === NodeCtor.TEXT_NODE) return node.nodeValue || '';
+    if (node.nodeType !== NodeCtor.ELEMENT_NODE) return '';
+    let output = '';
+    if (node.matches('span[data-ansicode]')) {
+      const code = Number(node.getAttribute('data-ansicode'));
+      if (Number.isInteger(code) && code >= 0 && code <= 127) output += String.fromCharCode(code);
+    }
+    Array.from(node.childNodes).forEach((child) => { output += serializeAnsiNode(child); });
+    return output;
+  }
+
+  function renderAnsiCodeBlock(pre) {
+    if (!isAnsiCodeBlock(pre)) return;
+    const code = qs(pre, ':scope > code') || qs(pre, 'code');
+    if (!code || code.dataset.xnsAnsiRendered === 'true') return;
+    const source = serializeAnsiNode(code)
+      .replace(/\u0008/g, '')
+      .replace(/\u000d\u000a?/g, '\n')
+      .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, '');
+    clearElement(code);
+    const state = createAnsiState();
+    const ansiPattern = /\u001b\[([0-9;]*)m/g;
+    let cursor = 0;
+    let match;
+    while ((match = ansiPattern.exec(source))) {
+      appendAnsiText(code, source.slice(cursor, match.index), state);
+      applyAnsiCodes(state, match[1].split(';').filter((value) => value !== '').map(Number));
+      cursor = ansiPattern.lastIndex;
+    }
+    appendAnsiText(code, source.slice(cursor), state);
+    code.dataset.xnsAnsiRendered = 'true';
+  }
+
+  function installPreviewAnsiBlocks(root) {
+    qsa(root, '.xns-preview-content pre').forEach(renderAnsiCodeBlock);
+  }
+
+  function installPreviewMagicTabs(root) {
+    qsa(root, '.xns-preview-content .nsk-magic-tabs').forEach((tabs) => {
+      if (tabs.dataset.xnsMagicTabsBound === 'true') return;
+      const titles = qsa(tabs, ':scope > .nsk-magic-tab-title');
+      const bodies = qsa(tabs, ':scope > .nsk-magic-tab-body');
+      if (!titles.length || titles.length !== bodies.length) return;
+      const activate = (selected) => {
+        titles.forEach((title, index) => {
+          const active = index === selected;
+          title.classList.toggle('xns-active', active);
+          title.setAttribute('aria-selected', active ? 'true' : 'false');
+          bodies[index].classList.toggle('xns-active', active);
+          bodies[index].setAttribute('aria-hidden', active ? 'false' : 'true');
+        });
+      };
+      titles.forEach((title, index) => {
+        title.setAttribute('role', 'tab');
+        title.setAttribute('tabindex', '0');
+        title.addEventListener('click', () => activate(index));
+        title.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            activate(index);
+          }
+        });
+      });
+      bodies.forEach((body) => body.setAttribute('role', 'tabpanel'));
+      activate(0);
+      tabs.dataset.xnsMagicTabsBound = 'true';
+    });
+  }
+
+  function getDirectiveText(node) {
+    if (!node || node.nodeType !== NodeCtor.ELEMENT_NODE || node.matches('pre, code')) return '';
+    return (node.textContent || '').trim().replace(/\s+/g, ' ');
+  }
+
+  function getMarkdownTabLabel(text) {
+    const match = /^:::\s*tab-item(?:\s+(.+?))?\s*$/i.exec(text);
+    return match?.[1]?.trim() || '标签页';
+  }
+
+  function installPreviewMarkdownTabs(root) {
+    const selector = '.xns-preview-content .post-content, .xns-preview-content article.post-content';
+    const contents = [];
+    if (root?.matches?.(selector)) contents.push(root);
+    contents.push(...qsa(root, selector));
+    contents.forEach((content) => {
+      if (content.dataset.xnsTabsBound === 'true') return;
+      const children = Array.from(content.children);
+      const start = children.findIndex((node) => getDirectiveText(node) === ':::: tabs');
+      if (start < 0) return;
+      const tabs = [];
+      const markers = [children[start]];
+      let current = null;
+      let end = -1;
+      for (let index = start + 1; index < children.length; index += 1) {
+        const node = children[index];
+        const text = getDirectiveText(node);
+        const tabMatch = /^:::\s*tab-item(?:\s+(.+?))?\s*$/i.exec(text);
+        if (tabMatch) {
+          current = { label: getMarkdownTabLabel(text), nodes: [] };
+          tabs.push(current);
+          markers.push(node);
+          continue;
+        }
+        if (text === ':::') {
+          markers.push(node);
+          current = null;
+          continue;
+        }
+        if (text === '::::') {
+          markers.push(node);
+          end = index;
+          break;
+        }
+        if (current) current.nodes.push(node);
+      }
+      if (end < 0 || !tabs.length) return;
+      const wrapper = createElement('section', 'xns-markdown-tabs');
+      const nav = createElement('div', 'xns-markdown-tabs-nav');
+      nav.setAttribute('role', 'tablist');
+      wrapper.appendChild(nav);
+      content.insertBefore(wrapper, children[start]);
+      tabs.forEach((tab, tabIndex) => {
+        const button = createElement('button', 'xns-markdown-tab', tab.label);
+        const panel = createElement('div', 'xns-markdown-tab-panel');
+        const active = tabIndex === 0;
+        button.type = 'button';
+        button.setAttribute('role', 'tab');
+        button.setAttribute('aria-selected', active ? 'true' : 'false');
+        panel.setAttribute('role', 'tabpanel');
+        if (active) {
+          button.classList.add('is-active');
+          panel.classList.add('is-active');
+        }
+        tab.nodes.forEach((node) => panel.appendChild(node));
+        button.addEventListener('click', () => {
+          Array.from(nav.children).forEach((item, index) => {
+            const selected = index === tabIndex;
+            item.classList.toggle('is-active', selected);
+            item.setAttribute('aria-selected', selected ? 'true' : 'false');
+          });
+          Array.from(wrapper.querySelectorAll('.xns-markdown-tab-panel')).forEach((item, index) => {
+            item.classList.toggle('is-active', index === tabIndex);
+          });
+        });
+        nav.appendChild(button);
+        wrapper.appendChild(panel);
+      });
+      markers.forEach((node) => node.remove());
+      content.dataset.xnsTabsBound = 'true';
+    });
+  }
+
+  function fallbackCopyText(text) {
+    const textarea = createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-10000px';
+    textarea.style.left = '-10000px';
+    textarea.style.opacity = '0';
+    documentObj.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    let copied = false;
+    try { copied = documentObj.execCommand('copy'); } catch { copied = false; }
+    textarea.remove();
+    return copied;
+  }
+
+  function copyText(text) {
+    if (navigatorObj.clipboard?.writeText) {
+      return navigatorObj.clipboard.writeText(text).catch(() => {
+        if (!fallbackCopyText(text)) throw new Error('copy failed');
+      });
+    }
+    return fallbackCopyText(text) ? Promise.resolve() : Promise.reject(new Error('copy failed'));
+  }
+
+  function installPreviewCodeBlocks(root) {
+    qsa(root, '.xns-preview-content pre').forEach((pre) => {
+      if (pre.dataset.xnsCodeBound === 'true') return;
+      const code = qs(pre, ':scope > code') || qs(pre, 'code');
+      if (!code) return;
+      pre.dataset.xnsCodeBound = 'true';
+      pre.classList.add('xns-code-block');
+      const button = createElement('button', 'xns-code-copy-btn', '复制');
+      button.type = 'button';
+      button.setAttribute('aria-label', '复制代码');
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const text = code.innerText ?? code.textContent ?? '';
+        button.disabled = true;
+        void copyText(text).then(() => {
+          button.textContent = '已复制';
+          button.classList.remove('xns-copy-failed');
+        }).catch(() => {
+          button.textContent = '复制失败';
+          button.classList.add('xns-copy-failed');
+        }).finally(() => {
+          windowObj.setTimeout(() => {
+            if (!button.isConnected) return;
+            button.disabled = false;
+            button.textContent = '复制';
+            button.classList.remove('xns-copy-failed');
+          }, 2_000);
+        });
+      });
+      pre.appendChild(button);
+    });
+  }
+
+  function installPreviewFeatures(root) {
+    installPreviewMagicTabs(root);
+    installPreviewMarkdownTabs(root);
+    installPreviewAnsiBlocks(root);
+    installPreviewImageFallback(root);
+    installPreviewCodeBlocks(root);
+    installPreviewVotePanels(root);
+  }
+
+  return Object.freeze({ installPreviewFeatures, installPreviewCodeBlocks });
+}
+
+const xnsContentFeatures = createContentFeatures({
+  windowObj: window,
+  documentObj: document,
+  navigatorObj: navigator,
+  qs,
+  qsa,
+  createElement,
+  clearElement,
+  installPreviewImageFallback,
+  installPreviewVotePanels,
+});
+const installPreviewFeatures = (...args) => xnsContentFeatures.installPreviewFeatures(...args);
+const installPreviewCodeBlocks = (...args) => xnsContentFeatures.installPreviewCodeBlocks(...args);
+
+
+// 预览控制器：负责弹窗生命周期、刷新和滚动位置恢复。
+function createPreviewController({
+  windowObj,
+  documentObj,
+  state,
+  selectors,
+  maxPage,
+  qs,
+  qsa,
+  createElement,
+  clearElement,
+  getPostInfo,
+  sanitizeImportedNode,
+  parseHtml,
+  fetchHtml,
+  getPageNumbers,
+  collectPageRecords,
+  loadPreviewRecords,
+  buildPreviewPostNode,
+  renderPreviewRecords,
+  installPreviewFeatures,
+  installPreviewScrollButtons,
+  closeImageLightbox,
+  closeModal,
+  createCloseButton,
+  openPreviewComposer,
+}) {
+  function buildPreviewContent(url, parsed, options = {}) {
+    const wrapper = createElement('div', 'xns-preview-content');
+    const title = qs(parsed, selectors.postTitle)?.textContent?.trim() || '';
+    const info = getPostInfo(url.href);
+    const importedPost = info ? buildPreviewPostNode(parsed, info) : null;
+    if (importedPost) wrapper.appendChild(importedPost);
+    else {
+      const content = qs(parsed, selectors.postContent);
+      const importedContent = sanitizeImportedNode(content);
+      if (importedContent) wrapper.appendChild(importedContent);
+      else wrapper.appendChild(createElement('p', 'xns-status', '没有找到帖子正文。'));
+    }
+    if (!info) return { title, content: wrapper, hydrate: null };
+    const currentRecords = collectPageRecords(info, parsed, info.page);
+    const knownPages = getPageNumbers(parsed, info.postId);
+    const hasRemotePages = Array.from(knownPages).some((page) => page !== info.page);
+    const section = createElement('section', 'xns-preview-comments');
+    section.appendChild(createElement('h3', '', '楼中楼预览'));
+    const thread = createElement('ul', 'xns-preview-thread');
+    section.appendChild(thread);
+    renderPreviewRecords(section, info, currentRecords, { loading: hasRemotePages });
+    wrapper.appendChild(section);
+    const hydrate = loadPreviewRecords(info, parsed, { noStore: options.noStore === true }).then((preview) => {
+      if (section.isConnected || options.renderDetached === true) renderPreviewRecords(section, info, preview.records, preview);
+      return preview;
+    });
+    return { title, content: wrapper, hydrate };
+  }
+
+  function getPreviewScrollOwners(body) {
+    return qsa(body, '.xns-preview-post, .xns-preview-thread .content-item[data-comment-id], .xns-preview-thread .content-item[data-xns-floor]');
+  }
+
+  function getPreviewScrollOwner(node) {
+    return node?.closest?.('.xns-preview-post, .xns-preview-thread .content-item[data-comment-id], .xns-preview-thread .content-item[data-xns-floor]') || null;
+  }
+
+  function getPreviewScrollCandidates(body) {
+    const seen = new Set();
+    const candidates = [];
+    getPreviewScrollOwners(body).forEach((owner) => {
+      const blocks = [owner, ...qsa(owner, ':scope > .post-title, :scope > .nsk-content-meta-info, :scope > article.post-content > *, :scope > .post-content > *')];
+      blocks.forEach((node) => {
+        if (!node || seen.has(node) || getPreviewScrollOwner(node) !== owner) return;
+        seen.add(node);
+        candidates.push(node);
+      });
+    });
+    return candidates;
+  }
+
+  function getPreviewChildPath(owner, node) {
+    const path = [];
+    let current = node;
+    while (current && current !== owner) {
+      const parent = current.parentElement;
+      if (!parent) return [];
+      const index = Array.prototype.indexOf.call(parent.children, current);
+      if (index < 0) return [];
+      path.unshift(index);
+      current = parent;
+    }
+    return current === owner ? path : [];
+  }
+
+  function capturePreviewScroll(body) {
+    const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
+    const snapshot = {
+      scrollTop: body.scrollTop,
+      maxScrollTop,
+      ratio: maxScrollTop > 0 ? body.scrollTop / maxScrollTop : 0,
+      atTop: body.scrollTop <= 3,
+      atBottom: maxScrollTop - body.scrollTop <= 24,
+      anchor: null,
+    };
+    if (snapshot.atTop || snapshot.atBottom || maxScrollTop === 0) return snapshot;
+    const bodyRect = body.getBoundingClientRect();
+    const anchorLine = bodyRect.top + Math.min(12, Math.max(2, body.clientHeight * 0.03));
+    const rows = getPreviewScrollCandidates(body).map((node) => ({ node, rect: node.getBoundingClientRect() }))
+      .filter(({ rect }) => rect.height > 0 && rect.bottom > bodyRect.top && rect.top < bodyRect.bottom);
+    const crossing = rows.filter(({ rect }) => rect.top <= anchorLine && rect.bottom > anchorLine);
+    const chosen = crossing.reduce((best, row) => (!best || row.rect.top > best.rect.top ? row : best), null)
+      || rows.filter(({ rect }) => rect.top > anchorLine).sort((left, right) => left.rect.top - right.rect.top)[0] || null;
+    if (!chosen) return snapshot;
+    const owner = getPreviewScrollOwner(chosen.node);
+    if (!owner) return snapshot;
+    const isPost = owner.matches('.xns-preview-post, [data-xns-target-type="post"]');
+    snapshot.anchor = {
+      isPost,
+      commentId: isPost ? '' : (owner.getAttribute('data-comment-id') || ''),
+      floor: owner.getAttribute('data-xns-floor') || '',
+      path: getPreviewChildPath(owner, chosen.node),
+      tagName: chosen.node.tagName,
+      offset: chosen.rect.top - bodyRect.top,
+    };
+    return snapshot;
+  }
+
+  function findPreviewScrollOwner(body, anchor) {
+    if (anchor.isPost) return qs(body, '.xns-preview-post, [data-xns-target-type="post"]');
+    if (anchor.commentId) {
+      const byCommentId = qs(body, `.xns-preview-thread .content-item[data-comment-id="${CSS.escape(anchor.commentId)}"]`);
+      if (byCommentId) return byCommentId;
+    }
+    if (anchor.floor) return qs(body, `.xns-preview-thread .content-item[data-xns-floor="${CSS.escape(anchor.floor)}"]`);
+    return null;
+  }
+
+  function resolvePreviewScrollAnchor(body, anchor) {
+    const owner = findPreviewScrollOwner(body, anchor);
+    if (!owner) return null;
+    let node = owner;
+    for (const index of anchor.path || []) {
+      node = node?.children?.[index] || null;
+      if (!node) return owner;
+    }
+    return !anchor.tagName || node.tagName === anchor.tagName ? node : owner;
+  }
+
+  function restorePreviewScroll(body, snapshot) {
+    if (!snapshot) return;
+    const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
+    if (snapshot.atTop) { body.scrollTop = 0; return; }
+    if (snapshot.atBottom) { body.scrollTop = maxScrollTop; return; }
+    const anchor = snapshot.anchor ? resolvePreviewScrollAnchor(body, snapshot.anchor) : null;
+    if (anchor) {
+      const currentOffset = anchor.getBoundingClientRect().top - body.getBoundingClientRect().top;
+      const targetScrollTop = body.scrollTop + currentOffset - snapshot.anchor.offset;
+      body.scrollTop = Math.max(0, Math.min(targetScrollTop, maxScrollTop));
+      return;
+    }
+    const proportional = Number.isFinite(snapshot.ratio) ? snapshot.ratio * maxScrollTop : snapshot.scrollTop;
+    body.scrollTop = Math.max(0, Math.min(proportional, maxScrollTop));
+  }
+
+  function stabilizePreviewScroll(modal, snapshot, generation) {
+    modal.refreshScrollCleanup?.();
+    const body = modal.body;
+    let active = true;
+    let frame = 0;
+    const timers = [];
+    const imageHandlers = [];
+    const apply = () => {
+      frame = 0;
+      if (!active || state.modal !== modal || modal.loadGeneration !== generation) return;
+      restorePreviewScroll(body, snapshot);
+    };
+    const schedule = () => {
+      if (!active || frame) return;
+      frame = windowObj.requestAnimationFrame(apply);
+    };
+    const cleanup = () => {
+      if (!active) return;
+      active = false;
+      if (frame) windowObj.cancelAnimationFrame(frame);
+      timers.forEach((timer) => windowObj.clearTimeout(timer));
+      resizeObserver?.disconnect();
+      imageHandlers.forEach(({ image, done }) => {
+        image.removeEventListener('load', done);
+        image.removeEventListener('error', done);
+      });
+      ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach((name) => modal.overlay.removeEventListener(name, cleanup, true));
+      if (modal.refreshScrollCleanup === cleanup) modal.refreshScrollCleanup = null;
+    };
+    const resizeObserver = windowObj.ResizeObserver ? new windowObj.ResizeObserver(schedule) : null;
+    resizeObserver?.observe(body.firstElementChild || body);
+    qsa(body, 'img').forEach((image) => {
+      if (image.complete) return;
+      const done = () => schedule();
+      imageHandlers.push({ image, done });
+      image.addEventListener('load', done, { once: true });
+      image.addEventListener('error', done, { once: true });
+    });
+    ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach((name) => modal.overlay.addEventListener(name, cleanup, { capture: true, passive: true }));
+    [0, 60, 180, 420, 900, 1_400].forEach((delay) => timers.push(windowObj.setTimeout(schedule, delay)));
+    timers.push(windowObj.setTimeout(cleanup, 1_800));
+    modal.refreshScrollCleanup = cleanup;
+    restorePreviewScroll(body, snapshot);
+  }
+
+  function showPreviewLoadError(modal, error) {
+    clearElement(modal.body);
+    modal.body.appendChild(createElement('p', 'xns-status', `预览加载失败：${error?.message || '网络错误'}`));
+    if (modal.fallbackLink) {
+      const link = createElement('a', '', '在原页面打开');
+      link.href = modal.fallbackLink.href;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      modal.body.appendChild(link);
+    }
+  }
+
+  function showPreviewRefreshError(modal, error) {
+    qs(modal.body, '.xns-refresh-status')?.remove();
+    const status = createElement('p', 'xns-status xns-refresh-status', `刷新失败，保留当前内容：${error?.message || '网络错误'}`);
+    status.classList.add('xns-refresh-failed');
+    modal.body.prepend(status);
+    windowObj.setTimeout(() => { if (status.isConnected) status.remove(); }, 4_000);
+  }
+
+  async function loadPreviewModal(modal, loadingText, options = {}) {
+    if (!modal || modal.loading) return false;
+    const preserveContent = Boolean(options.preserveContent);
+    modal.refreshScrollCleanup?.();
+    modal.loading = true;
+    const generation = (modal.loadGeneration || 0) + 1;
+    modal.loadGeneration = generation;
+    const refresh = qs(modal.dialog, '.xns-refresh-post');
+    refresh?.classList.add('xns-action-pending');
+    refresh?.setAttribute('aria-busy', 'true');
+    closeImageLightbox();
+    if (!preserveContent) {
+      modal.body.scrollTop = 0;
+      clearElement(modal.body);
+      modal.body.appendChild(createElement('p', 'xns-loading', loadingText));
+    }
+    try {
+      const { html } = await fetchHtml(modal.url, { noStore: true });
+      const preview = buildPreviewContent(modal.url, parseHtml(html), { noStore: true, renderDetached: preserveContent });
+      if (preserveContent && preview.hydrate) await preview.hydrate;
+      if (state.modal !== modal || modal.loadGeneration !== generation) return false;
+      const scrollSnapshot = preserveContent ? capturePreviewScroll(modal.body) : null;
+      modal.title.textContent = preview.title || 'NodeSeek 帖子预览';
+      clearElement(modal.body);
+      modal.body.appendChild(preview.content);
+      if (modal.composer && !modal.composer.isConnected) modal.body.appendChild(modal.composer);
+      installPreviewFeatures(modal.body);
+      if (!preserveContent && preview.hydrate) {
+        await preview.hydrate;
+        if (state.modal !== modal || modal.loadGeneration !== generation) return false;
+        installPreviewFeatures(modal.body);
+      }
+      if (preserveContent) stabilizePreviewScroll(modal, scrollSnapshot, generation);
+    } catch (error) {
+      if (state.modal === modal && modal.loadGeneration === generation) {
+        if (preserveContent) showPreviewRefreshError(modal, error);
+        else showPreviewLoadError(modal, error);
+      }
+    } finally {
+      modal.loading = false;
+      refresh?.classList.remove('xns-action-pending');
+      refresh?.removeAttribute('aria-busy');
+    }
+    return true;
+  }
+
+  function refreshPreviewModal() {
+    const modal = state.modal;
+    if (!modal || modal.loading) return;
+    void loadPreviewModal(modal, '正在刷新帖子…', { preserveContent: true });
+  }
+
+  function openPreviewModal(url, fallbackLink) {
+    closeModal();
+    const fetchUrl = url.search || url.hash ? new URL(url.pathname, url.origin) : url;
+    const overlay = createElement('div', 'xns-overlay');
+    overlay.tabIndex = -1;
+    overlay.addEventListener('click', (event) => { if (event.target === overlay) closeModal(); });
+    const dialog = createElement('section', 'xns-modal');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    const header = createElement('header', 'xns-modal-header');
+    const title = createElement('h2', 'xns-modal-title', '正在加载帖子…');
+    const replyPost = createElement('button', 'xns-modal-reply', '回复帖子');
+    replyPost.type = 'button';
+    replyPost.addEventListener('click', () => openPreviewComposer('post-reply', null));
+    const original = createElement('a', '', '新标签打开');
+    original.href = url.href;
+    original.target = '_blank';
+    original.rel = 'noopener noreferrer';
+    const close = createCloseButton(closeModal);
+    header.append(title, replyPost, original, close);
+    const body = createElement('div', 'xns-modal-body');
+    body.appendChild(createElement('p', 'xns-loading', '正在读取帖子内容…'));
+    dialog.append(header, body);
+    const scrollCleanup = installPreviewScrollButtons(dialog, body);
+    overlay.appendChild(dialog);
+    documentObj.body.appendChild(overlay);
+    documentObj.documentElement.style.overflow = 'hidden';
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, loading: false, loadGeneration: 0 };
+    overlay.focus();
+    void loadPreviewModal(state.modal, '正在读取帖子内容…');
+  }
+
+  return Object.freeze({ buildPreviewContent, loadPreviewModal, refreshPreviewModal, openPreviewModal });
+}
+
+const xnsPreviewController = createPreviewController({
+  windowObj: window,
+  documentObj: document,
+  state,
+  selectors: SELECTORS,
+  maxPage: MAX_PAGE,
+  qs,
+  qsa,
+  createElement,
+  clearElement,
+  getPostInfo,
+  sanitizeImportedNode,
+  parseHtml,
+  fetchHtml,
+  getPageNumbers,
+  collectPageRecords,
+  loadPreviewRecords,
+  buildPreviewPostNode,
+  renderPreviewRecords,
+  installPreviewFeatures,
+  installPreviewScrollButtons,
+  closeImageLightbox,
+  closeModal,
+  createCloseButton,
+  openPreviewComposer: (...args) => openPreviewComposer(...args),
+});
+const buildPreviewContent = (...args) => xnsPreviewController.buildPreviewContent(...args);
+const loadPreviewModal = (...args) => xnsPreviewController.loadPreviewModal(...args);
+const refreshPreviewModal = (...args) => xnsPreviewController.refreshPreviewModal(...args);
+const openPreviewModal = (...args) => xnsPreviewController.openPreviewModal(...args);
+
+
+// 全局事件边界：把站点原生点击与脚本接管的预览动作分开。
+function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPreviewAction, closeImageLightbox, closeModal }) {
+  function handlePreviewActionClick(event) {
+    const menuItem = event.target.closest?.('.xns-preview-menu > .menu-item');
+    if (!menuItem) return;
+    const inPreview = Boolean(menuItem.closest('.xns-overlay .xns-preview-content'));
+    const inPost = Boolean(menuItem.closest('.comment-container'));
+    if (!inPreview && !inPost) return;
+    const comment = menuItem.closest('.content-item');
+    const action = menuItem.dataset.xnsAction || getMenuActionKey(menuItem);
+    if (!comment || !action) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    void runPreviewAction(action, menuItem, comment, getActionContext(menuItem));
+  }
+
+  function handleKeydown(event) {
+    if (event.key !== 'Escape') return;
+    if (event.target.closest?.('textarea, input, [contenteditable="true"]')) return;
+    if (state.lightbox) {
+      event.preventDefault();
+      closeImageLightbox();
+    } else if (state.modal) {
+      closeModal();
+    }
+  }
+
+  return Object.freeze({ handlePreviewActionClick, handleKeydown });
+}
+
+const xnsAppEvents = createAppEvents({
+  state,
+  qsa,
+  getMenuActionKey,
+  getActionContext,
+  runPreviewAction,
+  closeImageLightbox,
+  closeModal,
+});
+const handlePreviewActionClick = (...args) => xnsAppEvents.handlePreviewActionClick(...args);
+const handleKeydown = (...args) => xnsAppEvents.handleKeydown(...args);
+
+
+// 帖子详情页控制器。
+// 它只管理原始楼层快照、评论布局模式和分页生命周期；预览入口由 preview/entry.js 管理。
+function createPostPageController({
+  documentObj,
+  windowObj,
+  appState,
+  selectors,
+  maxPage,
+  findCommentList,
+  createElement,
+  qs,
+  qsa,
+  fetchHtml,
+  parseHtml,
+  getFloor,
+  getCommentItems,
+  sanitizeImportedNode,
+  getDocState,
+  getCurrentUserUid,
+  getCommentRecord,
+  fetchPostPages,
+  buildReplyTree,
+  appendNestedRecord,
+  prepareCommentRecord,
+  addRemoteNote,
+  installPreviewFeatures,
+}) {
+  return class PostPageController {
+    constructor(info) {
+      this.info = info;
+      this.list = null;
+      this.originalChildren = [];
+      this.records = [];
+      this.pageDocs = new Map();
+      this.failedPages = [];
+      this.truncated = false;
+      this.totalPages = null;
+      this.toolbar = null;
+      this.statusNode = null;
+      this.loadingNode = null;
+      this.generation = 0;
+      this.composer = null;
+    }
+
+    async init() {
+      this.list = await this.waitForCommentList();
+      if (!this.list) return;
+      this.originalChildren = Array.from(this.list.childNodes);
+      this.createToolbar();
+      await this.reloadPages();
+    }
+
+    waitForCommentList() {
+      return new Promise((resolve) => {
+        const started = Date.now();
+        const check = () => {
+          const list = findCommentList();
+          if (list || Date.now() - started > 12_000) resolve(list);
+          else windowObj.setTimeout(check, 80);
+        };
+        check();
+      });
+    }
+
+    createToolbar() {
+      if (this.toolbar || !this.list) return;
+      const toolbar = createElement('nav', 'xns-post-toolbar');
+      toolbar.setAttribute('aria-label', '评论布局');
+      toolbar.appendChild(createElement('span', '', '评论布局：'));
+      [['thread', '楼中楼'], ['original', '原版']].forEach(([mode, text]) => {
+        const button = createElement('button', '', text);
+        button.type = 'button';
+        button.dataset.mode = mode;
+        button.addEventListener('click', () => this.setMode(mode));
+        toolbar.appendChild(button);
+      });
+      toolbar.appendChild(createElement('span', 'xns-toolbar-status'));
+      this.list.closest(selectors.commentContainer)?.insertAdjacentElement('beforebegin', toolbar);
+      this.toolbar = toolbar;
+      this.updateToolbar();
+    }
+
+    updateToolbar() {
+      if (!this.toolbar) return;
+      qsa(this.toolbar, '[data-mode]').forEach((button) => {
+        button.setAttribute('aria-pressed', String(button.dataset.mode === appState.mode));
+      });
+      const status = qs(this.toolbar, '.xns-toolbar-status');
+      if (status) status.textContent = this.records.length ? `${this.records.length} 条评论` : '读取中…';
+    }
+
+    async reloadPages(options = {}) {
+      if (!this.list) return;
+      const generation = ++this.generation;
+      this.showLoading('正在读取评论分页…');
+      try {
+        if (options.refreshCurrentPage) await this.adoptNewReplies(generation);
+        await this.loadPages(generation, options);
+        if (generation !== this.generation) return;
+        this.render();
+      } catch (error) {
+        if (generation !== this.generation) return;
+        this.restoreOriginal();
+        this.showStatus(`楼中楼读取失败：${error.message || '网络错误'}，已保留原版布局。`);
+      } finally {
+        if (generation === this.generation) {
+          this.loadingNode?.remove();
+          this.loadingNode = null;
+          this.updateToolbar();
+        }
+      }
+    }
+
+    async adoptNewReplies(generation) {
+      try {
+        const { html } = await fetchHtml(new URL(`/post-${this.info.postId}-${this.info.page}`, windowObj.location.origin), { noStore: true });
+        if (generation !== this.generation) return;
+        const parsed = parseHtml(html);
+        const knownFloors = new Set(this.originalChildren
+          .filter((node) => node.nodeType === Node.ELEMENT_NODE)
+          .map((node) => getFloor(node))
+          .filter((floor) => floor !== null));
+        getCommentItems(parsed).forEach((item) => {
+          const floor = getFloor(item);
+          if (floor === null || knownFloors.has(floor)) return;
+          const imported = sanitizeImportedNode(item, { keepCommentMenu: true });
+          if (!imported) return;
+          knownFloors.add(floor);
+          this.list.appendChild(imported);
+          this.originalChildren.push(imported);
+        });
+      } catch {
+        // 当前页重抓失败不阻断：楼中楼仍按已有快照渲染。
+      }
+    }
+
+    async loadPages(generation, options = {}) {
+      this.records = [];
+      this.failedPages = [];
+      const { pageDocs, failedPages, truncated, totalPages } = await fetchPostPages(this.info, documentObj, {
+        noStore: options.noStore !== false,
+        isAborted: () => generation !== this.generation,
+      });
+      if (generation !== this.generation) return;
+      this.pageDocs = pageDocs;
+      this.failedPages = failedPages;
+      this.truncated = truncated;
+      this.totalPages = totalPages;
+
+      const allRecords = [];
+      this.pageDocs.forEach((root, page) => {
+        const state = getDocState(root);
+        if (root === documentObj && this.originalChildren.length) {
+          this.originalChildren.forEach((item, index) => {
+            if (item.nodeType !== 1) return;
+            const record = getCommentRecord(item, this.info.postId, page, index, true, { keepCommentMenu: true, state, getCurrentUserUid });
+            if (record) allRecords.push(record);
+          });
+          return;
+        }
+        getCommentItems(root).forEach((item, index) => {
+          const record = getCommentRecord(item, this.info.postId, page, index, root === documentObj, { keepCommentMenu: true, state, getCurrentUserUid });
+          if (record) allRecords.push(record);
+        });
+      });
+      const unique = new Map();
+      allRecords.forEach((record) => {
+        const previous = unique.get(record.floor);
+        if (!previous || record.current) unique.set(record.floor, record);
+      });
+      this.records = Array.from(unique.values());
+    }
+
+    setMode(mode) {
+      if (!['thread', 'original'].includes(mode)) return;
+      appState.mode = mode;
+      this.updateToolbar();
+      if (mode === 'original') this.restoreOriginal();
+      else if (this.records.length) this.render();
+      else this.reloadPages();
+    }
+
+    showLoading(text) {
+      this.loadingNode?.remove();
+      this.loadingNode = createElement('div', 'xns-loading', text);
+      this.list?.closest(selectors.commentContainer)?.insertAdjacentElement('beforebegin', this.loadingNode);
+    }
+
+    showStatus(text) {
+      this.statusNode?.remove();
+      this.statusNode = createElement('div', 'xns-status', text);
+      this.list?.closest(selectors.commentContainer)?.insertAdjacentElement('beforebegin', this.statusNode);
+    }
+
+    render() {
+      if (!this.list || appState.mode !== 'thread') return;
+      this.restoreOriginal();
+      buildReplyTree(this.records).forEach((record) => appendNestedRecord(record, this.list, 0));
+      this.records.filter((record) => record.node.hasAttribute('data-xns-remote')).forEach((record) => {
+        addRemoteNote(record, this.info.postId);
+        record.node.classList.add('xns-preview-content');
+        installPreviewFeatures(record.node);
+      });
+      const loadedPages = this.pageDocs.size;
+      let status = this.failedPages.length
+        ? `楼中楼已整理：读取 ${loadedPages} 页，${this.failedPages.length} 页失败。`
+        : `楼中楼已整理：共读取 ${loadedPages} 页。`;
+      if (this.truncated) status += ` 帖子共 ${this.totalPages} 页，只读取了前 ${maxPage} 页，后面页的楼层没有显示。`;
+      this.showStatus(status);
+      this.updateToolbar();
+    }
+
+    restoreOriginal() {
+      if (!this.list) return;
+      qsa(this.list, '.xns-reply-list, .xns-remote-note').forEach((node) => node.remove());
+      this.originalChildren.forEach(stripRenderArtifacts);
+      while (this.list.firstChild) this.list.removeChild(this.list.firstChild);
+      this.originalChildren.forEach((node) => this.list.appendChild(node));
+      this.statusNode?.remove();
+      this.statusNode = null;
+      this.updateToolbar();
+    }
+  };
+}
+
+const PostEnhancer = createPostPageController({
+  documentObj: document,
+  windowObj: window,
+  appState: state,
+  selectors: SELECTORS,
+  maxPage: MAX_PAGE,
+  findCommentList,
+  createElement,
+  qs,
+  qsa,
+  fetchHtml,
+  parseHtml,
+  getFloor,
+  getCommentItems,
+  sanitizeImportedNode,
+  getDocState,
+  getCurrentUserUid,
+  getCommentRecord,
+  fetchPostPages,
+  buildReplyTree,
+  appendNestedRecord,
+  prepareCommentRecord,
+  addRemoteNote,
+  installPreviewFeatures,
+});
+
+
+// 全局样式注入。样式是构建期静态资源，运行时只负责一次性安装。
+function createStyleInstaller({ documentObj, styleId, ansiColors, ansiFgHex, ansiBgHex, ansiBrightHex }) {
+function ansiRulesFor(prefix, property, hexes) {
+  return ansiColors.map((name, index) => `.xns-preview-content .xns-ansi-${prefix}-${name} { ${property}:${hexes[index]}; }`).join(' ');
+}
+
+function installStyle() {
+  if (documentObj.getElementById(styleId)) return;
+  const style = documentObj.createElement('style');
+  style.id = styleId;
+  style.textContent = `
       .xns-post-toolbar, .xns-post-toolbar * { box-sizing: border-box; }
       .xns-post-toolbar { position:fixed; right:42px; bottom:166px; z-index:1000; display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin:0; padding:7px; border:1px solid rgba(100,116,139,.25); border-radius:8px; background:rgba(248,250,252,.96); font:13px/1.3 system-ui,sans-serif; box-shadow:0 4px 16px rgba(0,0,0,.25); }
       .xns-post-toolbar button { padding:5px 10px; border:1px solid rgba(100,116,139,.28); border-radius:6px; color:inherit; background:transparent; cursor:pointer; font:inherit; }
@@ -395,9 +2854,6 @@
       .xns-refresh-post.xns-action-pending svg { animation:xns-spin .9s linear infinite; }
       .xns-loading, .xns-status { margin:10px 0; padding:7px 10px; border:1px solid rgba(100,116,139,.2); border-radius:7px; color:#64748b; background:rgba(148,163,184,.08); font:13px/1.4 system-ui,sans-serif; }
       .xns-comment-root[data-xns-floor], .xns-comment-child[data-xns-floor] { position:relative; }
-      /* 官方 .floor-link-wrapper 的定位是 Vue scoped CSS（data-v 属性选择器），
-         预览/楼中楼里的克隆节点不带该属性，官方定位规则不生效，楼号会退化成
-         meta 行里的内联文本。这里补上与官方一致的 absolute 右上角定位。 */
       .xns-preview-thread .floor-link-wrapper, .xns-preview-content .floor-link-wrapper { position:absolute; top:8px; right:9px; }
       .xns-preview-thread .floor-link-wrapper .floor-link, .xns-preview-content .floor-link-wrapper .floor-link { color:#c5c5c5; font-size:13px; font-weight:400; line-height:19.5px; text-decoration:none; cursor:pointer; }
       .xns-comment-child { margin-top:7px !important; margin-left:clamp(8px,2vw,28px) !important; padding-left:clamp(8px,1.5vw,18px) !important; border-left:2px solid rgba(59,130,246,.35); }
@@ -420,10 +2876,10 @@
       .xns-preview-content .xns-code-copy-btn { position:absolute; top:8px; right:8px; z-index:2; padding:2px 8px; border:0; border-radius:3px; color:#fff; background:#4caf50; cursor:pointer; font:12px/1.2 system-ui,sans-serif; opacity:.85; }
       .xns-preview-content .xns-code-copy-btn:hover, .xns-preview-content .xns-code-copy-btn:focus-visible { opacity:1; outline:none; }
       .xns-preview-content .xns-code-copy-btn.xns-copy-failed { background:#dc2626; }
-      ${ansiRulesFor('fg', 'color', ANSI_FG_HEX)}
-      ${ansiRulesFor('fg-bright', 'color', ANSI_BRIGHT_HEX)}
-      ${ansiRulesFor('bg', 'background', ANSI_BG_HEX)}
-      ${ansiRulesFor('bg-bright', 'background', ANSI_BRIGHT_HEX)}
+      ${ansiRulesFor('fg', 'color', ansiFgHex)}
+      ${ansiRulesFor('fg-bright', 'color', ansiBrightHex)}
+      ${ansiRulesFor('bg', 'background', ansiBgHex)}
+      ${ansiRulesFor('bg-bright', 'background', ansiBrightHex)}
       .xns-preview-content .xns-ansi-bold { font-weight:700; } .xns-preview-content .xns-ansi-dim { opacity:.72; } .xns-preview-content .xns-ansi-italic { font-style:italic; } .xns-preview-content .xns-ansi-underline { text-decoration:underline; } .xns-preview-content .xns-ansi-strike { text-decoration:line-through; } .xns-preview-content .xns-ansi-hidden { visibility:hidden; } .xns-preview-content .xns-ansi-inverse { filter:invert(1); }
       .xns-preview-content .xns-markdown-tabs { margin:8px 0; overflow:hidden; border:1px solid rgba(100,116,139,.24); border-radius:7px; background:#f8fafc; }
       .xns-preview-content .xns-markdown-tabs-nav { display:flex; align-items:center; flex-wrap:wrap; gap:4px; padding:5px 6px; border-bottom:1px solid rgba(100,116,139,.2); background:rgba(148,163,184,.1); }
@@ -503,7 +2959,6 @@
       .xns-lightbox-close { top:10px; right:10px; font-size:20px; line-height:1; }
       .xns-lightbox-open { left:10px; bottom:10px; }
       .xns-lightbox-close:hover, .xns-lightbox-open:hover, .xns-lightbox-close:focus-visible, .xns-lightbox-open:focus-visible { background:rgba(15,23,42,.9); outline:none; }
-      /* 暗色跟随网站：NodeSeek 在 body 上挂 .dark-layout（亮色为 .light-layout），不用系统偏好。 */
       .dark-layout .xns-modal { color:#e5e7eb; background:#18202b; }
       .dark-layout .xns-modal-header a, .dark-layout .xns-modal-header .xns-modal-reply, .dark-layout .xns-modal-close, .dark-layout .xns-preview-post, .dark-layout .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
       .dark-layout .xns-preview-content pre.xns-code-block { color:#e5e7eb; background:#0b1220; }
@@ -524,1986 +2979,90 @@
       @media (max-width:800px) { .xns-preview-scroll-btns { right:6px; } .xns-scroll-btn { width:30px !important; min-width:30px !important; max-width:30px !important; height:30px !important; min-height:30px !important; max-height:30px !important; flex-basis:30px; } }
       @media (max-width:640px) { .xns-overlay { padding:0; } .xns-modal { width:100%; max-height:100vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-scroll-btns { right:5px; } .xns-scroll-btn { width:28px !important; min-width:28px !important; max-width:28px !important; height:28px !important; min-height:28px !important; max-height:28px !important; flex-basis:28px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; margin-left:0; } }
     `;
-    (document.head || document.documentElement || document.body)?.appendChild(style);
-  }
-
-  function removeBodyLock() {
-    if (!state.modal) document.documentElement.style.removeProperty('overflow');
-  }
-
-  function createScrollArrow(points) {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('aria-hidden', 'true');
-    const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-    polyline.setAttribute('points', points);
-    svg.appendChild(polyline);
-    return svg;
-  }
-
-  function createRefreshArrow() {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('aria-hidden', 'true');
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', 'M20 11a8 8 0 1 1-2.34-5.66');
-    const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-    polyline.setAttribute('points', '20 4 20 11 13 11');
-    svg.append(path, polyline);
-    return svg;
-  }
-
-  function installPreviewScrollButtons(dialog, body) {
-    const group = createElement('div', 'xns-preview-scroll-btns');
-    const refresh = createElement('button', 'xns-scroll-btn xns-refresh-post');
-    refresh.type = 'button';
-    refresh.title = '刷新帖子';
-    refresh.setAttribute('aria-label', '刷新帖子');
-    refresh.appendChild(createRefreshArrow());
-    const top = createElement('button', 'xns-scroll-btn xns-to-top');
-    top.type = 'button';
-    top.title = '回到顶部';
-    top.setAttribute('aria-label', '回到顶部');
-    top.appendChild(createScrollArrow('18 15 12 9 6 15'));
-    const bottom = createElement('button', 'xns-scroll-btn xns-to-bottom');
-    bottom.type = 'button';
-    bottom.title = '回到底部';
-    bottom.setAttribute('aria-label', '回到底部');
-    bottom.appendChild(createScrollArrow('6 9 12 15 18 9'));
-    const scrollTo = (edge) => {
-      const topPosition = edge === 'bottom' ? Math.max(0, body.scrollHeight - body.clientHeight) : 0;
-      body.scrollTo({ top: topPosition, behavior: 'smooth' });
-    };
-    top.addEventListener('click', () => scrollTo('top'));
-    bottom.addEventListener('click', () => scrollTo('bottom'));
-    refresh.addEventListener('click', () => { void refreshPreviewModal(); });
-    group.append(refresh, top, bottom);
-    dialog.appendChild(group);
-
-    const update = () => {
-      const distanceFromBottom = body.scrollHeight - (body.scrollTop + body.clientHeight);
-      top.classList.toggle('hidden', body.scrollTop <= 300);
-      bottom.classList.toggle('hidden', distanceFromBottom <= 300);
-    };
-    const cleanup = () => {
-      body.removeEventListener('scroll', update);
-      window.removeEventListener('resize', update);
-      mutationObserver?.disconnect();
-      resizeObserver?.disconnect();
-      group.remove();
-    };
-    const mutationObserver = window.MutationObserver ? new MutationObserver(update) : null;
-    const resizeObserver = window.ResizeObserver ? new ResizeObserver(update) : null;
-    body.addEventListener('scroll', update, { passive: true });
-    window.addEventListener('resize', update, { passive: true });
-    mutationObserver?.observe(body, { childList: true, subtree: true });
-    resizeObserver?.observe(body);
-    window.setTimeout(update, 0);
-    update();
-    return cleanup;
-  }
-
-  function closeModal() {
-    closeImageLightbox();
-    state.modal?.refreshScrollCleanup?.();
-    state.modal?.scrollCleanup?.();
-    state.modal?.overlay?.remove();
-    state.modal = null;
-    removeBodyLock();
-  }
-
-  function createCloseButton(onClick) {
-    const button = createElement('button', 'xns-modal-close', '×');
-    button.type = 'button';
-    button.setAttribute('aria-label', '关闭');
-    button.addEventListener('click', onClick);
-    return button;
-  }
-
-  function buildReplyTree(records) {
-    const byFloor = new Map(records.map((record) => [record.floor, record]));
-    records.forEach((record) => {
-      record.parent = null;
-      record.children = [];
-    });
-    records.forEach((record) => {
-      const target = record.reply?.targetFloor ? byFloor.get(record.reply.targetFloor) : null;
-      if (target && target !== record && !record.pinned) {
-        record.parent = target;
-        target.children.push(record);
-      }
-    });
-    const order = (record) => record.page * 100_000 + record.index;
-    records.forEach((record) => record.children.sort((a, b) => order(a) - order(b)));
-    return records.filter((record) => !record.parent).sort((a, b) => {
-      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-      return order(a) - order(b);
-    });
-  }
-
-  function getPreviewImageSource(image) {
-    const link = image?.closest?.('a[href]');
-    const candidates = [
-      image?.currentSrc,
-      image?.getAttribute?.('src'),
-      image?.getAttribute?.('data-src'),
-      image?.getAttribute?.('data-original'),
-      link?.getAttribute?.('href'),
-    ];
-    for (const candidate of candidates) {
-      const safe = getSafeUrlAttribute('src', candidate);
-      if (safe) return safe;
-    }
-    return null;
-  }
-
-  function closeImageLightbox() {
-    const lightbox = state.lightbox;
-    if (!lightbox) return;
-    lightbox.cleanup?.();
-    lightbox.overlay?.remove();
-    state.lightbox = null;
-  }
-
-  function openImageLightbox(image) {
-    const source = getPreviewImageSource(image);
-    if (!source) return;
-    closeImageLightbox();
-
-    const overlay = createElement('div', 'xns-lightbox');
-    overlay.tabIndex = -1;
-    overlay.setAttribute('role', 'dialog');
-    overlay.setAttribute('aria-modal', 'true');
-    overlay.setAttribute('aria-label', '图片预览');
-    const stage = createElement('div', 'xns-lightbox-stage');
-    const preview = document.createElement('img');
-    preview.className = 'xns-lightbox-image';
-    preview.src = source;
-    preview.alt = image.getAttribute('alt') || '图片预览';
-    preview.setAttribute('referrerpolicy', 'origin');
-    preview.setAttribute('draggable', 'false');
-    const close = createElement('button', 'xns-lightbox-close', '×');
-    close.type = 'button';
-    close.setAttribute('aria-label', '关闭图片预览');
-    const original = createElement('a', 'xns-lightbox-open', '打开原图');
-    original.href = source;
-    original.target = '_blank';
-    original.rel = 'noopener noreferrer';
-    stage.appendChild(preview);
-    overlay.append(stage, close, original);
-
-    let scale = 1;
-    let offsetX = 0;
-    let offsetY = 0;
-    let dragging = false;
-    let pointerId = null;
-    let startX = 0;
-    let startY = 0;
-    let startOffsetX = 0;
-    let startOffsetY = 0;
-    const render = () => {
-      preview.style.transform = `translate3d(${offsetX}px, ${offsetY}px, 0) scale(${scale})`;
-    };
-    const onWheel = (event) => {
-      event.preventDefault();
-      scale = Math.min(4, Math.max(0.5, scale * (event.deltaY < 0 ? 1.12 : 0.89)));
-      if (scale <= 1) {
-        scale = 1;
-        offsetX = 0;
-        offsetY = 0;
-      }
-      render();
-    };
-    const onPointerDown = (event) => {
-      if (event.button !== 0) return;
-      dragging = true;
-      pointerId = event.pointerId;
-      startX = event.clientX;
-      startY = event.clientY;
-      startOffsetX = offsetX;
-      startOffsetY = offsetY;
-      stage.classList.add('xns-dragging');
-      stage.setPointerCapture?.(event.pointerId);
-      event.preventDefault();
-    };
-    const onPointerMove = (event) => {
-      if (!dragging || event.pointerId !== pointerId) return;
-      offsetX = startOffsetX + event.clientX - startX;
-      offsetY = startOffsetY + event.clientY - startY;
-      render();
-    };
-    const onPointerUp = (event) => {
-      if (event.pointerId !== pointerId) return;
-      dragging = false;
-      pointerId = null;
-      stage.classList.remove('xns-dragging');
-      stage.releasePointerCapture?.(event.pointerId);
-    };
-    const cleanup = () => {
-      stage.removeEventListener('wheel', onWheel);
-      stage.removeEventListener('pointerdown', onPointerDown);
-      stage.removeEventListener('pointermove', onPointerMove);
-      stage.removeEventListener('pointerup', onPointerUp);
-      stage.removeEventListener('pointercancel', onPointerUp);
-    };
-    stage.addEventListener('wheel', onWheel, { passive: false });
-    stage.addEventListener('pointerdown', onPointerDown);
-    stage.addEventListener('pointermove', onPointerMove);
-    stage.addEventListener('pointerup', onPointerUp);
-    stage.addEventListener('pointercancel', onPointerUp);
-    stage.addEventListener('click', (event) => { if (event.target === stage) closeImageLightbox(); });
-    preview.addEventListener('click', (event) => event.stopPropagation());
-    close.addEventListener('click', closeImageLightbox);
-    overlay.addEventListener('click', (event) => { if (event.target === overlay) closeImageLightbox(); });
-    document.body.appendChild(overlay);
-    state.lightbox = { overlay, cleanup };
-    render();
-    overlay.focus();
-  }
-
-  function installPreviewImageFallback(root) {
-    qsa(root, 'img').forEach((image) => {
-      if (image.dataset.xnsImageBound === 'true') return;
-      image.dataset.xnsImageBound = 'true';
-      image.setAttribute('tabindex', '0');
-      image.setAttribute('role', 'button');
-      image.setAttribute('title', '点击放大图片');
-      const open = (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        openImageLightbox(image);
-      };
-      image.addEventListener('click', open);
-      image.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') open(event);
-      });
-      image.addEventListener('error', () => {
-        if (image.nextElementSibling?.matches('.xns-image-error')) return;
-        const message = createElement('span', 'xns-image-error', '图片加载失败：图片站拒绝了当前嵌入来源。仍可点击“打开原图”尝试查看。');
-        image.insertAdjacentElement('afterend', message);
-      }, { once: true });
-    });
-  }
-
-  const ANSI_COLORS = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
-
-  function createAnsiState() {
-    return { fg: '', bg: '', bold: false, dim: false, italic: false, underline: false, strike: false, hidden: false, inverse: false };
-  }
-
-  function applyAnsiCodes(state, rawCodes) {
-    const codes = rawCodes.length ? rawCodes : [0];
-    for (let index = 0; index < codes.length; index += 1) {
-      const code = Number(codes[index]);
-      if (!Number.isFinite(code)) continue;
-      if (code === 0) {
-        Object.assign(state, createAnsiState());
-      } else if (code === 1) {
-        state.bold = true;
-      } else if (code === 2) {
-        state.dim = true;
-      } else if (code === 3) {
-        state.italic = true;
-      } else if (code === 4) {
-        state.underline = true;
-      } else if (code === 7) {
-        state.inverse = true;
-      } else if (code === 8) {
-        state.hidden = true;
-      } else if (code === 9) {
-        state.strike = true;
-      } else if (code === 22) {
-        state.bold = false;
-        state.dim = false;
-      } else if (code === 23) {
-        state.italic = false;
-      } else if (code === 24) {
-        state.underline = false;
-      } else if (code === 27) {
-        state.inverse = false;
-      } else if (code === 28) {
-        state.hidden = false;
-      } else if (code === 29) {
-        state.strike = false;
-      } else if (code === 39) {
-        state.fg = '';
-      } else if (code === 49) {
-        state.bg = '';
-      } else if (code >= 30 && code <= 37) {
-        state.fg = ANSI_COLORS[code - 30];
-      } else if (code >= 40 && code <= 47) {
-        state.bg = ANSI_COLORS[code - 40];
-      } else if (code >= 90 && code <= 97) {
-        state.fg = 'bright-' + ANSI_COLORS[code - 90];
-      } else if (code >= 100 && code <= 107) {
-        state.bg = 'bright-' + ANSI_COLORS[code - 100];
-      } else if (code === 38 || code === 48) {
-        const mode = Number(codes[index + 1]);
-        index += mode === 5 ? 2 : mode === 2 ? 4 : 0;
-      }
-    }
-  }
-
-  function getAnsiClasses(state) {
-    return [
-      state.fg && 'xns-ansi-fg-' + state.fg,
-      state.bg && 'xns-ansi-bg-' + state.bg,
-      state.bold && 'xns-ansi-bold',
-      state.dim && 'xns-ansi-dim',
-      state.italic && 'xns-ansi-italic',
-      state.underline && 'xns-ansi-underline',
-      state.strike && 'xns-ansi-strike',
-      state.hidden && 'xns-ansi-hidden',
-      state.inverse && 'xns-ansi-inverse',
-    ].filter(Boolean);
-  }
-
-  function appendAnsiText(code, text, state) {
-    if (!text) return;
-    const classes = getAnsiClasses(state);
-    if (!classes.length) {
-      code.appendChild(document.createTextNode(text));
-      return;
-    }
-    const span = createElement('span', classes.join(' '));
-    span.textContent = text;
-    code.appendChild(span);
-  }
-
-  function isAnsiCodeBlock(pre) {
-    const code = qs(pre, ':scope > code') || qs(pre, 'code');
-    const className = String(pre.className || '') + ' ' + String(code?.className || '');
-    return Boolean(code && /(?:^|\s)(?:language-ansi|lang-ansi|ansi)(?:\s|$)/i.test(className));
-  }
-
-  function serializeAnsiNode(node) {
-    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || '';
-    if (node.nodeType !== Node.ELEMENT_NODE) return '';
-    let output = '';
-    if (node.matches('span[data-ansicode]')) {
-      const code = Number(node.getAttribute('data-ansicode'));
-      if (Number.isInteger(code) && code >= 0 && code <= 127) output += String.fromCharCode(code);
-    }
-    Array.from(node.childNodes).forEach((child) => {
-      output += serializeAnsiNode(child);
-    });
-    return output;
-  }
-
-  function renderAnsiCodeBlock(pre) {
-    if (!isAnsiCodeBlock(pre)) return;
-    const code = qs(pre, ':scope > code') || qs(pre, 'code');
-    if (!code || code.dataset.xnsAnsiRendered === 'true') return;
-    const source = serializeAnsiNode(code)
-      .replace(/\u0008/g, '')
-      .replace(/\u000d\u000a?/g, '\n')
-      .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, '');
-    clearElement(code);
-    const state = createAnsiState();
-    const ansiPattern = /\u001b\[([0-9;]*)m/g;
-    let cursor = 0;
-    let match;
-    while ((match = ansiPattern.exec(source))) {
-      appendAnsiText(code, source.slice(cursor, match.index), state);
-      applyAnsiCodes(state, match[1].split(';').filter((value) => value !== '').map(Number));
-      cursor = ansiPattern.lastIndex;
-    }
-    appendAnsiText(code, source.slice(cursor), state);
-    code.dataset.xnsAnsiRendered = 'true';
-  }
-
-  function installPreviewAnsiBlocks(root) {
-    qsa(root, '.xns-preview-content pre').forEach(renderAnsiCodeBlock);
-  }
-
-  function installPreviewMagicTabs(root) {
-    qsa(root, '.xns-preview-content .nsk-magic-tabs').forEach((tabs) => {
-      if (tabs.dataset.xnsMagicTabsBound === 'true') return;
-      const titles = qsa(tabs, ':scope > .nsk-magic-tab-title');
-      const bodies = qsa(tabs, ':scope > .nsk-magic-tab-body');
-      if (!titles.length || titles.length !== bodies.length) return;
-      const activate = (selected) => {
-        titles.forEach((title, index) => {
-          const active = index === selected;
-          title.classList.toggle('xns-active', active);
-          title.setAttribute('aria-selected', active ? 'true' : 'false');
-          bodies[index].classList.toggle('xns-active', active);
-          bodies[index].setAttribute('aria-hidden', active ? 'false' : 'true');
-        });
-      };
-      titles.forEach((title, index) => {
-        title.setAttribute('role', 'tab');
-        title.setAttribute('tabindex', '0');
-        title.addEventListener('click', () => activate(index));
-        title.addEventListener('keydown', (event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            activate(index);
-          }
-        });
-      });
-      bodies.forEach((body) => body.setAttribute('role', 'tabpanel'));
-      activate(0);
-      tabs.dataset.xnsMagicTabsBound = 'true';
-    });
-  }
-
-  function getDirectiveText(node) {
-    if (!node || node.nodeType !== Node.ELEMENT_NODE || node.matches('pre, code')) return '';
-    return (node.textContent || '').trim().replace(/\s+/g, ' ');
-  }
-
-  function getMarkdownTabLabel(text) {
-    const match = /^:::\s*tab-item(?:\s+(.+?))?\s*$/i.exec(text);
-    return match?.[1]?.trim() || '标签页';
-  }
-
-  function installPreviewMarkdownTabs(root) {
-    const selector = '.xns-preview-content .post-content, .xns-preview-content article.post-content';
-    const contents = [];
-    if (root?.matches?.(selector)) contents.push(root);
-    contents.push(...qsa(root, selector));
-    contents.forEach((content) => {
-      if (content.dataset.xnsTabsBound === 'true') return;
-      const children = Array.from(content.children);
-      const start = children.findIndex((node) => getDirectiveText(node) === ':::: tabs');
-      if (start < 0) return;
-
-      const tabs = [];
-      const markers = [children[start]];
-      let current = null;
-      let end = -1;
-      for (let index = start + 1; index < children.length; index += 1) {
-        const node = children[index];
-        const text = getDirectiveText(node);
-        const tabMatch = /^:::\s*tab-item(?:\s+(.+?))?\s*$/i.exec(text);
-        if (tabMatch) {
-          current = { label: getMarkdownTabLabel(text), nodes: [] };
-          tabs.push(current);
-          markers.push(node);
-          continue;
-        }
-        if (text === ':::') {
-          markers.push(node);
-          current = null;
-          continue;
-        }
-        if (text === '::::') {
-          markers.push(node);
-          end = index;
-          break;
-        }
-        if (current) current.nodes.push(node);
-      }
-      if (end < 0 || !tabs.length) return;
-
-      const wrapper = createElement('section', 'xns-markdown-tabs');
-      const nav = createElement('div', 'xns-markdown-tabs-nav');
-      nav.setAttribute('role', 'tablist');
-      wrapper.appendChild(nav);
-      const firstNode = children[start];
-      content.insertBefore(wrapper, firstNode);
-      tabs.forEach((tab, tabIndex) => {
-        const button = createElement('button', 'xns-markdown-tab', tab.label);
-        const panel = createElement('div', 'xns-markdown-tab-panel');
-        const active = tabIndex === 0;
-        button.type = 'button';
-        button.setAttribute('role', 'tab');
-        button.setAttribute('aria-selected', active ? 'true' : 'false');
-        panel.setAttribute('role', 'tabpanel');
-        if (active) {
-          button.classList.add('is-active');
-          panel.classList.add('is-active');
-        }
-        tab.nodes.forEach((node) => panel.appendChild(node));
-        button.addEventListener('click', () => {
-          Array.from(nav.children).forEach((item, index) => {
-            const selected = index === tabIndex;
-            item.classList.toggle('is-active', selected);
-            item.setAttribute('aria-selected', selected ? 'true' : 'false');
-          });
-          Array.from(wrapper.querySelectorAll('.xns-markdown-tab-panel')).forEach((item, index) => {
-            item.classList.toggle('is-active', index === tabIndex);
-          });
-        });
-        nav.appendChild(button);
-        wrapper.appendChild(panel);
-      });
-      markers.forEach((node) => node.remove());
-      content.dataset.xnsTabsBound = 'true';
-    });
-  }
-
-  function fallbackCopyText(text) {
-    const textarea = createElement('textarea');
-    textarea.value = text;
-    textarea.setAttribute('readonly', '');
-    textarea.style.position = 'fixed';
-    textarea.style.top = '-10000px';
-    textarea.style.left = '-10000px';
-    textarea.style.opacity = '0';
-    document.body.appendChild(textarea);
-    textarea.focus();
-    textarea.select();
-    let copied = false;
-    try {
-      copied = document.execCommand('copy');
-    } catch {
-      copied = false;
-    }
-    textarea.remove();
-    return copied;
-  }
-
-  function copyText(text) {
-    if (navigator.clipboard?.writeText) {
-      return navigator.clipboard.writeText(text).catch(() => {
-        if (!fallbackCopyText(text)) throw new Error('copy failed');
-      });
-    }
-    return fallbackCopyText(text) ? Promise.resolve() : Promise.reject(new Error('copy failed'));
-  }
-
-  function installPreviewFeatures(root) {
-    installPreviewMagicTabs(root);
-    installPreviewMarkdownTabs(root);
-    installPreviewAnsiBlocks(root);
-    installPreviewImageFallback(root);
-    installPreviewCodeBlocks(root);
-    installPreviewVotePanels(root);
-  }
-
-  function installPreviewCodeBlocks(root) {
-    qsa(root, '.xns-preview-content pre').forEach((pre) => {
-      if (pre.dataset.xnsCodeBound === 'true') return;
-      const code = qs(pre, ':scope > code') || qs(pre, 'code');
-      if (!code) return;
-
-      pre.dataset.xnsCodeBound = 'true';
-      pre.classList.add('xns-code-block');
-      const button = createElement('button', 'xns-code-copy-btn', '复制');
-      button.type = 'button';
-      button.setAttribute('aria-label', '复制代码');
-      button.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const text = code.innerText ?? code.textContent ?? '';
-        button.disabled = true;
-        void copyText(text).then(() => {
-          button.textContent = '已复制';
-          button.classList.remove('xns-copy-failed');
-        }).catch(() => {
-          button.textContent = '复制失败';
-          button.classList.add('xns-copy-failed');
-        }).finally(() => {
-          window.setTimeout(() => {
-            if (!button.isConnected) return;
-            button.disabled = false;
-            button.textContent = '复制';
-            button.classList.remove('xns-copy-failed');
-          }, 2_000);
-        });
-      });
-      pre.appendChild(button);
-    });
-  }
-
-  function getDirectCommentMenu(comment) {
-    return Array.from(comment?.children || []).find((child) => child.matches?.('.comment-menu, .comment-actions')) || null;
-  }
-
-  function getMenuActionKey(menuItem) {
-    const values = [
-      menuItem?.dataset?.action,
-      menuItem?.dataset?.type,
-      menuItem?.getAttribute?.('title'),
-      menuItem?.getAttribute?.('aria-label'),
-      menuItem?.textContent,
-    ].filter(Boolean).join(' ').toLowerCase();
-    if (/\b(like|upvote)\b|点赞/.test(values)) return 'like';
-    if (/\b(chicken|freelike)\b|鸡腿|投喂/.test(values)) return 'chicken';
-    if (/\b(dislike|downvote)\b|反对|踩/.test(values)) return 'dislike';
-    if (/\b(favorite|favourite|collection)\b|收藏/.test(values)) return 'favorite';
-    if (/\bquote\b|引用/.test(values)) return 'quote';
-    if (/\breply\b|回复/.test(values)) return 'reply';
-    return '';
-  }
-
-  function createPreviewMenu(includeFavorite = true) {
-    const menu = createElement('div', 'comment-menu xns-preview-menu');
-    const actions = [
-      ['like', '点赞', '♡', true],
-      ['chicken', '加鸡腿', '🍗', true],
-      ['dislike', '反对', '♧', true],
-      ['favorite', '收藏', '☆', true],
-      ['quote', '引用', '❝', false],
-      ['reply', '回复', '↩', false],
-    ].filter(([key]) => includeFavorite || key !== 'favorite');
-    actions.forEach(([key, label, icon, withCount]) => {
-      const item = createElement('span', 'menu-item');
-      item.dataset.xnsAction = key;
-      item.title = label;
-      item.setAttribute('role', 'button');
-      item.tabIndex = 0;
-      const iconNode = createElement('span', 'xns-action-icon', icon);
-      iconNode.setAttribute('aria-hidden', 'true');
-      item.appendChild(iconNode);
-      if (withCount) item.appendChild(createElement('span', 'xns-action-count', '0'));
-      item.appendChild(createElement('span', 'xns-action-label', label));
-      menu.appendChild(item);
-    });
-    return menu;
-  }
-
-  function ensurePreviewMenu(comment, options = {}) {
-    const includeFavorite = options.includeFavorite !== false;
-    let menu = getDirectCommentMenu(comment);
-    if (!menu) {
-      menu = createPreviewMenu(includeFavorite);
-      comment.appendChild(menu);
-    } else {
-      menu.classList.add('comment-menu', 'xns-preview-menu');
-      if (!includeFavorite) qsa(menu, ':scope > .menu-item').filter((item) => getMenuActionKey(item) === 'favorite').forEach((item) => item.remove());
-      const existingActions = new Set(qsa(menu, ':scope > .menu-item').map(getMenuActionKey).filter(Boolean));
-      qsa(createPreviewMenu(includeFavorite), ':scope > .menu-item').forEach((item) => {
-        const action = item.dataset.xnsAction;
-        if (action && !existingActions.has(action)) menu.appendChild(item);
-      });
-    }
-    qsa(menu, ':scope > .menu-item').forEach((item) => {
-      const action = getMenuActionKey(item);
-      if (action) {
-        item.dataset.xnsAction = action;
-        if (action === 'favorite' && /已收藏|取消收藏/.test(`${item.title} ${item.textContent}`)) item.dataset.xnsFavoriteState = 'added';
-      }
-      if (!item.hasAttribute('role')) item.setAttribute('role', 'button');
-      if (!item.hasAttribute('tabindex')) item.tabIndex = 0;
-      if (item.dataset.xnsKeyBound !== 'true') {
-        item.dataset.xnsKeyBound = 'true';
-        item.addEventListener('keydown', (event) => {
-          if (event.key !== 'Enter' && event.key !== ' ') return;
-          event.preventDefault();
-          item.click();
-        });
-      }
-    });
-    const counts = options.counts || null;
-    if (counts) {
-      qsa(menu, ':scope > .menu-item').forEach((item) => {
-        const action = getMenuActionKey(item);
-        const value = counts[action];
-        const countNode = qs(item, ':scope > .xns-action-count') || getMenuCountElement(item);
-        if (countNode && Number.isFinite(value) && value >= 0) countNode.textContent = String(value);
-        if (action === 'favorite' && counts.collected && item.dataset.xnsFavoriteState !== 'removed') {
-          item.dataset.xnsFavoriteState = 'added';
-        }
-      });
-    }
-    return menu;
-  }
-
-  function getCommentId(comment) {
-    const value = comment?.getAttribute('data-comment-id') || '';
-    return safePositiveInt(value);
-  }
-
-  function getDisplayFloor(comment) {
-    const raw = comment?.getAttribute('data-xns-floor') || comment?.getAttribute('id') || '';
-    if (raw === '0') return 0;
-    return getFloor(comment);
-  }
-
-  function getActionTargetId(comment) {
-    const commentId = getCommentId(comment);
-    if (commentId !== null) return commentId;
-    if (comment?.getAttribute('data-xns-target-type') === 'post') {
-      return safePositiveInt(comment.getAttribute('data-xns-post-id') || '') || safePositiveInt(state.modal?.postId || '');
-    }
-    return null;
-  }
-
-  function getPageActionContext() {
-    const info = pageInfo || getPostInfo(window.location.href);
-    return {
-      modal: null,
-      postId: info?.postId || '',
-      url: parseSameOriginUrl(window.location.href),
-    };
-  }
-
-  function getActionContext(menuItem) {
-    const modal = menuItem?.closest?.('.xns-overlay') ? state.modal : null;
-    if (modal) return { modal, postId: modal.postId, url: modal.url };
-    return getPageActionContext();
-  }
-
-  // NodeSeek 对所有 /api/ 请求校验 x-dynamic-sign：对
-  // `method + "\n\n" + url + "\n\n" + userAgent + "\n\n" + body` 做 SHA-1（hex）。
-  // 计算失败时站点自身回退为 40 个 'a'，这里同样回退。
-  async function dynamicSign(method, url, body) {
-    const input = `${method}\n\n${url}\n\n${navigator.userAgent || ''}\n\n${body || ''}`;
-    try {
-      const digest = await window.crypto.subtle.digest('SHA-1', new TextEncoder().encode(input));
-      return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-    } catch {
-      return 'a'.repeat(40);
-    }
-  }
-
-  // NodeSeek 的 /api/content/* 写接口额外要求带一个客户端随机生成的 `csrf-token` 头；
-  // 站点编辑器每次提交都用 e4(16) 现造 16 位字母数字（纯 Math.random，无服务端往返），
-  // 说明服务端只校验该头存在。缺失会被拒为 "csrf check error"（0.5.12 曾误删，回复全挂）。
-  function randomCsrfToken() {
-    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    const bytes = new Uint8Array(16);
-    if (window.crypto?.getRandomValues) window.crypto.getRandomValues(bytes);
-    else for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
-    let token = '';
-    bytes.forEach((byte) => { token += alphabet[byte % alphabet.length]; });
-    return token;
-  }
-
-  async function postAction(path, payload, options = {}) {
-    const contextUrl = options.context?.url?.href || state.modal?.url?.href || window.location.href;
-    const endpoint = parseSameOriginUrl(path, contextUrl);
-    const allowed = new Set(['/api/statistics/upvote', '/api/statistics/like', '/api/statistics/dislike', '/api/statistics/collection', '/api/content/new-comment', '/api/vote/voteforitem']);
-    if (!endpoint || !allowed.has(endpoint.pathname)) throw new Error('操作地址不是 NodeSeek 同源接口');
-
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
-    const bodyText = JSON.stringify(payload);
-    const requestHeaders = {
-      Accept: 'application/json, text/plain, */*',
-      'Content-Type': 'application/json',
-      'X-Requested-With': 'XMLHttpRequest',
-      // 站点 /api/content/* 写接口强制校验该头存在（0.5.12 曾误删导致回复全挂）。
-      'csrf-token': randomCsrfToken(),
-      ...(options.headers || {}),
-    };
-    if (window.crypto?.subtle) requestHeaders['x-dynamic-sign'] = await dynamicSign('POST', endpoint.href, bodyText);
-    try {
-      const response = await fetch(endpoint.href, {
-        method: 'POST',
-        credentials: 'same-origin',
-        cache: 'no-store',
-        redirect: 'error',
-        referrer: contextUrl,
-        referrerPolicy: 'same-origin',
-        headers: requestHeaders,
-        body: bodyText,
-        signal: controller.signal,
-      });
-      const text = await response.text();
-      let data = null;
-      try { data = text ? JSON.parse(text) : null; } catch { /* 某些接口成功时不返回 JSON。 */ }
-      const contentType = (response.headers.get('content-type') || '').toLowerCase();
-      const explicitFailure = data && typeof data === 'object' && (
-        data.success === false || data.ok === false || data.error === true ||
-        (typeof data.status === 'string' && /fail|error|unauthor|denied/i.test(data.status)) ||
-        (typeof data.code === 'string' && /fail|error|unauthor|denied/i.test(data.code))
-      );
-      if (!response.ok || explicitFailure || (!data && /text\/html|<html[\s>]|登录|禁止访问/i.test(`${contentType} ${text.slice(0, 500)}`))) {
-        const message = data?.message || data?.msg || text.replace(/<[^>]+>/g, ' ').trim().slice(0, 120);
-        throw new Error(message || `HTTP ${response.status}`);
-      }
-      return data;
-    } finally {
-      window.clearTimeout(timer);
-    }
-  }
-
-  function setActionState(menuItem, text, failed = false) {
-    menuItem.classList.toggle('xns-action-failed', failed);
-    let stateNode = qs(menuItem, ':scope > .xns-action-state');
-    if (!stateNode) {
-      stateNode = createElement('span', 'xns-action-state');
-      menuItem.appendChild(stateNode);
-    }
-    stateNode.textContent = text;
-  }
-
-  function getMenuCountElement(menuItem) {
-    return qsa(menuItem, ':scope > span').find((node) => /^\d+$/.test((node.textContent || '').trim())) || null;
-  }
-
-  function bumpMenuCount(menuItem, delta) {
-    const count = getMenuCountElement(menuItem);
-    if (!count) return;
-    const value = Number(count.textContent || 0);
-    count.textContent = String(Math.max(0, value + delta));
-  }
-
-  function getPreviewCommentText(comment) {
-    const content = getPostContent(comment);
-    if (!content) return '';
-    const copy = content.cloneNode(true);
-    qsa(copy, '.xns-remote-floor-link, .floor-link-wrapper').forEach((node) => node.remove());
-    return (copy.innerText || copy.textContent || '').trim().slice(0, 12_000);
-  }
-
-  function getPreviewSourceUrl(comment, context = null) {
-    const contextUrl = context?.url?.href || state.modal?.url?.href || window.location.href;
-    if (!comment) return contextUrl;
-    const contextInfo = getPostInfo(contextUrl);
-    const modalInfo = context?.postId
-      ? { postId: String(context.postId), page: contextInfo?.page || 1 }
-      : (contextInfo || (state.modal?.postId ? { postId: state.modal.postId, page: 1 } : null));
-    if (!modalInfo) return contextUrl;
-    const page = safePositiveInt(comment?.getAttribute('data-xns-source-page')) || modalInfo.page;
-    const floor = getDisplayFloor(comment);
-    const url = new URL(`/post-${modalInfo.postId}-${page}`, window.location.origin);
-    if (floor !== null) url.hash = String(floor);
-    return url.href;
-  }
-
-  function getDirectComposer(comment) {
-    return Array.from(comment?.children || []).find((child) => child.matches?.(':scope.xns-preview-composer')) || null;
-  }
-
-  function openPreviewComposer(action, comment, context = null) {
-    const modal = context?.modal || state.modal;
-    const actionContext = context || {
-      modal,
-      postId: modal?.postId || pageInfo?.postId || '',
-      url: modal?.url || parseSameOriginUrl(window.location.href),
-    };
-    const host = modal?.body || (comment ? comment : findCommentList());
-    if (!host) return;
-    const isPostReply = !comment || action === 'post-reply';
-    // 帖子回复只有一个入口；楼层回复按楼层独立保存，允许同时打开多个编辑器。
-    const previousComposer = isPostReply
-      ? (modal?.composer || state.post?.composer)
-      : getDirectComposer(comment);
-    previousComposer?.remove();
-    const floor = isPostReply ? null : getDisplayFloor(comment);
-    const author = isPostReply ? '' : getAuthorName(comment);
-    const isReply = action === 'reply' && !isPostReply;
-    const composer = createElement('section', 'xns-preview-composer');
-    const floorLabel = floor === null ? '' : floor;
-    const composerTitle = isPostReply ? '回复帖子' : `${isReply ? '回复' : '引用'} #${floorLabel} · ${author}`;
-    composer.appendChild(createElement('h3', 'xns-preview-composer-title', composerTitle));
-    const textarea = document.createElement('textarea');
-    textarea.setAttribute('aria-label', isPostReply || isReply ? '回复内容' : '引用内容');
-    const sourceUrl = isPostReply ? (actionContext.url?.href || window.location.href) : getPreviewSourceUrl(comment, actionContext);
-    if (isPostReply) {
-      textarea.placeholder = '输入对帖子的回复内容…';
-      textarea.value = '';
-    } else {
-      const replyToken = `@${author} [#${floorLabel}](${sourceUrl})`;
-      const quoted = getPreviewCommentText(comment).split(/\r?\n/).slice(0, 80).map((line) => `> ${line}`).join('\n');
-      textarea.value = isReply ? `${replyToken} ` : `> ${replyToken}\n${quoted}\n\n`;
-    }
-    composer.appendChild(textarea);
-
-    const actions = createElement('div', 'xns-preview-composer-actions');
-    const submit = createElement('button', '', '发送回复');
-    submit.type = 'button';
-    const original = createElement('a', '', '打开原帖回复');
-    original.href = getPreviewSourceUrl(comment, actionContext);
-    original.target = '_blank';
-    original.rel = 'noopener noreferrer';
-    const cancel = createElement('button', '', '取消');
-    cancel.type = 'button';
-    const status = createElement('span', 'xns-preview-composer-status');
-    actions.append(submit, original, cancel, status);
-    composer.appendChild(actions);
-    if (isPostReply && modal?.body) {
-      modal.body.appendChild(composer);
-      modal.composer = composer;
-    } else {
-      const menu = qs(comment, '.xns-preview-menu');
-      if (menu) menu.insertAdjacentElement('afterend', composer);
-      else host.appendChild(composer);
-      if (isPostReply && state.post) state.post.composer = composer;
-    }
-    textarea.focus();
-    composer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
-    cancel.addEventListener('click', () => {
-      composer.remove();
-      if (modal?.composer === composer) modal.composer = null;
-      if (!modal && state.post?.composer === composer) state.post.composer = null;
-    });
-    submit.addEventListener('click', async () => {
-      const content = textarea.value.trim();
-      if (!content) {
-        status.textContent = '请输入内容。';
-        textarea.focus();
-        return;
-      }
-      submit.disabled = true;
-      status.textContent = '正在发送…';
-      try {
-        await postAction('/api/content/new-comment', {
-          content,
-          mode: 'new-comment',
-          postId: Number(actionContext.postId),
-        }, { context: actionContext });
-        status.textContent = '回复已发送，正在更新楼中楼…';
-        textarea.readOnly = true;
-        submit.remove();
-        if (actionContext.modal && state.modal === actionContext.modal) {
-          // 回复已完成使命：刷新前清掉引用，防止 loadPreviewModal 把
-          // 已发送的编辑器当“进行中的草稿”重新挂回 body。
-          if (actionContext.modal.composer === composer) actionContext.modal.composer = null;
-          const refreshed = await loadPreviewModal(actionContext.modal, '正在更新回复…', { preserveContent: true });
-          if (refreshed) {
-            // 发送并刷新成功：编辑器连同状态提示一起移除，不留残留。
-            composer.remove();
-          } else {
-            status.textContent = '回复已发送。帖子正在刷新中，楼中楼可能暂未包含新回复，请稍后再点刷新。';
-          }
-        } else if (state.post) {
-          const post = state.post;
-          if (post.composer === composer) post.composer = null;
-          composer.remove();
-          // refreshCurrentPage：重抓当前页把刚发的回复并入快照，楼中楼立刻可见。
-          await post.reloadPages({ refreshCurrentPage: true });
-        }
-      } catch (error) {
-        status.textContent = `发送失败：${error.message || '网络错误'}`;
-        submit.disabled = false;
-      }
-    });
-  }
-
-  async function runPreviewAction(action, menuItem, comment, context = null) {
-    const actionContext = context || getActionContext(menuItem);
-    if (action === 'quote' || action === 'reply') {
-      openPreviewComposer(action, comment, actionContext);
-      return;
-    }
-
-    const postId = safePositiveInt(actionContext?.postId || '');
-    const targetId = getActionTargetId(comment);
-    if ((action !== 'favorite' && targetId === null) || (action === 'favorite' && postId === null)) {
-      setActionState(menuItem, action === 'favorite' ? '缺少帖子ID' : '缺少目标ID', true);
-      return;
-    }
-    if (action !== 'favorite' && menuItem.dataset.xnsActionDone === 'true') {
-      setActionState(menuItem, '已操作');
-      return;
-    }
-    if (menuItem.classList.contains('xns-action-pending')) return;
-    if (action === 'chicken' && !window.confirm('确认给这条评论加鸡腿？NodeSeek 可能会消耗鸡腿。')) return;
-    if (action === 'dislike' && !window.confirm('确认反对这条评论？NodeSeek 可能会消耗两个鸡腿。')) return;
-
-    const isFavoriteRemoval = action === 'favorite' && menuItem.dataset.xnsFavoriteState === 'added';
-    menuItem.classList.add('xns-action-pending');
-    menuItem.classList.remove('xns-action-failed');
-    setActionState(menuItem, '处理中…');
-    try {
-      if (action === 'like') {
-        // /aics/upvote 已失效（恒定 404），直接调用站点实际的点赞接口。
-        await postAction('/api/statistics/upvote', { commentId: targetId, action: 'add' }, { context: actionContext });
-      } else if (action === 'chicken') {
-        await postAction('/api/statistics/like', { commentId: targetId, action: 'add' }, { context: actionContext });
-      } else if (action === 'dislike') {
-        await postAction('/api/statistics/dislike', { commentId: targetId, action: 'add' }, { context: actionContext });
-      } else if (action === 'favorite') {
-        await postAction('/api/statistics/collection', { action: isFavoriteRemoval ? 'del' : 'add', postId }, { context: actionContext });
-      }
-      if (action === 'favorite') {
-        menuItem.dataset.xnsFavoriteState = isFavoriteRemoval ? 'removed' : 'added';
-        bumpMenuCount(menuItem, isFavoriteRemoval ? -1 : 1);
-      } else {
-        menuItem.dataset.xnsActionDone = 'true';
-        bumpMenuCount(menuItem, 1);
-      }
-      setActionState(menuItem, '✓');
-      window.setTimeout(() => {
-        if (menuItem.isConnected && !menuItem.classList.contains('xns-action-failed')) qs(menuItem, ':scope > .xns-action-state')?.remove();
-      }, 1_800);
-    } catch (error) {
-      setActionState(menuItem, `失败：${error.message || '操作未完成'}`, true);
-    } finally {
-      menuItem.classList.remove('xns-action-pending');
-    }
-  }
-
-  function collectPageRecords(info, root, page) {
-    const state = getDocState(root);
-    return getCommentItems(root).map((item, index) => getCommentRecord(item, info.postId, page, index, false, { keepCommentMenu: true, state })).filter(Boolean);
-  }
-
-  // 并发拉取同帖的所有分页（含分页器里动态发现的新页码）。
-  // MAX_PAGE 防超长帖拖垮浏览器：总页数超过上限时只读取前 MAX_PAGE 页，
-  // 返回 truncated 让调用方向用户明示“部分楼层未加载”，而不是静默丢弃。
-  async function fetchPostPages(info, firstDocument, options = {}) {
-    const noStore = options.noStore !== false;
-    const pageDocs = new Map([[info.page, firstDocument]]);
-    const failedPages = [];
-    const pages = new Set([info.page]);
-    const discovered = getPageNumbers(firstDocument, info.postId);
-    const totalPages = discovered.size ? Math.max(...discovered, info.page) : info.page;
-    const truncated = totalPages > MAX_PAGE;
-    discovered.forEach((page) => {
-      if (page <= MAX_PAGE) pages.add(page);
-    });
-    const maxSeed = truncated ? MAX_PAGE : Math.min(MAX_PAGE, Math.max(...pages));
-    for (let page = 1; page <= maxSeed; page += 1) pages.add(page);
-    pages.delete(info.page);
-
-    const pending = Array.from(pages).sort((a, b) => a - b);
-    const worker = async () => {
-      while (pending.length) {
-        if (options.isAborted?.()) return;
-        const page = pending.shift();
-        if (page === undefined || pageDocs.has(page)) continue;
-        try {
-          const { html } = await fetchHtml(new URL(`/post-${info.postId}-${page}`, window.location.origin), { noStore });
-          const parsed = parseHtml(html);
-          pageDocs.set(page, parsed);
-          getPageNumbers(parsed, info.postId).forEach((foundPage) => {
-            if (foundPage <= MAX_PAGE && !pages.has(foundPage) && foundPage !== info.page) {
-              pages.add(foundPage);
-              pending.push(foundPage);
-            }
-          });
-        } catch {
-          failedPages.push(page);
-        }
-      }
-    };
-    const workerCount = Math.min(PAGE_CONCURRENCY, Math.max(1, pending.length));
-    await Promise.all(Array.from({ length: workerCount }, () => worker()));
-    return { pageDocs, failedPages, truncated, totalPages };
-  }
-
-  async function loadPreviewRecords(info, firstDocument, options = {}) {
-    const { pageDocs, failedPages, truncated, totalPages } = await fetchPostPages(info, firstDocument, options);
-    const allRecords = [];
-    pageDocs.forEach((root, page) => {
-      allRecords.push(...collectPageRecords(info, root, page));
-    });
-    const unique = new Map();
-    allRecords.forEach((record) => {
-      if (!unique.has(record.floor)) unique.set(record.floor, record);
-    });
-    return { records: Array.from(unique.values()), loadedPages: pageDocs.size, failedPages, truncated, totalPages };
-  }
-
-  function ensurePreviewEditOption(node, record) {
-    if (!node || !record?.isMine) return;
-    const menu = getDirectCommentMenu(node);
-    if (!menu) return;
-    // 楼中楼重排会卸载 Vue 组件，官方“编辑”项即使残留也已失效；
-    // 找到官方项直接接管（附脚本点击，无官方项才创建）。
-    let item = qsa(menu, ':scope > .menu-item').find((el) => (el.textContent || '' ).trim() === '编辑' && !el.dataset?.xnsAction);
-    if (!item) {
-      item = createElement('span', 'menu-item');
-      item.setAttribute('role', 'button');
-      item.tabIndex = 0;
-      item.innerHTML = '<svg class="iconpark-icon" aria-hidden="true"><use href="#edit"></use></svg><span>编辑</span>';
-      menu.appendChild(item);
-    }
-    if (item.dataset.xnsEditBound === 'true') return;
-    item.dataset.xnsEditBound = 'true';
-    item.addEventListener('click', function (event) {
-      // 新标签打开原帖该楼层，Vue 全新挂载后可正常编辑。
-
-      event.preventDefault();
-      event.stopPropagation();
-      const postId = record.postId || pageInfo?.postId || getPostInfo(window.location.href)?.postId || '';
-      const floor = record?.floor;
-      const url = `/post-${postId}-${record.page || 1}${floor >= 0 ? '#' + floor : ''}`;
-      window.open(url, '_blank', 'noopener');
-    });
-  }
-
-  function prepareCommentRecord(record, depth) {
-    stripRenderArtifacts(record.node);
-    record.node.setAttribute('data-xns-floor', String(record.floor));
-    if (!record.current) {
-      record.node.setAttribute('data-xns-remote', 'true');
-      record.node.setAttribute('data-xns-source-page', String(record.page));
-    }
-    record.node.classList.add(depth === 0 ? 'xns-comment-root' : 'xns-comment-child');
-    if (depth > 0 && record.parent) record.node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
-    ensurePreviewMenu(record.node, { includeFavorite: false, counts: record.counts || undefined });
-    ensurePreviewEditOption(record.node, record);
-  }
-
-  function appendNestedRecord(record, container, depth, prepareRecord) {
-    prepareRecord(record, depth);
-    container.appendChild(record.node);
-    if (!record.children.length) return;
-    const replyList = createElement('ul', 'xns-reply-list');
-    record.children.forEach((child) => appendNestedRecord(child, replyList, depth + 1, prepareRecord));
-    record.node.appendChild(replyList);
-  }
-
-  function buildPreviewPostNode(parsed, info) {
-    const postRoot = qs(parsed, '.nsk-post');
-    const source = postRoot?.matches?.('.content-item')
-      ? postRoot
-      : qs(postRoot, ':scope > .content-item, .content-item') || postRoot || qs(parsed, SELECTORS.postContent);
-    let node = sanitizeImportedNode(source, { keepCommentMenu: true });
-    if (!node) return null;
-    if (node.matches?.('article.post-content')) {
-      const wrapper = createElement('div', 'content-item');
-      wrapper.appendChild(node);
-      node = wrapper;
-    }
-    node.classList.add('content-item', 'xns-preview-post', 'xns-comment-root');
-    node.setAttribute('data-xns-floor', '0');
-    node.setAttribute('data-xns-target-type', 'post');
-    node.setAttribute('data-xns-post-id', info.postId);
-    const postState = getDocState(parsed);
-    const postCommentId = getCommentId(node);
-    const counts = postCommentId !== null && postState ? getSsrCommentCounts(postState, postCommentId) : null;
-    if (counts) {
-      const collectionCount = safeCount(postState?.postData?.collectionCount);
-      if (collectionCount !== null) counts.favorite = collectionCount;
-      if (postState?.postData?.collected) counts.collected = true;
-    }
-    ensurePreviewMenu(node, { includeFavorite: true, counts });
-    return node;
-  }
-
-  function renderPreviewRecords(section, info, records, options = {}) {
-    const heading = qs(section, ':scope > h3');
-    const thread = qs(section, ':scope > .xns-preview-thread');
-    if (!heading || !thread) return;
-    heading.textContent = `楼中楼预览 · ${records.length} 条回复`;
-    clearElement(thread);
-    qs(section, ':scope > .xns-preview-empty')?.remove();
-    qsa(section, ':scope > .xns-page-loading, :scope > .xns-page-failed').forEach((node) => node.remove());
-    if (records.length) {
-      buildReplyTree(records).forEach((record) => appendNestedRecord(record, thread, 0, prepareCommentRecord));
-      // “打开原楼层”只用于跨页评论；当前页评论在预览里已有原文，不重复放来源链接。
-      records.forEach((record) => {
-        if (record.page !== info.page) addRemoteNote(record, info.postId);
-      });
-    } else {
-      section.appendChild(createElement('p', 'xns-status xns-preview-empty', '没有读取到评论。'));
-    }
-    if (options.loading) {
-      section.appendChild(createElement('p', 'xns-status xns-page-loading', '正在加载其他分页…'));
-    }
-    if (options.failedPages?.length) {
-      section.appendChild(createElement('p', 'xns-status xns-page-failed', `已读取 ${options.loadedPages} 页，${options.failedPages.length} 页读取失败。`));
-    }
-    if (options.truncated) {
-      section.appendChild(createElement('p', 'xns-status xns-page-truncated', `帖子共 ${options.totalPages} 页，只读取了前 ${MAX_PAGE} 页，后面页的楼层没有显示。`));
-    }
-  }
-
-  function buildPreviewContent(url, parsed, options = {}) {
-    const wrapper = createElement('div', 'xns-preview-content');
-    const title = qs(parsed, SELECTORS.postTitle)?.textContent?.trim() || '';
-    const info = getPostInfo(url.href);
-    const importedPost = info ? buildPreviewPostNode(parsed, info) : null;
-    if (importedPost) {
-      wrapper.appendChild(importedPost);
-    } else {
-      const content = qs(parsed, SELECTORS.postContent);
-      const importedContent = sanitizeImportedNode(content);
-      if (importedContent) wrapper.appendChild(importedContent);
-      else wrapper.appendChild(createElement('p', 'xns-status', '没有找到帖子正文。'));
-    }
-    if (!info) return { title, content: wrapper, hydrate: null };
-    const currentRecords = collectPageRecords(info, parsed, info.page);
-    const knownPages = getPageNumbers(parsed, info.postId);
-    const hasRemotePages = Array.from(knownPages).some((page) => page !== info.page);
-    const section = createElement('section', 'xns-preview-comments');
-    section.appendChild(createElement('h3', '', '楼中楼预览'));
-    const thread = createElement('ul', 'xns-preview-thread');
-    section.appendChild(thread);
-    renderPreviewRecords(section, info, currentRecords, { loading: hasRemotePages });
-    wrapper.appendChild(section);
-    const hydrate = loadPreviewRecords(info, parsed, { noStore: options.noStore === true }).then((preview) => {
-      if (section.isConnected || options.renderDetached === true) renderPreviewRecords(section, info, preview.records, preview);
-      return preview;
-    });
-    return { title, content: wrapper, hydrate };
-  }
-
-  function getPreviewScrollOwners(body) {
-    return qsa(body, '.xns-preview-post, .xns-preview-thread .content-item[data-comment-id], .xns-preview-thread .content-item[data-xns-floor]');
-  }
-
-  function getPreviewScrollOwner(node) {
-    return node?.closest?.('.xns-preview-post, .xns-preview-thread .content-item[data-comment-id], .xns-preview-thread .content-item[data-xns-floor]') || null;
-  }
-
-  function getPreviewScrollCandidates(body) {
-    const seen = new Set();
-    const candidates = [];
-    getPreviewScrollOwners(body).forEach((owner) => {
-      const blocks = [
-        owner,
-        ...qsa(owner, ':scope > .post-title, :scope > .nsk-content-meta-info, :scope > article.post-content > *, :scope > .post-content > *'),
-      ];
-      blocks.forEach((node) => {
-        if (!node || seen.has(node) || getPreviewScrollOwner(node) !== owner) return;
-        seen.add(node);
-        candidates.push(node);
-      });
-    });
-    return candidates;
-  }
-
-  function getPreviewChildPath(owner, node) {
-    const path = [];
-    let current = node;
-    while (current && current !== owner) {
-      const parent = current.parentElement;
-      if (!parent) return [];
-      const index = Array.prototype.indexOf.call(parent.children, current);
-      if (index < 0) return [];
-      path.unshift(index);
-      current = parent;
-    }
-    return current === owner ? path : [];
-  }
-
-  function capturePreviewScroll(body) {
-    const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
-    const snapshot = {
-      scrollTop: body.scrollTop,
-      maxScrollTop,
-      ratio: maxScrollTop > 0 ? body.scrollTop / maxScrollTop : 0,
-      atTop: body.scrollTop <= 3,
-      atBottom: maxScrollTop - body.scrollTop <= 24,
-      anchor: null,
-    };
-    if (snapshot.atTop || snapshot.atBottom || maxScrollTop === 0) return snapshot;
-
-    const bodyRect = body.getBoundingClientRect();
-    const anchorLine = bodyRect.top + Math.min(12, Math.max(2, body.clientHeight * 0.03));
-    const rows = getPreviewScrollCandidates(body).map((node) => ({ node, rect: node.getBoundingClientRect() }))
-      .filter(({ rect }) => rect.height > 0 && rect.bottom > bodyRect.top && rect.top < bodyRect.bottom);
-    const crossing = rows.filter(({ rect }) => rect.top <= anchorLine && rect.bottom > anchorLine);
-    const chosen = crossing.reduce((best, row) => (!best || row.rect.top > best.rect.top ? row : best), null)
-      || rows.filter(({ rect }) => rect.top > anchorLine).sort((left, right) => left.rect.top - right.rect.top)[0]
-      || null;
-    if (!chosen) return snapshot;
-
-    const owner = getPreviewScrollOwner(chosen.node);
-    if (!owner) return snapshot;
-    const isPost = owner.matches('.xns-preview-post, [data-xns-target-type="post"]');
-    snapshot.anchor = {
-      isPost,
-      commentId: isPost ? '' : (owner.getAttribute('data-comment-id') || ''),
-      floor: owner.getAttribute('data-xns-floor') || '',
-      path: getPreviewChildPath(owner, chosen.node),
-      tagName: chosen.node.tagName,
-      offset: chosen.rect.top - bodyRect.top,
-    };
-    return snapshot;
-  }
-
-  function findPreviewScrollOwner(body, anchor) {
-    if (anchor.isPost) return qs(body, '.xns-preview-post, [data-xns-target-type="post"]');
-    if (anchor.commentId) {
-      const byCommentId = qs(body, '.xns-preview-thread .content-item[data-comment-id="' + CSS.escape(anchor.commentId) + '"]');
-      if (byCommentId) return byCommentId;
-    }
-    if (anchor.floor) {
-      return qs(body, '.xns-preview-thread .content-item[data-xns-floor="' + CSS.escape(anchor.floor) + '"]');
-    }
-    return null;
-  }
-
-  function resolvePreviewScrollAnchor(body, anchor) {
-    const owner = findPreviewScrollOwner(body, anchor);
-    if (!owner) return null;
-    let node = owner;
-    for (const index of anchor.path || []) {
-      node = node?.children?.[index] || null;
-      if (!node) return owner;
-    }
-    return !anchor.tagName || node.tagName === anchor.tagName ? node : owner;
-  }
-
-  function restorePreviewScroll(body, snapshot) {
-    if (!snapshot) return;
-    const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
-    if (snapshot.atTop) {
-      body.scrollTop = 0;
-      return;
-    }
-    if (snapshot.atBottom) {
-      body.scrollTop = maxScrollTop;
-      return;
-    }
-
-    const anchor = snapshot.anchor ? resolvePreviewScrollAnchor(body, snapshot.anchor) : null;
-    if (anchor) {
-      const currentOffset = anchor.getBoundingClientRect().top - body.getBoundingClientRect().top;
-      const targetScrollTop = body.scrollTop + currentOffset - snapshot.anchor.offset;
-      body.scrollTop = Math.max(0, Math.min(targetScrollTop, maxScrollTop));
-      return;
-    }
-
-    const proportional = Number.isFinite(snapshot.ratio) ? snapshot.ratio * maxScrollTop : snapshot.scrollTop;
-    body.scrollTop = Math.max(0, Math.min(proportional, maxScrollTop));
-  }
-
-  function stabilizePreviewScroll(modal, snapshot, generation) {
-    modal.refreshScrollCleanup?.();
-    const body = modal.body;
-    let active = true;
-    let frame = 0;
-    const timers = [];
-    const imageHandlers = [];
-    const apply = () => {
-      frame = 0;
-      if (!active || state.modal !== modal || modal.loadGeneration !== generation) return;
-      restorePreviewScroll(body, snapshot);
-    };
-    const schedule = () => {
-      if (!active || frame) return;
-      frame = window.requestAnimationFrame(apply);
-    };
-    const cleanup = () => {
-      if (!active) return;
-      active = false;
-      if (frame) window.cancelAnimationFrame(frame);
-      timers.forEach((timer) => window.clearTimeout(timer));
-      resizeObserver?.disconnect();
-      imageHandlers.forEach(({ image, done }) => {
-        image.removeEventListener('load', done);
-        image.removeEventListener('error', done);
-      });
-      ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach((name) => {
-        modal.overlay.removeEventListener(name, cleanup, true);
-      });
-      if (modal.refreshScrollCleanup === cleanup) modal.refreshScrollCleanup = null;
-    };
-    const resizeObserver = window.ResizeObserver ? new ResizeObserver(schedule) : null;
-    resizeObserver?.observe(body.firstElementChild || body);
-    qsa(body, 'img').forEach((image) => {
-      if (image.complete) return;
-      const done = () => schedule();
-      imageHandlers.push({ image, done });
-      image.addEventListener('load', done, { once: true });
-      image.addEventListener('error', done, { once: true });
-    });
-    ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach((name) => {
-      modal.overlay.addEventListener(name, cleanup, { capture: true, passive: true });
-    });
-    [0, 60, 180, 420, 900, 1_400].forEach((delay) => timers.push(window.setTimeout(schedule, delay)));
-    timers.push(window.setTimeout(cleanup, 1_800));
-    modal.refreshScrollCleanup = cleanup;
-    restorePreviewScroll(body, snapshot);
-  }
-
-  function showPreviewLoadError(modal, error) {
-    clearElement(modal.body);
-    modal.body.appendChild(createElement('p', 'xns-status', `预览加载失败：${error?.message || '网络错误'}`));
-    if (modal.fallbackLink) {
-      const link = createElement('a', '', '在原页面打开');
-      link.href = modal.fallbackLink.href;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      modal.body.appendChild(link);
-    }
-  }
-
-  function showPreviewRefreshError(modal, error) {
-    const previous = qs(modal.body, '.xns-refresh-status');
-    previous?.remove();
-    const status = createElement('p', 'xns-status xns-refresh-status', `刷新失败，保留当前内容：${error?.message || '网络错误'}`);
-    status.classList.add('xns-refresh-failed');
-    modal.body.prepend(status);
-    window.setTimeout(() => {
-      if (status.isConnected) status.remove();
-    }, 4_000);
-  }
-
-  async function loadPreviewModal(modal, loadingText, options = {}) {
-    if (!modal || modal.loading) return false;
-    const preserveContent = Boolean(options.preserveContent);
-    modal.refreshScrollCleanup?.();
-    modal.loading = true;
-    const generation = (modal.loadGeneration || 0) + 1;
-    modal.loadGeneration = generation;
-    const refresh = qs(modal.dialog, '.xns-refresh-post');
-    refresh?.classList.add('xns-action-pending');
-    refresh?.setAttribute('aria-busy', 'true');
-    closeImageLightbox();
-    if (!preserveContent) {
-      modal.body.scrollTop = 0;
-      clearElement(modal.body);
-      modal.body.appendChild(createElement('p', 'xns-loading', loadingText));
-    }
-    try {
-      // 预览必须拿到最新分页，否则新回复可能只会在手动打开最后一页时出现。
-      const { html } = await fetchHtml(modal.url, { noStore: true });
-      const preview = buildPreviewContent(modal.url, parseHtml(html), {
-        noStore: true,
-        renderDetached: preserveContent,
-      });
-      if (preserveContent && preview.hydrate) await preview.hydrate;
-      if (state.modal !== modal || modal.loadGeneration !== generation) return false;
-      const scrollSnapshot = preserveContent ? capturePreviewScroll(modal.body) : null;
-      modal.title.textContent = preview.title || 'NodeSeek 帖子预览';
-      clearElement(modal.body);
-      modal.body.appendChild(preview.content);
-      // 刷新重建楼中楼时恢复仍然打开的帖子回复编辑器，避免清掉进行中的草稿。
-      if (modal.composer && !modal.composer.isConnected) modal.body.appendChild(modal.composer);
-      installPreviewFeatures(modal.body);
-      if (!preserveContent && preview.hydrate) {
-        await preview.hydrate;
-        if (state.modal !== modal || modal.loadGeneration !== generation) return false;
-        installPreviewFeatures(modal.body);
-      }
-      if (preserveContent) stabilizePreviewScroll(modal, scrollSnapshot, generation);
-    } catch (error) {
-      if (state.modal === modal && modal.loadGeneration === generation) {
-        if (preserveContent) showPreviewRefreshError(modal, error);
-        else showPreviewLoadError(modal, error);
-      }
-    } finally {
-      modal.loading = false;
-      refresh?.classList.remove('xns-action-pending');
-      refresh?.removeAttribute('aria-busy');
-    }
-    return true;
-  }
-
-  function refreshPreviewModal() {
-    const modal = state.modal;
-    if (!modal || modal.loading) return;
-    void loadPreviewModal(modal, '正在刷新帖子…', { preserveContent: true });
-  }
-
-  function openPreviewModal(url, fallbackLink) {
-    closeModal();
-    // 预览抓取只接受干净的帖子路径：先剥离 query 与 hash，避免触发 fetchHtml 的同源校验。
-    const fetchUrl = url.search || url.hash ? new URL(url.pathname, url.origin) : url;
-    const overlay = createElement('div', 'xns-overlay');
-    overlay.tabIndex = -1;
-    overlay.addEventListener('click', (event) => { if (event.target === overlay) closeModal(); });
-
-    const dialog = createElement('section', 'xns-modal');
-    dialog.setAttribute('role', 'dialog');
-    dialog.setAttribute('aria-modal', 'true');
-    const header = createElement('header', 'xns-modal-header');
-    const title = createElement('h2', 'xns-modal-title', '正在加载帖子…');
-    const replyPost = createElement('button', 'xns-modal-reply', '回复帖子');
-    replyPost.type = 'button';
-    replyPost.addEventListener('click', () => openPreviewComposer('post-reply', null));
-    const original = createElement('a', '', '新标签打开');
-    original.href = url.href;
-    original.target = '_blank';
-    original.rel = 'noopener noreferrer';
-    const close = createCloseButton(closeModal);
-    header.append(title, replyPost, original, close);
-
-    const body = createElement('div', 'xns-modal-body');
-    body.appendChild(createElement('p', 'xns-loading', '正在读取帖子内容…'));
-    dialog.append(header, body);
-    const scrollCleanup = installPreviewScrollButtons(dialog, body);
-    overlay.appendChild(dialog);
-    document.body.appendChild(overlay);
-    document.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, loading: false, loadGeneration: 0 };
-    overlay.focus();
-    void loadPreviewModal(state.modal, '正在读取帖子内容…');
-  }
-
-  function scrollToFloor(floor) {
-    const target = document.querySelector(`[data-xns-floor="${CSS.escape(String(floor))}"]`);
-    if (!target) return false;
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    target.classList.remove('xns-floor-highlight');
-    window.requestAnimationFrame(() => target.classList.add('xns-floor-highlight'));
-    return true;
-  }
-
-  function handleFloorClick(event) {
-    const link = event.target.closest?.('a[href]');
-    if (!link || !link.closest(SELECTORS.commentContainer) || link.closest('.xns-remote-floor-link')) return;
-    const rawHref = link.getAttribute('href') || '';
-    const directMatch = /^#([1-9]\d*)$/.exec(rawHref);
-    const linkedUrl = directMatch ? null : parseSameOriginUrl(rawHref);
-    const linkedInfo = linkedUrl ? getPostInfo(linkedUrl.href) : null;
-    if (linkedInfo && pageInfo && linkedInfo.postId !== pageInfo.postId) return;
-    const match = directMatch || (linkedUrl ? /^#([1-9]\d*)$/.exec(linkedUrl.hash || '') : null);
-    if (!match) return;
-    const floor = safePositiveInt(match[1]);
-    if (floor === null || !scrollToFloor(floor)) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-  }
-
-  function handleDocumentClick(event) {
-    if (event.defaultPrevented) return;
-    if (pageInfo) {
-      handleFloorClick(event);
-      return;
-    }
-    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    if (event.target.closest?.('.xns-overlay')) return;
-
-    const link = event.target.closest?.('a[href]');
-    if (!link) return;
-    const url = parseSameOriginUrl(link.getAttribute('href') || '');
-    if (!url || !getPostInfo(url.href)) return;
-
-    // 仅拦截列表页普通左键；修饰键、中键、右键完全交给浏览器原生行为。
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    openPreviewModal(url, link);
-  }
-
-  function getVoteIdFromLink(link) {
-    const href = link.getAttribute('data-href') || link.getAttribute('href') || '';
-    const match = /nsapp:\/\/vote\?id=(\d+)/.exec(href);
-    return match ? safePositiveInt(match[1]) : null;
-  }
-
-  async function fetchVoteInfo(voteId) {
-    const endpoint = parseSameOriginUrl(`/api/vote/info/${voteId}`);
-    if (!endpoint) throw new Error('投票地址非法');
-    const headers = { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' };
-    if (window.crypto?.subtle) headers['x-dynamic-sign'] = await dynamicSign('GET', endpoint.href, '');
-    const response = await fetch(endpoint.href, {
-      method: 'GET',
-      credentials: 'same-origin',
-      cache: 'no-store',
-      redirect: 'error',
-      referrerPolicy: 'same-origin',
-      headers,
-    });
-    const text = await response.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch { /* 非 JSON 响应 */ }
-    if (!response.ok || !data || data.success === false) throw new Error(data?.message || `HTTP ${response.status}`);
-    return data;
-  }
-
-  // NodeSeek 接口约定：未投票时 items 不带统计字段（count），投票后才有。
-  const hasVoteResults = (vote) => (vote.items || []).some((item) => typeof item.count === 'number');
-
-  function buildVoteResults(vote) {
-    const items = vote.items || [];
-    const total = items.reduce((sum, item) => sum + (typeof item.count === 'number' ? item.count : 0), 0);
-    const box = createElement('div', 'xns-vote-results');
-    items.forEach((item) => {
-      const count = typeof item.count === 'number' ? item.count : 0;
-      const percent = total > 0 ? Math.round((count / total) * 100) : 0;
-      const row = createElement('div', 'xns-vote-result' + (item.voted ? ' xns-vote-mine' : ''));
-      row.appendChild(createElement('div', 'vote-item-text', item.text || ''));
-      const barWrap = createElement('div', 'xns-vote-bar-wrap');
-      const bar = createElement('div', 'xns-vote-bar');
-      bar.style.width = `${percent}%`;
-      bar.appendChild(document.createTextNode(`${percent}%`));
-      barWrap.appendChild(bar);
-      row.appendChild(barWrap);
-      row.appendChild(createElement('div', 'xns-vote-result-meta', `${count} 票${item.voted ? '（已选）' : ''}`));
-      box.appendChild(row);
-    });
-    box.appendChild(createElement('div', 'xns-vote-total', `共 ${total} 票${vote.locked ? ' · 已结束' : ''}`));
-    return box;
-  }
-
-  function buildVotePanel(vote) {
-    const panel = createElement('div', 'vote-panel xns-vote-panel');
-    panel.dataset.xnsVoteId = String(vote.id);
-    const title = createElement('h2', 'xns-vote-title', vote.title || '投票');
-    title.style.textAlign = 'center';
-    title.style.fontSize = '1.2rem';
-    panel.appendChild(title);
-    // 投票后（或已锁定）接口返回统计字段：直接展示结果，不再渲染可点击选项。
-    if (hasVoteResults(vote)) {
-      panel.appendChild(buildVoteResults(vote));
-      panel.appendChild(createElement('div', 'xns-vote-note', `nsapp://vote?id=${vote.id}${vote.isPublic ? ' (公开投票)' : ''}${vote.locked ? ' · 已结束' : ''}`));
-      return panel;
-    }
-    const single = vote.multiple !== true;
-    const wrapper = createElement('fieldset', 'vote-stat-wrapper');
-    (vote.items || []).forEach((item) => {
-      const stat = createElement('div', 'vote-stat' + (item.voted ? ' voted' : ' not-voted'));
-      const input = document.createElement('input');
-      input.type = single ? 'radio' : 'checkbox';
-      input.name = 'vote-item';
-      input.value = String(item.vote_item_id);
-      if (item.voted) input.checked = true;
-      const label = createElement('label', 'pure-checkbox');
-      label.appendChild(input);
-      label.appendChild(createElement('div', 'vote-item-text', item.text || ''));
-      stat.appendChild(label);
-      wrapper.appendChild(stat);
-    });
-    panel.appendChild(wrapper);
-    const buttons = createElement('fieldset', 'op-buttons');
-    const submit = createElement('button', 'pure-button pure-button-primary add-margin', vote.locked ? '已结束' : '投票');
-    submit.type = 'button';
-    if (vote.locked) submit.setAttribute('disabled', '');
-    buttons.appendChild(submit);
-    panel.appendChild(buttons);
-    panel.appendChild(createElement('div', 'xns-vote-note', `nsapp://vote?id=${vote.id}${vote.isPublic ? ' (公开投票)' : ''}`));
-    return panel;
-  }
-
-  function mountVotePanel(link, data) {
-    if (!link.isConnected) return;
-    const vote = data?.vote;
-    if (!vote || !Array.isArray(vote.items)) return;
-    const panel = buildVotePanel(vote);
-    link.replaceWith(panel);
-  }
-
-  // NodeSeek 的投票面板是 Vue 客户端渲染的，SSR HTML 里只有 nsapp://vote 链接；
-  // 预览和跨页克隆通过同源接口 /api/vote/info/{id} 拉取后自建面板。
-  function installPreviewVotePanels(root) {
-    qsa(root, 'a[data-href^="nsapp://vote"], a[href^="nsapp://vote"]').forEach((link) => {
-      if (link.dataset.xnsVoteBound === 'true') return;
-      const voteId = getVoteIdFromLink(link);
-      if (voteId === null) return;
-      link.dataset.xnsVoteBound = 'true';
-      void fetchVoteInfo(voteId)
-        .then((data) => mountVotePanel(link, data))
-        .catch(() => {
-          // 未登录或接口失败时保留链接文本，不带承载面板
-          if (link.isConnected) link.textContent = link.textContent || `投票 #${voteId}（需登录）`;
-        });
-    });
-  }
-
-  function getVoteStatus(panel) {
-    let status = qs(panel, '.xns-vote-status');
-    if (!status) {
-      status = createElement('div', 'xns-vote-status');
-      panel.appendChild(status);
-    }
-    return status;
-  }
-
-  // 只拦截预览/跨页克隆里脚本自建的面板；原页面（非克隆）交给 NodeSeek Vue 原生处理。
-  function handleVoteClick(event) {
-    const button = event.target.closest?.('.xns-vote-panel button');
-    if (!button || button.disabled) return;
-    const panel = button.closest('.xns-vote-panel');
-    if (!panel || panel.dataset.xnsVotePending === 'true') return;
-    const inPreview = Boolean(panel.closest('.xns-overlay .xns-preview-content'));
-    const inRemote = Boolean(panel.closest('[data-xns-remote]'));
-    if (!inPreview && !inRemote) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    const selected = qsa(panel, 'input[name="vote-item"]:checked').map((input) => input.value);
-    const status = getVoteStatus(panel);
-    if (!selected.length) {
-      status.textContent = '请先选择选项。';
-      return;
-    }
-    panel.dataset.xnsVotePending = 'true';
-    button.setAttribute('disabled', '');
-    status.textContent = '正在投票…';
-    const voteId = safePositiveInt(panel.dataset.xnsVoteId || '');
-    void postAction('/api/vote/voteforitem', { ids: selected.map((value) => Number(value)) }, { context: getActionContext(button) })
-      .then(async () => {
-        // 投票后接口才会返回统计：重新拉取并把面板切换成结果视图。
-        let refreshed = null;
-        if (voteId !== null) {
-          try { refreshed = await fetchVoteInfo(voteId); } catch { /* 保留成功提示 */ }
-        }
-        if (!panel.isConnected) return;
-        if (refreshed?.vote) {
-          const rebuilt = buildVotePanel(refreshed.vote);
-          panel.replaceWith(rebuilt);
-        } else {
-          status.textContent = '投票成功，感谢参与。';
-          button.textContent = '已投票';
-        }
-      })
-      .catch((error) => {
-        status.textContent = `投票失败：${error.message || '网络错误'}`;
-        button.removeAttribute('disabled');
-        panel.dataset.xnsVotePending = '';
-      });
-  }
-
-  function handlePreviewActionClick(event) {
-    const menuItem = event.target.closest?.('.xns-preview-menu > .menu-item');
-    if (!menuItem) return;
-    const inPreview = Boolean(menuItem.closest('.xns-overlay .xns-preview-content'));
-    const inPost = Boolean(menuItem.closest('.comment-container'));
-    if (!inPreview && !inPost) return;
-    const comment = menuItem.closest('.content-item');
-    const action = menuItem.dataset.xnsAction || getMenuActionKey(menuItem);
-    if (!comment || !action) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    void runPreviewAction(action, menuItem, comment, getActionContext(menuItem));
-  }
-
-  function handleKeydown(event) {
-    if (event.key !== 'Escape') return;
-    // 焦点在可编辑控件内时把 Esc 交给原生行为，避免误关弹窗丢失草稿。
-    if (event.target.closest?.('textarea, input, [contenteditable="true"]')) return;
-    if (state.lightbox) {
-      event.preventDefault();
-      closeImageLightbox();
-    } else if (state.modal) {
-      closeModal();
-    }
-  }
-
-  function stripRenderArtifacts(item) {
-    if (!item?.classList) return;
-    qsa(item, '.xns-reply-list, .xns-remote-floor-link').forEach((node) => node.remove());
-    item.classList.remove('xns-comment-root', 'xns-comment-child', 'xns-floor-highlight');
-    item.removeAttribute('data-xns-floor');
-    item.removeAttribute('data-xns-parent-floor');
-    item.removeAttribute('data-xns-remote');
-    item.removeAttribute('data-xns-source-page');
-  }
-
-  function addRemoteNote(record, postId) {
-    if (!record.node?.hasAttribute('data-xns-remote')) return;
-    // 复用官方楼号结构：优先改造已有的官方 floor-link（href 指向来源页），
-    // 没有官方楼号时才创建。xns-remote-floor-link 只是脚本侧标记，不参与视觉。
-    const meta = qs(record.node, ':scope > .nsk-content-meta-info');
-    let source = qs(record.node, '.floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link');
-    let wrapper = source?.closest('.floor-link-wrapper');
-    if (!source) {
-      wrapper = createElement('div', 'floor-link-wrapper');
-      source = createElement('a', 'floor-link', `#${record.floor}`);
-      wrapper.appendChild(source);
-      (meta || record.node).appendChild(wrapper);
-    } else {
-      source.textContent = `#${record.floor}`;
-      wrapper = wrapper || (function () {
-        const w = createElement('div', 'floor-link-wrapper');
-        source.replaceWith(w);
-        w.appendChild(source);
-        return w;
-      }());
-    }
-    source.href = `/post-${postId}-${record.page}#${record.floor}`;
-    source.target = '_blank';
-    source.rel = 'noopener noreferrer';
-    source.title = `打开原楼层 #${record.floor}`;
-    wrapper?.classList.add('xns-remote-floor-link');
-  }
-
-  class PostEnhancer {
-    constructor(info) {
-      this.info = info;
-      this.list = null;
-      this.originalChildren = [];
-      this.records = [];
-      this.pageDocs = new Map();
-      this.failedPages = [];
-      this.truncated = false;
-      this.totalPages = null;
-      this.toolbar = null;
-      this.statusNode = null;
-      this.loadingNode = null;
-      this.generation = 0;
-      this.composer = null;
-    }
-
-    async init() {
-      this.list = await this.waitForCommentList();
-      if (!this.list) return;
-      this.originalChildren = Array.from(this.list.childNodes);
-      this.createToolbar();
-      await this.reloadPages();
-    }
-
-    waitForCommentList() {
-      return new Promise((resolve) => {
-        const started = Date.now();
-        const check = () => {
-          const list = findCommentList();
-          if (list || Date.now() - started > 12_000) resolve(list);
-          else window.setTimeout(check, 80);
-        };
-        check();
-      });
-    }
-
-    createToolbar() {
-      if (this.toolbar || !this.list) return;
-      const toolbar = createElement('nav', 'xns-post-toolbar');
-      toolbar.setAttribute('aria-label', '评论布局');
-      toolbar.appendChild(createElement('span', '', '评论布局：'));
-      [['thread', '楼中楼'], ['original', '原版']].forEach(([mode, text]) => {
-        const button = createElement('button', '', text);
-        button.type = 'button';
-        button.dataset.mode = mode;
-        button.addEventListener('click', () => this.setMode(mode));
-        toolbar.appendChild(button);
-      });
-      const status = createElement('span', 'xns-toolbar-status');
-      toolbar.appendChild(status);
-      this.list.closest(SELECTORS.commentContainer)?.insertAdjacentElement('beforebegin', toolbar);
-      this.toolbar = toolbar;
-      this.updateToolbar();
-    }
-
-    updateToolbar() {
-      if (!this.toolbar) return;
-      qsa(this.toolbar, '[data-mode]').forEach((button) => {
-        button.setAttribute('aria-pressed', String(button.dataset.mode === state.mode));
-      });
-      const status = qs(this.toolbar, '.xns-toolbar-status');
-      if (status) status.textContent = this.records.length ? `${this.records.length} 条评论` : '读取中…';
-    }
-
-    async reloadPages(options = {}) {
-      if (!this.list) return;
-      const generation = ++this.generation;
-      this.showLoading('正在读取评论分页…');
-      try {
-        // 回复提交后活动 DOM 与初始快照都没有新楼层：先重抓当前页把新回复并入快照，
-        // 否则楼中楼里会看不到刚发的回复（当前页在 fetchPostPages 里永不重抓）。
-        if (options.refreshCurrentPage) await this.adoptNewReplies(generation);
-        await this.loadPages(generation, options);
-        if (generation !== this.generation) return;
-        this.render();
-      } catch (error) {
-        // 旧代失败不能回滚新代已渲染的楼中楼，先过代际守卫再恢复。
-        if (generation !== this.generation) return;
-        this.restoreOriginal();
-        this.showStatus(`楼中楼读取失败：${error.message || '网络错误'}，已保留原版布局。`);
-      } finally {
-        if (generation === this.generation) {
-          this.loadingNode?.remove();
-          this.loadingNode = null;
-          this.updateToolbar();
-        }
-      }
-    }
-
-    // 回复经 API 提交后，活动 DOM 与初始快照都没有新楼层，而当前页在
-    // fetchPostPages 里永不重抓 → 楼中楼看不到刚发的回复。重抓当前页，把
-    // 快照里没有的新楼层消毒导入并并入 originalChildren，后续收集自然带上。
-    async adoptNewReplies(generation) {
-      try {
-        const { html } = await fetchHtml(new URL(`/post-${this.info.postId}-${this.info.page}`, window.location.origin), { noStore: true });
-        if (generation !== this.generation) return;
-        const parsed = parseHtml(html);
-        const knownFloors = new Set(this.originalChildren
-          .filter((node) => node.nodeType === Node.ELEMENT_NODE)
-          .map((node) => getFloor(node))
-          .filter((floor) => floor !== null));
-        getCommentItems(parsed).forEach((item) => {
-          const floor = getFloor(item);
-          if (floor === null || knownFloors.has(floor)) return;
-          const imported = sanitizeImportedNode(item, { keepCommentMenu: true });
-          if (!imported) return;
-          knownFloors.add(floor);
-          this.list.appendChild(imported);
-          this.originalChildren.push(imported);
-        });
-      } catch { /* 当前页重抓失败不阻断：楼中楼仍按既有快照渲染，仅看不到新回复 */ }
-    }
-
-    async loadPages(generation, options = {}) {
-      this.records = [];
-      this.failedPages = [];
-      const { pageDocs, failedPages, truncated, totalPages } = await fetchPostPages(this.info, document, {
-        noStore: options.noStore !== false,
-        isAborted: () => generation !== this.generation,
-      });
-      // 代际守卫：并发刷新时旧代晚到就直接放弃，绝不覆盖新代已写入的数据。
-      if (generation !== this.generation) return;
-      this.pageDocs = pageDocs;
-      this.failedPages = failedPages;
-      this.truncated = truncated;
-      this.totalPages = totalPages;
-
-      const allRecords = [];
-      this.pageDocs.forEach((root, page) => {
-        const state = getDocState(root);
-        if (root === document && this.originalChildren.length) {
-          // 楼中楼渲染会把当前页评论重排进嵌套回复列表；必须从初始扁平快照收集，
-          // 否则在线程模式下 reload 会漏掉被嵌套的楼层。
-          this.originalChildren.forEach((item, index) => {
-            if (item.nodeType !== Node.ELEMENT_NODE) return;
-            const record = getCommentRecord(item, this.info.postId, page, index, true, { keepCommentMenu: true, state });
-            if (record) allRecords.push(record);
-          });
-          return;
-        }
-        getCommentItems(root).forEach((item, index) => {
-          const record = getCommentRecord(item, this.info.postId, page, index, root === document, { keepCommentMenu: true, state });
-          if (record) allRecords.push(record);
-        });
-      });
-      const unique = new Map();
-      allRecords.forEach((record) => {
-        const previous = unique.get(record.floor);
-        if (!previous || record.current) unique.set(record.floor, record);
-      });
-      this.records = Array.from(unique.values());
-    }
-
-    setMode(mode) {
-      if (!['thread', 'original'].includes(mode)) return;
-      state.mode = mode;
-      this.updateToolbar();
-      if (mode === 'original') this.restoreOriginal();
-      else if (this.records.length) this.render();
-      else this.reloadPages();
-    }
-
-    showLoading(text) {
-      this.loadingNode?.remove();
-      this.loadingNode = createElement('div', 'xns-loading', text);
-      this.list?.closest(SELECTORS.commentContainer)?.insertAdjacentElement('beforebegin', this.loadingNode);
-    }
-
-    showStatus(text) {
-      this.statusNode?.remove();
-      this.statusNode = createElement('div', 'xns-status', text);
-      this.list?.closest(SELECTORS.commentContainer)?.insertAdjacentElement('beforebegin', this.statusNode);
-    }
-
-    render() {
-      if (!this.list || state.mode !== 'thread') return;
-      this.restoreOriginal();
-      buildReplyTree(this.records).forEach((record) => appendNestedRecord(record, this.list, 0, prepareCommentRecord));
-      this.records.filter((record) => record.node.hasAttribute('data-xns-remote')).forEach((record) => {
-        addRemoteNote(record, this.info.postId);
-        // 跨页克隆脱离 NodeSeek Vue 环境：复用预览弹窗的功能接线与作用域样式，
-        // 重建投票面板、代码复制、标签页和 ANSI 渲染；当前页楼层不加类，仍交给 Vue。
-        record.node.classList.add('xns-preview-content');
-        installPreviewFeatures(record.node);
-      });
-      const loadedPages = this.pageDocs.size;
-      let status = this.failedPages.length
-        ? `楼中楼已整理：读取 ${loadedPages} 页，${this.failedPages.length} 页失败。`
-        : `楼中楼已整理：共读取 ${loadedPages} 页。`;
-      if (this.truncated) status += ` 帖子共 ${this.totalPages} 页，只读取了前 ${MAX_PAGE} 页，后面页的楼层没有显示。`;
-      this.showStatus(status);
-      this.updateToolbar();
-    }
-
-    restoreOriginal() {
-      if (!this.list) return;
-      qsa(this.list, '.xns-reply-list, .xns-remote-note').forEach((node) => node.remove());
-      this.originalChildren.forEach(stripRenderArtifacts);
-      while (this.list.firstChild) this.list.removeChild(this.list.firstChild);
-      this.originalChildren.forEach((node) => this.list.appendChild(node));
-      this.statusNode?.remove();
-      this.statusNode = null;
-      this.updateToolbar();
-    }
-  }
-
+  (documentObj.head || documentObj.documentElement || documentObj.body)?.appendChild(style);
+}
+
+  return Object.freeze({ ansiRulesFor, installStyle });
+}
+
+const xnsStyleInstaller = createStyleInstaller({
+  documentObj: document,
+  styleId: STYLE_ID,
+  ansiColors: ANSI_COLORS,
+  ansiFgHex: ANSI_FG_HEX,
+  ansiBgHex: ANSI_BG_HEX,
+  ansiBrightHex: ANSI_BRIGHT_HEX,
+});
+const ansiRulesFor = (...args) => xnsStyleInstaller.ansiRulesFor(...args);
+const installStyle = (...args) => xnsStyleInstaller.installStyle(...args);
+
+
+// 应用启动：集中注册事件并在 DOM ready 后初始化帖子页增强。
+function createAppBootstrap({
+  documentObj,
+  windowObj,
+  pageInfo,
+  state,
+  installStyle,
+  createPreviewEntryController,
+  createFloorNavigationController,
+  parseSameOriginUrl,
+  getPostInfo,
+  openPreviewModal,
+  handleFloorClick,
+  handlePreviewActionClick,
+  handleVoteClick,
+  handleKeydown,
+  PostEnhancer,
+}) {
   function start() {
     installStyle();
-    document.addEventListener('click', handlePreviewActionClick, true);
-    document.addEventListener('click', handleVoteClick, true);
-    document.addEventListener('click', handleDocumentClick, true);
-    document.addEventListener('keydown', handleKeydown, true);
+    const previewEntry = createPreviewEntryController({
+      document: documentObj,
+      location: windowObj.location,
+      parseSameOriginUrl,
+      getPostInfo,
+      openPreviewModal,
+    });
+    const floorNavigation = createFloorNavigationController({
+      enabled: Boolean(pageInfo),
+      handleFloorClick,
+    });
+    documentObj.addEventListener('click', handlePreviewActionClick, true);
+    documentObj.addEventListener('click', handleVoteClick, true);
+    documentObj.addEventListener('click', previewEntry.handle, true);
+    documentObj.addEventListener('click', floorNavigation.handle, true);
+    documentObj.addEventListener('keydown', handleKeydown, true);
 
     const ready = () => {
       if (!pageInfo || state.post) return;
       state.post = new PostEnhancer(pageInfo);
       state.post.init().catch(() => state.post?.restoreOriginal());
     };
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready, { once: true });
+    if (documentObj.readyState === 'loading') documentObj.addEventListener('DOMContentLoaded', ready, { once: true });
     else ready();
   }
 
-  start();
+  return Object.freeze({ start });
+}
+
+const xnsAppBootstrap = createAppBootstrap({
+  documentObj: document,
+  windowObj: window,
+  pageInfo,
+  state,
+  installStyle,
+  createPreviewEntryController,
+  createFloorNavigationController,
+  parseSameOriginUrl,
+  getPostInfo,
+  openPreviewModal,
+  handleFloorClick,
+  handlePreviewActionClick,
+  handleVoteClick,
+  handleKeydown,
+  PostEnhancer,
+});
+xnsAppBootstrap.start();
+
 })();

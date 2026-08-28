@@ -109,13 +109,23 @@ const scenarios = [];
 const scenario = (name, run) => scenarios.push({ name, run });
 
 function createContext(browser, base) {
+  const pages = [];
   return {
     browser,
     base,
+    pages,
     async newPage() {
       const page = await browser.newPage();
       await page.setViewport({ width: 1280, height: 800 });
-      const data = { posts: [], voteInfoGets: [], pageErrors: [], dialogs: [] };
+      const data = {
+        posts: [],
+        voteInfoGets: [],
+        pageErrors: [],
+        consoleIssues: [],
+        requestFailures: [],
+        badResponses: [],
+        dialogs: [],
+      };
       page.on('request', (request) => {
         const headers = request.headers();
         const record = { url: request.url(), body: request.postData() || '', headers };
@@ -124,17 +134,53 @@ function createContext(browser, base) {
         else if (request.url().includes('/api/vote/info')) data.voteInfoGets.push(record);
       });
       page.on('pageerror', (error) => data.pageErrors.push(error.message));
+      page.on('console', (message) => {
+        if (message.type() === 'error' || message.type() === 'warning') {
+          data.consoleIssues.push({ type: message.type(), text: message.text() });
+        }
+      });
+      page.on('requestfailed', (request) => {
+        data.requestFailures.push({
+          method: request.method(),
+          url: request.url(),
+          error: request.failure()?.errorText || null,
+        });
+      });
+      page.on('response', (response) => {
+        if (response.status() >= 400) {
+          data.badResponses.push({ status: response.status(), url: response.url() });
+        }
+      });
       page.on('dialog', async (dialog) => {
         data.dialogs.push(dialog.message());
         await dialog.accept();
       });
       page.__testData = data;
+      pages.push(page);
       return page;
     },
   };
 }
 
 const dataOf = (page) => page.__testData;
+
+function runtimeDiagnostics(pages) {
+  return pages.flatMap((page) => {
+    const data = dataOf(page);
+    return [
+      ...data.pageErrors.map((message) => `pageerror: ${message}`),
+      ...data.consoleIssues.map((item) => `console.${item.type}: ${item.text}`),
+      ...data.requestFailures.map((item) => `requestfailed: ${item.method} ${item.url} (${item.error || 'unknown'})`),
+      ...data.badResponses.map((item) => `HTTP ${item.status}: ${item.url}`),
+    ];
+  });
+}
+
+function assertNoRuntimeDiagnostics(pages) {
+  const issues = runtimeDiagnostics(pages);
+  assert(issues.length === 0, `运行时出现异常：${issues.join(' | ')}`);
+}
+
 async function waitPost(page, predicate, timeout = 12_000) {
   const started = Date.now();
   for (;;) {
@@ -320,6 +366,17 @@ scenario('列表页预览弹窗结构与操作菜单', async (ctx) => {
   assert(state.floorActions[5] === null, `回复楼层第 6 项应为官方编辑项（null），实际 ${JSON.stringify(state.floorActions[5])}`);
   assert(state.items === 9, `弹窗应有 9 条回复，实际 ${state.items}`);
 });
+
+scenario('列表外帖子链接保持原生跳转', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.goto(`${ctx.base}/list`, { waitUntil: 'networkidle0' });
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'networkidle0' }),
+    page.click('.post-link-notification'),
+  ]);
+  assert(page.url() === `${ctx.base}/post-123-1`, `列表外链接应原生跳转，实际 ${page.url()}`);
+});
+
 scenario('弹窗点赞/鸡腿/反对/收藏计数来自 SSR 状态（0.5.9 回归）', async (ctx) => {
   const page = await openPreviewModal(ctx);
   const state = await page.evaluate(() => {
@@ -493,7 +550,6 @@ scenario('弹窗预览自己的评论出现编辑入口（0.5.20 回归）', asy
   // 预览弹窗的评论走 SSR 克隆；fixture 的官方“编辑”项模拟原版节点，
   // 脚本须识别为 isMine 并接管（菜单保留单个编辑项）。
   const page = await ctx.newPage();
-  await page.setCookie({ name: 'pjwt', value: 'x.eyJpZCI6MSwibmFtZSI6IlJvb3QiLCJ0cyI6MX0.y', url: ctx.base });
   await page.goto(`${ctx.base}/list`, { waitUntil: 'networkidle0' });
   await page.click('a[href="/post-123-1"]');
   await waitFor(page, () => {
@@ -668,13 +724,21 @@ try {
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
   });
   const ctx = createContext(browser, base);
-  for (const { name, run } of scenarios) {
+  const selectedScenarios = process.env.XNS_TEST_FILTER
+    ? scenarios.filter(({ name }) => name.includes(process.env.XNS_TEST_FILTER))
+    : scenarios;
+  if (selectedScenarios.length === 0) throw new Error(`没有匹配的测试场景：${process.env.XNS_TEST_FILTER}`);
+  for (const { name, run } of selectedScenarios) {
     const started = Date.now();
+    const pageStart = ctx.pages.length;
     try {
       await run(ctx);
+      assertNoRuntimeDiagnostics(ctx.pages.slice(pageStart));
       reports.push({ name, pass: true, ms: Date.now() - started });
     } catch (error) {
-      reports.push({ name, pass: false, ms: Date.now() - started, error: error.message });
+      const issues = runtimeDiagnostics(ctx.pages.slice(pageStart));
+      const detail = issues.length ? `${error.message}；${issues.join(' | ')}` : error.message;
+      reports.push({ name, pass: false, ms: Date.now() - started, error: detail });
     }
   }
 } finally {

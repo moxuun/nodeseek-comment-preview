@@ -2,9 +2,12 @@
   "name": "nodeseek-preview-regression",
   "private": true,
   "type": "module",
-  "description": "nodeseek楼中楼预览 浏览器回归测试（本地 fixture）",
+  "description": "nodeseek楼中楼预览 浏览器回归测试与真实环境只读冒烟",
   "scripts": {
-    "test": "node run-tests.mjs"
+    "build": "node ../build.mjs",
+    "pretest": "npm run build",
+    "test": "node run-tests.mjs",
+    "test:live": "node real-smoke.mjs"
   },
   "dependencies": {
     "puppeteer-core": "^25.9.0"

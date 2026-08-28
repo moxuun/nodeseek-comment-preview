@@ -2,9 +2,17 @@
 <html lang="zh-CN">
 <head><meta charset="utf-8"><title>Fixture list</title></head>
 <body>
+  <header class="user-menu"><a href="/space/1">Root</a></header>
   <main>
-    <div class="post-item"><a href="/post-123-1">Fixture NodeSeek 帖子</a></div>
+    <ul class="post-list">
+      <li class="post-list-item">
+        <div class="post-list-content">
+          <div class="post-title" role="heading"><a href="/post-123-1">Fixture NodeSeek 帖子</a></div>
+        </div>
+      </li>
+    </ul>
   </main>
+  <aside class="notification"><a class="post-link-notification" href="/post-123-1">通知中的帖子链接</a></aside>
   <script src="/outputs/nodeseek-comment-preview.user.js"></script>
 </body>
 </html>

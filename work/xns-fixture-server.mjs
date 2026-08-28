@@ -21,6 +21,8 @@ const sendFile = (res, filePath, contentType) => {
   });
 };
 
+const testPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+
 // 模拟真实 /api/vote 契约：未投票时 items 不带统计字段（count）；
 // 提交后接口才返回 count / voted / voters，脚本据此切换到结果视图。
 const voteState = { votedIds: new Set() };
@@ -75,6 +77,16 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/vote/info/123') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(votePayload()));
+    return;
+  }
+  if (pathname === '/favicon.ico') {
+    res.writeHead(204, { 'Cache-Control': 'no-store' });
+    res.end();
+    return;
+  }
+  if (pathname === '/test.png') {
+    res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
+    res.end(testPng);
     return;
   }
   if (pathname === '/post-123-1') return sendFile(res, fixturePath('post-123-1'), 'text/html; charset=utf-8');
