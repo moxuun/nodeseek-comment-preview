@@ -364,6 +364,13 @@ scenario('弹窗跨页来源链接只出现在跨页评论（0.5.8 回归）', a
   assert(JSON.stringify(state.owners) === JSON.stringify(['4', '5']), `应只出现在 #4 #5，实际 ${JSON.stringify(state.owners)}`);
   const currentPageLinks = state.floorLinks.filter((l) => l.floor !== '4' && l.floor !== '5');
   assert(currentPageLinks.length === 7, `当前页 7 层评论都应显示官方楼号，实际 ${currentPageLinks.length}：${JSON.stringify(state.floorLinks)}`);
+  // 楼号必须 absolute 悬浮在卡片右上角（与官方一致），不能退化为 meta 行内联文本。
+  const pos = await page.evaluate(() => {
+    const w = document.querySelector('.xns-preview-thread .content-item .floor-link-wrapper');
+    const s = w ? getComputedStyle(w) : null;
+    return s ? { position: s.position, top: s.top, right: s.right } : null;
+  });
+  assert(pos && pos.position === 'absolute', `楼号 wrapper 应为 absolute 定位（官方右上角样式），实际 ${JSON.stringify(pos)}`);
   assert(currentPageLinks.every((l) => /^#\d+$/.test(l.text)), `楼号文本应为官方 #N 格式，实际 ${JSON.stringify(currentPageLinks.map((l) => l.text))}`);
   assert(currentPageLinks.every((l) => l.href === `#${l.floor}` || l.href.endsWith(`#${l.floor}`)), `当前页楼号 href 应为官方 #N，实际 ${JSON.stringify(currentPageLinks.map((l) => l.href))}`);
 });

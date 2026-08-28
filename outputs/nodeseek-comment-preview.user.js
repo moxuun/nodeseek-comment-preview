@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.16
+// @version      0.5.17
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -360,6 +360,11 @@
       .xns-refresh-post.xns-action-pending svg { animation:xns-spin .9s linear infinite; }
       .xns-loading, .xns-status { margin:10px 0; padding:7px 10px; border:1px solid rgba(100,116,139,.2); border-radius:7px; color:#64748b; background:rgba(148,163,184,.08); font:13px/1.4 system-ui,sans-serif; }
       .xns-comment-root[data-xns-floor], .xns-comment-child[data-xns-floor] { position:relative; }
+      /* 官方 .floor-link-wrapper 的定位是 Vue scoped CSS（data-v 属性选择器），
+         预览/楼中楼里的克隆节点不带该属性，官方定位规则不生效，楼号会退化成
+         meta 行里的内联文本。这里补上与官方一致的 absolute 右上角定位。 */
+      .xns-preview-thread .floor-link-wrapper, .xns-preview-content .floor-link-wrapper { position:absolute; top:8px; right:9px; }
+      .xns-preview-thread .floor-link-wrapper .floor-link, .xns-preview-content .floor-link-wrapper .floor-link { color:#c5c5c5; font-size:13px; font-weight:400; line-height:19.5px; text-decoration:none; cursor:pointer; }
       .xns-comment-child { margin-top:7px !important; margin-left:clamp(8px,2vw,28px) !important; padding-left:clamp(8px,1.5vw,18px) !important; border-left:2px solid rgba(59,130,246,.35); }
       .xns-reply-list { margin:6px 0 0 !important; padding:0 !important; list-style:none !important; }
       .xns-floor-highlight { animation:xns-floor-highlight 1.8s ease both; }
@@ -480,6 +485,7 @@
       .dark-layout .xns-vote-results .xns-vote-bar { color:#0b1220; background:#60a5fa; }
       .dark-layout .xns-vote-results .xns-vote-mine .vote-item-text { color:#93c5fd; }
       .dark-layout .xns-toolbar-status, .dark-layout .xns-loading, .dark-layout .xns-status, .dark-layout .xns-vote-status { color:#9ca3af; }
+      .dark-layout .xns-preview-thread .floor-link-wrapper .floor-link, .dark-layout .xns-preview-content .floor-link-wrapper .floor-link { color:#6b7280; }
       @media (max-width:800px) { .xns-preview-scroll-btns { right:6px; } .xns-scroll-btn { width:30px !important; min-width:30px !important; max-width:30px !important; height:30px !important; min-height:30px !important; max-height:30px !important; flex-basis:30px; } }
       @media (max-width:640px) { .xns-overlay { padding:0; } .xns-modal { width:100%; max-height:100vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-scroll-btns { right:5px; } .xns-scroll-btn { width:28px !important; min-width:28px !important; max-width:28px !important; height:28px !important; min-height:28px !important; max-height:28px !important; flex-basis:28px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; margin-left:0; } }
     `;
