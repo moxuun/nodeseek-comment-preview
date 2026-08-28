@@ -125,13 +125,19 @@ function createContext(browser, base) {
         requestFailures: [],
         badResponses: [],
         dialogs: [],
+        expectedResponses: [],
+        expectedRequestFailures: [],
+        gets: [],
       };
       page.on('request', (request) => {
         const headers = request.headers();
         const record = { url: request.url(), body: request.postData() || '', headers };
         if ('x-dynamic-sign' in headers) record.signature = headers['x-dynamic-sign'];
         if (request.method() === 'POST') data.posts.push(record);
-        else if (request.url().includes('/api/vote/info')) data.voteInfoGets.push(record);
+        else {
+          data.gets.push(record);
+          if (request.url().includes('/api/vote/info')) data.voteInfoGets.push(record);
+        }
       });
       page.on('pageerror', (error) => data.pageErrors.push(error.message));
       page.on('console', (message) => {
@@ -167,11 +173,15 @@ const dataOf = (page) => page.__testData;
 function runtimeDiagnostics(pages) {
   return pages.flatMap((page) => {
     const data = dataOf(page);
+    const isExpectedResponse = (item) => data.expectedResponses.some((expected) => item.status === expected.status && item.url.includes(expected.url));
+    const isExpectedConsole = (item) => data.expectedResponses.some((expected) => item.text.includes(String(expected.status)));
     return [
       ...data.pageErrors.map((message) => `pageerror: ${message}`),
-      ...data.consoleIssues.map((item) => `console.${item.type}: ${item.text}`),
-      ...data.requestFailures.map((item) => `requestfailed: ${item.method} ${item.url} (${item.error || 'unknown'})`),
-      ...data.badResponses.map((item) => `HTTP ${item.status}: ${item.url}`),
+      ...data.consoleIssues.filter((item) => !isExpectedConsole(item)).map((item) => `console.${item.type}: ${item.text}`),
+      ...data.requestFailures
+        .filter((item) => !data.expectedRequestFailures.some((url) => item.url.includes(url)))
+        .map((item) => `requestfailed: ${item.method} ${item.url} (${item.error || 'unknown'})`),
+      ...data.badResponses.filter((item) => !isExpectedResponse(item)).map((item) => `HTTP ${item.status}: ${item.url}`),
     ];
   });
 }
@@ -194,7 +204,7 @@ async function waitPost(page, predicate, timeout = 12_000) {
 async function openPostPage(ctx) {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/post-123-1`, { waitUntil: 'networkidle0' });
-  await waitFor(page, () => /条评论/.test(document.querySelector('.xns-toolbar-status')?.textContent || ''), 15_000, '帖子页楼中楼构建');
+  await waitFor(page, () => /^9 条评论$/.test(document.querySelector('.xns-toolbar-status')?.textContent || ''), 15_000, '帖子页楼中楼构建');
   return page;
 }
 
@@ -209,6 +219,98 @@ async function openPreviewModal(ctx) {
   return page;
 }
 
+async function installFeatureQueryCounter(page) {
+  await page.evaluateOnNewDocument(() => {
+    const featureSelectors = new Set([
+      '.xns-preview-content .nsk-magic-tabs',
+      '.xns-preview-content .post-content, .xns-preview-content article.post-content',
+      '.xns-preview-content pre',
+      '.xns-preview-content img',
+      '.xns-preview-content a[data-href^="nsapp://vote"], .xns-preview-content a[href^="nsapp://vote"]',
+    ]);
+    const stats = { count: 0, selectors: [] };
+    const original = Element.prototype.querySelectorAll;
+    Element.prototype.querySelectorAll = function patchedQuerySelectorAll(selector) {
+      const key = String(selector);
+      if (featureSelectors.has(key)) {
+        stats.count += 1;
+        stats.selectors.push(key);
+      }
+      return original.call(this, selector);
+    };
+    window.__xnsFeatureQueryStats = stats;
+  });
+}
+
+async function installPaginationQueryCounter(page) {
+  await page.evaluateOnNewDocument(() => {
+    const stats = { broad: 0, targeted: 0 };
+    const original = Document.prototype.querySelectorAll;
+    Document.prototype.querySelectorAll = function patchedQuerySelectorAll(selector) {
+      const key = String(selector);
+      if (key === 'a[href]') stats.broad += 1;
+      if (key === '.nsk-pager a[href], a.pager-pos[href]') stats.targeted += 1;
+      return original.call(this, selector);
+    };
+    window.__xnsPaginationQueryStats = stats;
+  });
+}
+
+async function installSanitizeQueryCounter(page) {
+  await page.evaluateOnNewDocument(() => {
+    const stats = { all: 0, dangerous: 0, menus: 0, ids: 0 };
+    const original = Element.prototype.querySelectorAll;
+    Element.prototype.querySelectorAll = function patchedQuerySelectorAll(selector) {
+      const key = String(selector);
+      if (key === '*') stats.all += 1;
+      if (key === 'script,style,link,meta,base,iframe,object,embed,form,input,textarea,select,option,button') stats.dangerous += 1;
+      if (key === '.comment-menu, .comment-actions') stats.menus += 1;
+      if (key === '[id]') stats.ids += 1;
+      return original.call(this, selector);
+    };
+    window.__xnsSanitizeQueryStats = stats;
+  });
+}
+
+async function installLargeArrayFindCounter(page) {
+  await page.evaluateOnNewDocument(() => {
+    const stats = { count: 0 };
+    const original = Array.prototype.find;
+    Array.prototype.find = function patchedFind(...args) {
+      if (this.length >= 100) stats.count += 1;
+      return original.apply(this, args);
+    };
+    window.__xnsLargeArrayFindStats = stats;
+  });
+}
+
+async function installParserCounter(page) {
+  await page.evaluateOnNewDocument(() => {
+    const stats = { count: 0 };
+    const original = DOMParser.prototype.parseFromString;
+    DOMParser.prototype.parseFromString = function patchedParseFromString(...args) {
+      stats.count += 1;
+      return original.apply(this, args);
+    };
+    window.__xnsParserStats = stats;
+  });
+}
+
+async function installAbortCounter(page) {
+  await page.evaluateOnNewDocument(() => {
+    const stats = { count: 0 };
+    const original = window.fetch.bind(window);
+    window.fetch = function patchedFetch(input, init = {}) {
+      const url = typeof input === 'string' ? input : input?.url || '';
+      if (url.includes('/post-124-2') && init.signal) {
+        init.signal.addEventListener('abort', () => { stats.count += 1; }, { once: true });
+      }
+      return original(input, init);
+    };
+    window.__xnsAbortStats = stats;
+  });
+}
+
 // ---------- 场景 ----------
 
 scenario('长帖分页截断明示（0.5.13 回归）', async (ctx) => {
@@ -217,7 +319,8 @@ scenario('长帖分页截断明示（0.5.13 回归）', async (ctx) => {
   // 456 帖共 52 页、每页 1 楼：MAX_PAGE 之上应截断并在状态栏明示，而不是静默丢楼层。
   await waitFor(page, () => {
     const status = document.querySelector('.xns-status')?.textContent || '';
-    return /只读取了前/.test(status);
+    const items = document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length;
+    return /只读取了前/.test(status) && items === 50;
   }, 30_000, '截断状态提示');
   const state = await page.evaluate(() => ({
     toolbar: document.querySelector('.xns-toolbar-status')?.textContent,
@@ -226,6 +329,207 @@ scenario('长帖分页截断明示（0.5.13 回归）', async (ctx) => {
   }));
   assert(/帖子共 52 页，只读取了前 50 页/.test(state.status), `状态栏应明示截断，实际 ${state.status}`);
   assert(state.items === 50, `截断后应只有前 50 楼，实际 ${state.items}`);
+  assert(dataOf(page).pageErrors.length === 0, `页面出现未捕获异常：${dataOf(page).pageErrors.join('; ')}`);
+  await page.close();
+});
+
+scenario('长帖内容增强只扫描一次评论根节点', async (ctx) => {
+  const page = await ctx.newPage();
+  await installFeatureQueryCounter(page);
+  await page.goto(`${ctx.base}/post-456-1`, { waitUntil: 'networkidle0' });
+  await waitFor(page, () => {
+    const status = document.querySelector('.xns-status')?.textContent || '';
+    const items = document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length;
+    return /只读取了前/.test(status) && items === 50;
+  }, 30_000, '长帖内容增强扫描完成');
+  const stats = await page.evaluate(() => window.__xnsFeatureQueryStats);
+  assert(stats.count === 6, `长帖应只执行一轮 6 组内容增强查询，实际 ${stats.count} 次：${JSON.stringify(stats.selectors)}`);
+  await page.close();
+});
+
+scenario('长帖分页发现优先扫描分页链接', async (ctx) => {
+  const page = await ctx.newPage();
+  await installPaginationQueryCounter(page);
+  await page.goto(`${ctx.base}/post-456-1`, { waitUntil: 'networkidle0' });
+  await waitFor(page, () => {
+    const status = document.querySelector('.xns-status')?.textContent || '';
+    const items = document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length;
+    return /只读取了前/.test(status) && items === 50;
+  }, 30_000, '分页发现完成');
+  const stats = await page.evaluate(() => window.__xnsPaginationQueryStats);
+  assert(stats.broad === 0, `标准分页页面不应执行全量 a[href] 扫描，实际 ${stats.broad} 次`);
+  assert(stats.targeted >= 50, `应对长帖分页执行定向扫描，实际 ${stats.targeted} 次`);
+  await page.close();
+});
+
+scenario('无标准分页标记时仍回退发现分页', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.goto(`${ctx.base}/post-126-1`, { waitUntil: 'networkidle0' });
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '2 条评论', 5_000, '分页回退加载完成');
+  const state = await page.evaluate(() => ({
+    items: document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length,
+    status: document.querySelector('.xns-status')?.textContent || '',
+  }));
+  assert(state.items === 2, `分页回退应读取两页评论，实际 ${state.items}`);
+  assert(/共读取 2 页/.test(state.status), `分页回退状态应为 2 页，实际 ${state.status}`);
+  await page.close();
+});
+
+scenario('长帖安全克隆只做一次全树查询', async (ctx) => {
+  const page = await ctx.newPage();
+  await installSanitizeQueryCounter(page);
+  await page.goto(`${ctx.base}/post-456-1`, { waitUntil: 'networkidle0' });
+  await waitFor(page, () => {
+    const status = document.querySelector('.xns-status')?.textContent || '';
+    const items = document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length;
+    return /只读取了前/.test(status) && items === 50;
+  }, 30_000, '安全克隆完成');
+  const stats = await page.evaluate(() => window.__xnsSanitizeQueryStats);
+  assert(stats.all >= 49, `长帖远端评论应执行全树节点查询，实际 ${stats.all} 次`);
+  assert(stats.dangerous === 0 && stats.menus === 0 && stats.ids === 0, `安全规则不应再重复查询树，实际 ${JSON.stringify(stats)}`);
+  await page.close();
+});
+
+scenario('远端评论安全克隆规则保持', async (ctx) => {
+  const page = await openPostPage(ctx);
+  const state = await page.evaluate(() => {
+    const remote = document.querySelector('.comment-container [data-xns-remote][data-xns-floor="4"]');
+    const dangerousNodes = remote
+      ? [...remote.querySelectorAll('script,style,link,meta,base,iframe,object,embed,form,input,textarea,select,option,button')]
+        .filter((node) => !node.matches('.xns-code-copy-btn')).length
+      : -1;
+    return {
+      exists: !!remote,
+      dangerousNodes,
+      unsafeAttributes: remote?.querySelectorAll('[onclick],[style],[srcdoc],[srcset],[formaction],[contenteditable],[ping]').length ?? -1,
+      unsafeLinks: [...(remote?.querySelectorAll('a') || [])].filter((link) => /^javascript:/i.test(link.getAttribute('href') || '')).length,
+    };
+  });
+  assert(state.exists, '应找到第 4 楼远端评论');
+  assert(state.dangerousNodes === 0, `危险节点应被清理，实际 ${state.dangerousNodes}`);
+  assert(state.unsafeAttributes === 0, `危险属性应被清理，实际 ${state.unsafeAttributes}`);
+  assert(state.unsafeLinks === 0, `javascript 链接应被清理，实际 ${state.unsafeLinks}`);
+  await page.close();
+});
+
+scenario('多评论 SSR 统计使用索引避免重复查找', async (ctx) => {
+  const page = await ctx.newPage();
+  await installLargeArrayFindCounter(page);
+  await page.goto(`${ctx.base}/list-128`, { waitUntil: 'networkidle0' });
+  await page.click('a[href="/post-128-1"]');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 120 条回复', 15_000, '120 条评论预览完成');
+  const state = await page.evaluate(() => {
+    const comment = document.querySelector('.xns-modal .xns-preview-thread .content-item[data-xns-floor="1"]');
+    const like = [...(comment?.querySelector(':scope > .comment-menu')?.children || [])]
+      .find((item) => item.dataset.xnsAction === 'like')?.querySelector('.xns-action-count')?.textContent;
+    return { findCount: window.__xnsLargeArrayFindStats.count, like };
+  });
+  assert(state.findCount === 0, `120 条 SSR 评论不应反复执行大数组 find，实际 ${state.findCount} 次`);
+  assert(state.like === '1', `SSR 统计索引应保留第 1 条评论点赞数，实际 ${state.like}`);
+  await page.close();
+});
+
+scenario('预览首屏第一页评论不重复克隆', async (ctx) => {
+  const page = await ctx.newPage();
+  await installSanitizeQueryCounter(page);
+  await page.goto(`${ctx.base}/list`, { waitUntil: 'networkidle0' });
+  await page.click('a[href="/post-123-1"]');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 9 条回复', 15_000, '预览首屏完成');
+  const stats = await page.evaluate(() => window.__xnsSanitizeQueryStats);
+  // 帖子根 1 次 + 第一页 7 条评论 + 第二页 2 条评论；第一页不能被后台加载重复克隆。
+  assert(stats.all === 10, `预览应只克隆 10 个节点，实际 ${stats.all} 次`);
+  await page.close();
+});
+
+scenario('短期缓存命中时复用解析文档，刷新时重新解析', async (ctx) => {
+  const page = await ctx.newPage();
+  await installParserCounter(page);
+  await page.goto(`${ctx.base}/list`, { waitUntil: 'networkidle0' });
+  const link = page.locator('a[href="/post-123-1"]');
+  await link.click();
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 9 条回复', 15_000, '首次解析完成');
+  const firstCount = await page.evaluate(() => window.__xnsParserStats.count);
+  assert(firstCount === 2, `首次预览应解析两个帖子页面，实际 ${firstCount} 次`);
+  await page.locator('.xns-modal-close').click();
+  await waitFor(page, () => !document.querySelector('.xns-modal'), 5_000, '关闭预览');
+  await link.click();
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 9 条回复', 5_000, '缓存解析完成');
+  const cachedCount = await page.evaluate(() => window.__xnsParserStats.count);
+  assert(cachedCount === firstCount, `缓存预览不应重复 DOMParser，实际 ${firstCount} -> ${cachedCount}`);
+  await page.locator('.xns-refresh-post').click();
+  await waitFor(page, () => !document.querySelector('.xns-refresh-post')?.hasAttribute('aria-busy'), 15_000, '强制刷新解析完成');
+  const refreshedCount = await page.evaluate(() => window.__xnsParserStats.count);
+  assert(refreshedCount >= cachedCount + 2, `强制刷新应重新解析两个帖子页面，实际 ${cachedCount} -> ${refreshedCount}`);
+  await page.close();
+});
+
+scenario('投票信息接近视口时才读取', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.goto(`${ctx.base}/list-128`, { waitUntil: 'networkidle0' });
+  await page.click('a[href="/post-128-1"]');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 120 条回复', 15_000, '长帖预览完成');
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert(dataOf(page).voteInfoGets.length === 0, `底部不可见投票不应在首屏请求，实际 ${dataOf(page).voteInfoGets.length} 次`);
+  await page.evaluate(() => document.querySelector('.xns-modal .xns-preview-thread [data-xns-floor="120"]')?.scrollIntoView({ block: 'center' }));
+  await waitFor(page, () => !!document.querySelector('.xns-modal .xns-vote-panel'), 10_000, '滚动后投票面板');
+  assert(dataOf(page).voteInfoGets.length === 1, `滚动到底部后应只请求一次投票信息，实际 ${dataOf(page).voteInfoGets.length} 次`);
+  await page.close();
+});
+
+scenario('关闭预览会取消未完成的远端分页请求', async (ctx) => {
+  const page = await ctx.newPage();
+  await installAbortCounter(page);
+  dataOf(page).expectedRequestFailures.push('/post-124-2');
+  await page.goto(`${ctx.base}/list-124`, { waitUntil: 'networkidle0' });
+  const remoteRequest = page.waitForRequest((request) => request.url().endsWith('/post-124-2'), { timeout: 5_000 });
+  await page.click('a[href="/post-124-1"]');
+  await remoteRequest;
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 2 条回复', 5_000, '当前页预览完成');
+  await page.click('.xns-modal-close');
+  await waitFor(page, () => !document.querySelector('.xns-modal'), 5_000, '预览关闭');
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const aborted = await page.evaluate(() => window.__xnsAbortStats.count);
+  assert(aborted >= 1, `关闭预览应 abort 未完成分页请求，实际 ${aborted} 次`);
+  await page.close();
+});
+
+scenario('帖子页远端内容增强功能保留', async (ctx) => {
+  const page = await openPostPage(ctx);
+  const state = await page.evaluate(() => ({
+    remoteCodeBlocks: document.querySelectorAll('.comment-container [data-xns-remote] pre').length,
+    remoteCopyButtons: document.querySelectorAll('.comment-container [data-xns-remote] .xns-code-copy-btn').length,
+  }));
+  assert(state.remoteCodeBlocks === 1, `远端评论应保留 1 个代码块，实际 ${state.remoteCodeBlocks}`);
+  assert(state.remoteCopyButtons === 1, `远端代码块应保留 1 个复制按钮，实际 ${state.remoteCopyButtons}`);
+  await page.close();
+});
+
+scenario('帖子页当前页优先渲染，远端分页后台加载', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.goto(`${ctx.base}/post-124-1`, { waitUntil: 'domcontentloaded' });
+  await waitFor(page, () => {
+    const toolbar = document.querySelector('.xns-toolbar-status')?.textContent || '';
+    const status = document.querySelector('.xns-status')?.textContent || '';
+    const items = document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length;
+    return toolbar === '2 条评论' && /正在读取其他分页/.test(status) && items === 2;
+  }, 1_000, '当前页优先渲染');
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '4 条评论', 5_000, '远端分页完成');
+  const state = await page.evaluate(() => ({
+    items: document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length,
+    status: document.querySelector('.xns-status')?.textContent || '',
+  }));
+  assert(state.items === 4, `后台分页完成后应有 4 个楼层，实际 ${state.items}`);
+  assert(/共读取 2 页/.test(state.status), `后台分页完成后状态应为 2 页，实际 ${state.status}`);
+  assert(dataOf(page).pageErrors.length === 0, `页面出现未捕获异常：${dataOf(page).pageErrors.join('; ')}`);
+  await page.close();
+});
+scenario('分页 429 按 Retry-After 重试后继续加载', async (ctx) => {
+  const page = await ctx.newPage();
+  dataOf(page).expectedResponses.push({ status: 429, url: '/post-125-2' });
+  await page.goto(`${ctx.base}/post-125-1`, { waitUntil: 'domcontentloaded' });
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '4 条评论', 5_000, '429 重试后的分页完成');
+  const retryState = await page.evaluate(() => fetch('/test/retry-state', { cache: 'no-store' }).then((response) => response.json()));
+  assert(retryState.post125Page2 === 2, `第 2 页应首次 429 后重试一次，实际请求 ${retryState.post125Page2} 次`);
   assert(dataOf(page).pageErrors.length === 0, `页面出现未捕获异常：${dataOf(page).pageErrors.join('; ')}`);
   await page.close();
 });
@@ -365,6 +669,32 @@ scenario('列表页预览弹窗结构与操作菜单', async (ctx) => {
   assert(JSON.stringify(state.floorActions.slice(0, 5)) === JSON.stringify(['like', 'chicken', 'dislike', 'quote', 'reply']), `回复楼层应有 5 项标准操作（不含收藏），实际 ${JSON.stringify(state.floorActions.slice(0, 5))}`);
   assert(state.floorActions[5] === null, `回复楼层第 6 项应为官方编辑项（null），实际 ${JSON.stringify(state.floorActions[5])}`);
   assert(state.items === 9, `弹窗应有 9 条回复，实际 ${state.items}`);
+});
+
+scenario('同一页面重复打开帖子命中短期缓存，手动刷新强制重抓', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.goto(`${ctx.base}/list`, { waitUntil: 'networkidle0' });
+  const link = page.locator('a[href="/post-123-1"]');
+  const postReads = () => dataOf(page).gets.filter(({ url }) => {
+    const pathname = new URL(url).pathname;
+    return ['/post-123-1', '/post-123-2'].includes(pathname);
+  }).length;
+  await link.click();
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 9 条回复', 15_000, '首次预览完成');
+  const firstReads = postReads();
+  assert(firstReads === 2, `首次预览应读取 2 个帖子页面，实际 ${firstReads}`);
+  await page.locator('.xns-modal-close').click();
+  await waitFor(page, () => !document.querySelector('.xns-modal'), 5_000, '关闭首次预览');
+  await link.click();
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 9 条回复', 5_000, '缓存预览完成');
+  const cachedReads = postReads();
+  assert(cachedReads === firstReads, `第二次预览应命中缓存，不应新增请求，实际 ${firstReads} -> ${cachedReads}`);
+  await page.locator('.xns-refresh-post').click();
+  await waitFor(page, () => !document.querySelector('.xns-refresh-post')?.hasAttribute('aria-busy'), 15_000, '手动刷新完成');
+  const refreshedReads = postReads();
+  assert(refreshedReads >= cachedReads + 2, `手动刷新应重新读取两个帖子页面，实际 ${cachedReads} -> ${refreshedReads}`);
+  assert(dataOf(page).pageErrors.length === 0, `页面出现未捕获异常：${dataOf(page).pageErrors.join('; ')}`);
+  await page.close();
 });
 
 scenario('列表外帖子链接保持原生跳转', async (ctx) => {

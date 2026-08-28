@@ -31,15 +31,18 @@ function createPostPageController({
       this.list = null;
       this.originalChildren = [];
       this.records = [];
-      this.pageDocs = new Map();
+      this.loadedPages = 0;
       this.failedPages = [];
       this.truncated = false;
       this.totalPages = null;
       this.toolbar = null;
       this.statusNode = null;
       this.loadingNode = null;
+      this.loading = false;
+      this.hasRemotePages = false;
       this.generation = 0;
       this.composer = null;
+      this.requestController = null;
     }
 
     async init() {
@@ -92,18 +95,28 @@ function createPostPageController({
     async reloadPages(options = {}) {
       if (!this.list) return;
       const generation = ++this.generation;
+      this.requestController?.abort();
+      const requestController = windowObj.AbortController ? new windowObj.AbortController() : null;
+      this.requestController = requestController;
+      this.loading = true;
       this.showLoading('正在读取评论分页…');
       try {
-        if (options.refreshCurrentPage) await this.adoptNewReplies(generation);
-        await this.loadPages(generation, options);
+        if (options.refreshCurrentPage) await this.adoptNewReplies(generation, requestController?.signal);
         if (generation !== this.generation) return;
+        this.loadCurrentPage();
+        if (appState.mode === 'thread') this.render({ progressive: true });
+        await this.loadPages(generation, options, requestController?.signal);
+        if (generation !== this.generation) return;
+        this.loading = false;
         this.render();
       } catch (error) {
         if (generation !== this.generation) return;
         this.restoreOriginal();
         this.showStatus(`楼中楼读取失败：${error.message || '网络错误'}，已保留原版布局。`);
       } finally {
+        if (this.requestController === requestController) this.requestController = null;
         if (generation === this.generation) {
+          this.loading = false;
           this.loadingNode?.remove();
           this.loadingNode = null;
           this.updateToolbar();
@@ -111,11 +124,32 @@ function createPostPageController({
       }
     }
 
-    async adoptNewReplies(generation) {
+    loadCurrentPage() {
+      const state = getDocState(documentObj);
+      const records = [];
+      this.originalChildren.forEach((item, index) => {
+        if (item.nodeType !== 1) return;
+        const record = getCommentRecord(item, this.info.postId, this.info.page, index, true, {
+          keepCommentMenu: true,
+          state,
+          getCurrentUserUid,
+        });
+        if (record) records.push(record);
+      });
+      this.records = records;
+      this.loadedPages = 1;
+      this.failedPages = [];
+      const discovered = getPageNumbers(documentObj, this.info.postId);
+      this.totalPages = discovered.size ? Math.max(...discovered, this.info.page) : this.info.page;
+      this.truncated = this.totalPages > maxPage;
+      this.hasRemotePages = this.totalPages > 1 || this.info.page > 1;
+    }
+
+    async adoptNewReplies(generation, signal) {
       try {
-        const { html } = await fetchHtml(new URL(`/post-${this.info.postId}-${this.info.page}`, windowObj.location.origin), { noStore: true });
+        const response = await fetchHtml(new URL(`/post-${this.info.postId}-${this.info.page}`, windowObj.location.origin), { noStore: true, signal });
         if (generation !== this.generation) return;
-        const parsed = parseHtml(html);
+        const parsed = parseHtml(response.html, response.url);
         const knownFloors = new Set(this.originalChildren
           .filter((node) => node.nodeType === Node.ELEMENT_NODE)
           .map((node) => getFloor(node))
@@ -134,41 +168,44 @@ function createPostPageController({
       }
     }
 
-    async loadPages(generation, options = {}) {
-      this.records = [];
+    async loadPages(generation, options = {}, signal) {
       this.failedPages = [];
-      const { pageDocs, failedPages, truncated, totalPages } = await fetchPostPages(this.info, documentObj, {
-        noStore: options.noStore !== false,
+      const remoteRecords = [];
+      const fresh = options.noStore === true || options.refreshCurrentPage === true;
+      const { loadedPages, failedPages, truncated, totalPages } = await fetchPostPages(this.info, documentObj, {
+        noStore: fresh,
+        allowCache: !fresh,
+        retainDocuments: false,
+        signal,
+        onPageLoaded: (page, root) => {
+          if (page !== this.info.page) remoteRecords.push(...this.collectRemoteRecords(root, page));
+        },
         isAborted: () => generation !== this.generation,
       });
       if (generation !== this.generation) return;
-      this.pageDocs = pageDocs;
+      this.loadedPages = loadedPages;
       this.failedPages = failedPages;
       this.truncated = truncated;
       this.totalPages = totalPages;
 
-      const allRecords = [];
-      this.pageDocs.forEach((root, page) => {
-        const state = getDocState(root);
-        if (root === documentObj && this.originalChildren.length) {
-          this.originalChildren.forEach((item, index) => {
-            if (item.nodeType !== 1) return;
-            const record = getCommentRecord(item, this.info.postId, page, index, true, { keepCommentMenu: true, state, getCurrentUserUid });
-            if (record) allRecords.push(record);
-          });
-          return;
-        }
-        getCommentItems(root).forEach((item, index) => {
-          const record = getCommentRecord(item, this.info.postId, page, index, root === documentObj, { keepCommentMenu: true, state, getCurrentUserUid });
-          if (record) allRecords.push(record);
-        });
-      });
+      const allRecords = [...this.records, ...remoteRecords];
       const unique = new Map();
       allRecords.forEach((record) => {
         const previous = unique.get(record.floor);
         if (!previous || record.current) unique.set(record.floor, record);
       });
       this.records = Array.from(unique.values());
+    }
+
+    collectRemoteRecords(root, page) {
+      const state = getDocState(root);
+      return getCommentItems(root)
+        .map((item, index) => getCommentRecord(item, this.info.postId, page, index, false, {
+          keepCommentMenu: true,
+          state,
+          getCurrentUserUid,
+        }))
+        .filter(Boolean);
     }
 
     setMode(mode) {
@@ -192,18 +229,30 @@ function createPostPageController({
       this.list?.closest(selectors.commentContainer)?.insertAdjacentElement('beforebegin', this.statusNode);
     }
 
-    render() {
+    render(options = {}) {
       if (!this.list || appState.mode !== 'thread') return;
       this.restoreOriginal();
-      buildReplyTree(this.records).forEach((record) => appendNestedRecord(record, this.list, 0));
-      this.records.filter((record) => record.node.hasAttribute('data-xns-remote')).forEach((record) => {
+      const recordNodes = new Set(this.records.map((record) => record.node));
+      const fragment = documentObj.createDocumentFragment();
+      Array.from(this.list.childNodes).forEach((node) => {
+        if (!recordNodes.has(node)) fragment.appendChild(node);
+      });
+      buildReplyTree(this.records).forEach((record) => appendNestedRecord(record, fragment, 0));
+      this.list.replaceChildren(fragment);
+      const remoteRecords = this.records.filter((record) => record.node.hasAttribute('data-xns-remote'));
+      remoteRecords.forEach((record) => {
         addRemoteNote(record, this.info.postId);
         record.node.classList.add('xns-preview-content');
-        installPreviewFeatures(record.node);
       });
-      const loadedPages = this.pageDocs.size;
+      // 内容特性会各自查询图片、代码块、标签页和投票链接。以评论列表为根一次扫描，
+      // 避免父楼层包含子楼层时反复遍历同一棵 DOM；当前页原生节点不带此标记，不会被改写。
+      if (remoteRecords.length) installPreviewFeatures(this.list);
+      const loadedPages = this.loadedPages;
+      const loading = this.loading || options.progressive;
       let status = this.failedPages.length
         ? `楼中楼已整理：读取 ${loadedPages} 页，${this.failedPages.length} 页失败。`
+        : loading && this.hasRemotePages
+          ? `楼中楼已整理：已读取 ${loadedPages} 页，正在读取其他分页…`
         : `楼中楼已整理：共读取 ${loadedPages} 页。`;
       if (this.truncated) status += ` 帖子共 ${this.totalPages} 页，只读取了前 ${maxPage} 页，后面页的楼层没有显示。`;
       this.showStatus(status);

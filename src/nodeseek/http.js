@@ -9,20 +9,125 @@ function createHttpClient({
   isAllowedPostRequest,
   parseSameOriginUrl,
   extractSsrState,
+  cacheTtl,
+  cacheMaxEntries,
+  cacheMaxBytes,
+  cacheItemMaxBytes,
 }) {
+  const htmlCache = new Map();
+  let htmlCacheBytes = 0;
+
+  function removeCacheEntry(key) {
+    const entry = htmlCache.get(key);
+    if (!entry) return;
+    htmlCacheBytes -= entry.bytes;
+    htmlCache.delete(key);
+  }
+
+  function postIdFromUrl(url) {
+    return /^\/post-(\d+)-\d+(?:\/)?$/.exec(url.pathname)?.[1] || '';
+  }
+
+  function invalidatePostCache(url) {
+    const postId = postIdFromUrl(url);
+    if (!postId) {
+      removeCacheEntry(url.href);
+      return;
+    }
+    Array.from(htmlCache.entries()).forEach(([key, entry]) => {
+      if (entry.postId === postId) removeCacheEntry(key);
+    });
+  }
+
+  function readCachedHtml(url) {
+    const entry = htmlCache.get(url.href);
+    if (!entry) return null;
+    if (Date.now() - entry.createdAt > cacheTtl) {
+      removeCacheEntry(url.href);
+      return null;
+    }
+    htmlCache.delete(url.href);
+    htmlCache.set(url.href, entry);
+    return { html: entry.html, url: parseSameOriginUrl(entry.url) };
+  }
+
+  function writeCachedHtml(url, html) {
+    const bytes = html.length;
+    if (bytes > cacheItemMaxBytes) return;
+    removeCacheEntry(url.href);
+    while (htmlCache.size >= cacheMaxEntries || htmlCacheBytes + bytes > cacheMaxBytes) {
+      const oldest = htmlCache.keys().next().value;
+      if (oldest === undefined) break;
+      removeCacheEntry(oldest);
+    }
+    htmlCache.set(url.href, { html, url: url.href, postId: postIdFromUrl(url), createdAt: Date.now(), bytes, document: null });
+    htmlCacheBytes += bytes;
+  }
+
+  function getRetryDelay(response, fallback) {
+    const value = response.headers?.get?.('retry-after')?.trim() || '';
+    if (!value) return fallback;
+    const seconds = Number(value);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(10_000, seconds * 1_000);
+    const timestamp = Date.parse(value);
+    if (!Number.isNaN(timestamp)) return Math.min(10_000, Math.max(0, timestamp - Date.now()));
+    return fallback;
+  }
+
+  function abortError() {
+    const error = new Error('请求已取消');
+    error.name = 'AbortError';
+    return error;
+  }
+
+  function wait(delay, signal) {
+    if (signal?.aborted) return Promise.reject(abortError());
+    return new Promise((resolve, reject) => {
+      const timer = windowObj.setTimeout(() => {
+        signal?.removeEventListener('abort', cancel);
+        resolve();
+      }, delay);
+      const cancel = () => {
+        windowObj.clearTimeout(timer);
+        signal?.removeEventListener('abort', cancel);
+        reject(abortError());
+      };
+      signal?.addEventListener('abort', cancel, { once: true });
+    });
+  }
+
+  function throwIfAborted(signal) {
+    if (signal?.aborted) throw abortError();
+  }
+
   async function fetchHtml(url, options = {}) {
     if (!isAllowedPostRequest(url)) throw new Error('只允许读取同一站点的帖子页面');
     const noStore = options.noStore === true;
+    const allowCache = options.allowCache === true && !noStore;
+    if (noStore) invalidatePostCache(url);
+    if (allowCache) {
+      const cached = readCachedHtml(url);
+      if (cached) return cached;
+    }
     for (let attempt = 1; attempt <= 3; attempt += 1) {
+      throwIfAborted(options.signal);
+      if (typeof options.beforeRequest === 'function') await options.beforeRequest();
+      throwIfAborted(options.signal);
       const controller = new AbortControllerCtor();
+      const abortExternal = () => controller.abort();
+      options.signal?.addEventListener('abort', abortExternal, { once: true });
       const timer = windowObj.setTimeout(() => controller.abort(), requestTimeout);
       try {
         const response = await fetchFn(url.href, {
           method: 'GET', credentials: 'same-origin', cache: noStore ? 'no-store' : 'default', redirect: 'error',
           referrerPolicy: 'same-origin', headers: { Accept: 'text/html,application/xhtml+xml' }, signal: controller.signal,
         });
+        if (typeof options.onResponse === 'function') options.onResponse(response.status);
         if (response.status === 429 || response.status >= 500) {
-          if (attempt < 3) { await new Promise((resolve) => windowObj.setTimeout(resolve, 600 * attempt)); continue; }
+          if (attempt < 3) {
+            await wait(getRetryDelay(response, 600 * attempt), options.signal);
+            continue;
+          }
           throw new Error(`HTTP ${response.status}`);
         }
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -33,6 +138,7 @@ function createHttpClient({
         if (Number.isFinite(contentLength) && contentLength > maxResponseBytes) throw new Error('响应过大');
         const html = await response.text();
         if (!html || html.length > maxResponseBytes) throw new Error('响应过大或为空');
+        if (allowCache) writeCachedHtml(responseUrl, html);
         return { html, url: responseUrl };
       } catch (error) {
         if (attempt < 3 && error?.name !== 'AbortError') {
@@ -40,14 +146,21 @@ function createHttpClient({
           continue;
         }
         throw error;
-      } finally { windowObj.clearTimeout(timer); }
+      } finally {
+        windowObj.clearTimeout(timer);
+        options.signal?.removeEventListener('abort', abortExternal);
+      }
     }
     throw new Error('抓取失败');
   }
 
-  function parseHtml(html) {
+  function parseHtml(html, cacheKey = '') {
+    const key = typeof cacheKey === 'string' ? cacheKey : cacheKey?.href || '';
+    const cached = key ? htmlCache.get(key) : null;
+    if (cached?.html === html && cached.document) return cached.document;
     const doc = new DOMParserCtor().parseFromString(html, 'text/html');
     doc.__xnsState = extractSsrState(doc);
+    if (cached?.html === html) cached.document = doc;
     return doc;
   }
 
@@ -61,6 +174,10 @@ const xnsHttpClient = createHttpClient({
   DOMParserCtor: window.DOMParser,
   requestTimeout: REQUEST_TIMEOUT,
   maxResponseBytes: MAX_RESPONSE_BYTES,
+  cacheTtl: HTML_CACHE_TTL,
+  cacheMaxEntries: HTML_CACHE_MAX_ENTRIES,
+  cacheMaxBytes: HTML_CACHE_MAX_BYTES,
+  cacheItemMaxBytes: HTML_CACHE_ITEM_MAX_BYTES,
   isAllowedPostRequest,
   parseSameOriginUrl,
   extractSsrState,

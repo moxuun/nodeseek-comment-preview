@@ -110,17 +110,36 @@ function createVoteFeature({
     link.replaceWith(buildVotePanel(vote));
   }
 
-  function installPreviewVotePanels(root) {
-    qsa(root, 'a[data-href^="nsapp://vote"], a[href^="nsapp://vote"]').forEach((link) => {
-      if (link.dataset.xnsVoteBound === 'true') return;
-      const voteId = getVoteIdFromLink(link);
-      if (voteId === null) return;
-      link.dataset.xnsVoteBound = 'true';
+  function scheduleVoteInfo(link, voteId) {
+    const load = () => {
+      if (!link.isConnected) return;
       void fetchVoteInfo(voteId)
         .then((data) => mountVotePanel(link, data))
         .catch(() => {
           if (link.isConnected) link.textContent = link.textContent || `投票 #${voteId}（需登录）`;
         });
+    };
+    if (typeof windowObj.IntersectionObserver === 'function') {
+      let observer;
+      observer = new windowObj.IntersectionObserver((entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer.disconnect();
+        load();
+      }, { rootMargin: '600px 0px' });
+      observer.observe(link);
+      return;
+    }
+    if (typeof windowObj.requestIdleCallback === 'function') windowObj.requestIdleCallback(load, { timeout: 1_000 });
+    else windowObj.setTimeout(load, 0);
+  }
+
+  function installPreviewVotePanels(root) {
+    qsa(root, '.xns-preview-content a[data-href^="nsapp://vote"], .xns-preview-content a[href^="nsapp://vote"]').forEach((link) => {
+      if (link.dataset.xnsVoteBound === 'true') return;
+      const voteId = getVoteIdFromLink(link);
+      if (voteId === null) return;
+      link.dataset.xnsVoteBound = 'true';
+      scheduleVoteInfo(link, voteId);
     });
   }
 

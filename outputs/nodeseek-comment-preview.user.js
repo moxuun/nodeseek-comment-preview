@@ -21,6 +21,12 @@ const MAX_RESPONSE_BYTES = 2_000_000;
 const MAX_PAGE = 50;
 // NodeSeek 对连续分页请求有明显的限流；保留少量并发，避免长帖读取时成批 429。
 const PAGE_CONCURRENCY = 2;
+// 发生限流后，分页请求之间错开起始时间；正常情况下不人为降低吞吐。
+const PAGE_REQUEST_GAP = 150;
+const HTML_CACHE_TTL = 30_000;
+const HTML_CACHE_MAX_ENTRIES = 16;
+const HTML_CACHE_MAX_BYTES = 4_000_000;
+const HTML_CACHE_ITEM_MAX_BYTES = 512_000;
 const STYLE_ID = `${PREFIX}-style`;
 const DEFAULT_MODE = 'thread';
 
@@ -381,16 +387,27 @@ function createContentParser({
   getPostContent,
   getCurrentUserUid,
 }) {
+const DANGEROUS_IMPORTED_SELECTOR = 'script,style,link,meta,base,iframe,object,embed,form,input,textarea,select,option,button';
+const COMMENT_MENU_SELECTOR = '.comment-menu, .comment-actions';
+const ssrCommentIndexes = new WeakMap();
+
 function sanitizeImportedNode(sourceNode, options = {}) {
   if (!sourceNode) return null;
   const imported = documentObj.importNode(sourceNode, true);
-  const dangerous = 'script,style,link,meta,base,iframe,object,embed,form,input,textarea,select,option,button';
-  qsa(imported, dangerous).forEach((node) => node.remove());
-  if (imported.matches?.(dangerous)) imported.remove();
-  if (!options.keepCommentMenu) qsa(imported, '.comment-menu, .comment-actions').forEach((node) => node.remove());
-  qsa(imported, '[id]').forEach((node) => node.removeAttribute('id'));
+  if (imported.matches?.(DANGEROUS_IMPORTED_SELECTOR)) return null;
   const all = [imported, ...qsa(imported, '*')].filter((node) => node.nodeType === 1);
   all.forEach((node) => {
+    if (node !== imported && node.matches?.(DANGEROUS_IMPORTED_SELECTOR)) {
+      node.remove();
+      return;
+    }
+    if (node !== imported && !options.keepCommentMenu && node.matches?.(COMMENT_MENU_SELECTOR)) {
+      node.remove();
+      return;
+    }
+    // 保留克隆根节点的楼层 id；旧实现的 [id] 查询只覆盖后代节点，
+    // 预览和帖子页回复流程依赖根 id 继续识别楼层。
+    if (node !== imported && node.hasAttribute('id')) node.removeAttribute('id');
     Array.from(node.attributes).forEach((attribute) => {
       const name = attribute.name.toLowerCase();
       if (name.startsWith('on') || ['style', 'srcdoc', 'srcset', 'formaction', 'contenteditable', 'ping'].includes(name)) {
@@ -471,7 +488,21 @@ function getCommentRecord(item, postId, page, index, current, options = {}) {
 }
 
 function getSsrCommentCounts(stateValue, commentId) {
-  const comment = stateValue?.postData?.comments?.find((item) => String(item.commentId) === String(commentId));
+  if (!stateValue || typeof stateValue !== 'object') return null;
+  let index = ssrCommentIndexes.get(stateValue);
+  if (!index) {
+    index = new Map();
+    const comments = stateValue?.postData?.comments;
+    if (Array.isArray(comments)) {
+      comments.forEach((item) => {
+        if (item?.commentId !== undefined && item?.commentId !== null && !index.has(String(item.commentId))) {
+          index.set(String(item.commentId), item);
+        }
+      });
+    }
+    ssrCommentIndexes.set(stateValue, index);
+  }
+  const comment = index.get(String(commentId));
   if (!comment) return null;
   return {
     like: safeCount(comment.upvoteCount), chicken: safeCount(comment.likeCount), dislike: safeCount(comment.dislikeCount),
@@ -515,10 +546,15 @@ const getSsrCommentCounts = (...args) => xnsContentParser.getSsrCommentCounts(..
 
 // 从页面链接发现同一帖子的分页。
 function createPaginationService({ windowObj, qsa, parseSameOriginUrl, getPostInfo }) {
+  function getPaginationLinks(root) {
+    const preferred = qsa(root, '.nsk-pager a[href], a.pager-pos[href]');
+    return preferred.length ? preferred : qsa(root, 'a[href]');
+  }
+
   function getPageNumbers(root, postId) {
     const pages = new Set();
     const baseUrl = typeof root?.baseURI === 'string' && /^https?:/.test(root.baseURI) ? root.baseURI : windowObj.location.href;
-    qsa(root, 'a[href]').forEach((link) => {
+    getPaginationLinks(root).forEach((link) => {
       const url = parseSameOriginUrl(link.getAttribute('href') || '', baseUrl);
       const info = url ? getPostInfo(url.href) : null;
       if (info?.postId === String(postId)) pages.add(info.page);
@@ -549,20 +585,125 @@ function createHttpClient({
   isAllowedPostRequest,
   parseSameOriginUrl,
   extractSsrState,
+  cacheTtl,
+  cacheMaxEntries,
+  cacheMaxBytes,
+  cacheItemMaxBytes,
 }) {
+  const htmlCache = new Map();
+  let htmlCacheBytes = 0;
+
+  function removeCacheEntry(key) {
+    const entry = htmlCache.get(key);
+    if (!entry) return;
+    htmlCacheBytes -= entry.bytes;
+    htmlCache.delete(key);
+  }
+
+  function postIdFromUrl(url) {
+    return /^\/post-(\d+)-\d+(?:\/)?$/.exec(url.pathname)?.[1] || '';
+  }
+
+  function invalidatePostCache(url) {
+    const postId = postIdFromUrl(url);
+    if (!postId) {
+      removeCacheEntry(url.href);
+      return;
+    }
+    Array.from(htmlCache.entries()).forEach(([key, entry]) => {
+      if (entry.postId === postId) removeCacheEntry(key);
+    });
+  }
+
+  function readCachedHtml(url) {
+    const entry = htmlCache.get(url.href);
+    if (!entry) return null;
+    if (Date.now() - entry.createdAt > cacheTtl) {
+      removeCacheEntry(url.href);
+      return null;
+    }
+    htmlCache.delete(url.href);
+    htmlCache.set(url.href, entry);
+    return { html: entry.html, url: parseSameOriginUrl(entry.url) };
+  }
+
+  function writeCachedHtml(url, html) {
+    const bytes = html.length;
+    if (bytes > cacheItemMaxBytes) return;
+    removeCacheEntry(url.href);
+    while (htmlCache.size >= cacheMaxEntries || htmlCacheBytes + bytes > cacheMaxBytes) {
+      const oldest = htmlCache.keys().next().value;
+      if (oldest === undefined) break;
+      removeCacheEntry(oldest);
+    }
+    htmlCache.set(url.href, { html, url: url.href, postId: postIdFromUrl(url), createdAt: Date.now(), bytes, document: null });
+    htmlCacheBytes += bytes;
+  }
+
+  function getRetryDelay(response, fallback) {
+    const value = response.headers?.get?.('retry-after')?.trim() || '';
+    if (!value) return fallback;
+    const seconds = Number(value);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(10_000, seconds * 1_000);
+    const timestamp = Date.parse(value);
+    if (!Number.isNaN(timestamp)) return Math.min(10_000, Math.max(0, timestamp - Date.now()));
+    return fallback;
+  }
+
+  function abortError() {
+    const error = new Error('请求已取消');
+    error.name = 'AbortError';
+    return error;
+  }
+
+  function wait(delay, signal) {
+    if (signal?.aborted) return Promise.reject(abortError());
+    return new Promise((resolve, reject) => {
+      const timer = windowObj.setTimeout(() => {
+        signal?.removeEventListener('abort', cancel);
+        resolve();
+      }, delay);
+      const cancel = () => {
+        windowObj.clearTimeout(timer);
+        signal?.removeEventListener('abort', cancel);
+        reject(abortError());
+      };
+      signal?.addEventListener('abort', cancel, { once: true });
+    });
+  }
+
+  function throwIfAborted(signal) {
+    if (signal?.aborted) throw abortError();
+  }
+
   async function fetchHtml(url, options = {}) {
     if (!isAllowedPostRequest(url)) throw new Error('只允许读取同一站点的帖子页面');
     const noStore = options.noStore === true;
+    const allowCache = options.allowCache === true && !noStore;
+    if (noStore) invalidatePostCache(url);
+    if (allowCache) {
+      const cached = readCachedHtml(url);
+      if (cached) return cached;
+    }
     for (let attempt = 1; attempt <= 3; attempt += 1) {
+      throwIfAborted(options.signal);
+      if (typeof options.beforeRequest === 'function') await options.beforeRequest();
+      throwIfAborted(options.signal);
       const controller = new AbortControllerCtor();
+      const abortExternal = () => controller.abort();
+      options.signal?.addEventListener('abort', abortExternal, { once: true });
       const timer = windowObj.setTimeout(() => controller.abort(), requestTimeout);
       try {
         const response = await fetchFn(url.href, {
           method: 'GET', credentials: 'same-origin', cache: noStore ? 'no-store' : 'default', redirect: 'error',
           referrerPolicy: 'same-origin', headers: { Accept: 'text/html,application/xhtml+xml' }, signal: controller.signal,
         });
+        if (typeof options.onResponse === 'function') options.onResponse(response.status);
         if (response.status === 429 || response.status >= 500) {
-          if (attempt < 3) { await new Promise((resolve) => windowObj.setTimeout(resolve, 600 * attempt)); continue; }
+          if (attempt < 3) {
+            await wait(getRetryDelay(response, 600 * attempt), options.signal);
+            continue;
+          }
           throw new Error(`HTTP ${response.status}`);
         }
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -573,6 +714,7 @@ function createHttpClient({
         if (Number.isFinite(contentLength) && contentLength > maxResponseBytes) throw new Error('响应过大');
         const html = await response.text();
         if (!html || html.length > maxResponseBytes) throw new Error('响应过大或为空');
+        if (allowCache) writeCachedHtml(responseUrl, html);
         return { html, url: responseUrl };
       } catch (error) {
         if (attempt < 3 && error?.name !== 'AbortError') {
@@ -580,14 +722,21 @@ function createHttpClient({
           continue;
         }
         throw error;
-      } finally { windowObj.clearTimeout(timer); }
+      } finally {
+        windowObj.clearTimeout(timer);
+        options.signal?.removeEventListener('abort', abortExternal);
+      }
     }
     throw new Error('抓取失败');
   }
 
-  function parseHtml(html) {
+  function parseHtml(html, cacheKey = '') {
+    const key = typeof cacheKey === 'string' ? cacheKey : cacheKey?.href || '';
+    const cached = key ? htmlCache.get(key) : null;
+    if (cached?.html === html && cached.document) return cached.document;
     const doc = new DOMParserCtor().parseFromString(html, 'text/html');
     doc.__xnsState = extractSsrState(doc);
+    if (cached?.html === html) cached.document = doc;
     return doc;
   }
 
@@ -601,6 +750,10 @@ const xnsHttpClient = createHttpClient({
   DOMParserCtor: window.DOMParser,
   requestTimeout: REQUEST_TIMEOUT,
   maxResponseBytes: MAX_RESPONSE_BYTES,
+  cacheTtl: HTML_CACHE_TTL,
+  cacheMaxEntries: HTML_CACHE_MAX_ENTRIES,
+  cacheMaxBytes: HTML_CACHE_MAX_BYTES,
+  cacheItemMaxBytes: HTML_CACHE_ITEM_MAX_BYTES,
   isAllowedPostRequest,
   parseSameOriginUrl,
   extractSsrState,
@@ -641,7 +794,40 @@ const buildReplyTree = (records) => xnsCommentThreadModel.build(records);
 
 // 帖子分页读取服务。
 // 只负责“读哪些页、如何并发、如何合并”，不创建 DOM，也不决定如何展示失败。
-function createPageLoader({ windowObj, maxPage, concurrency, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid }) {
+function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid }) {
+  function createRequestGate(gapMs) {
+    const cooldownGap = Number.isFinite(Number(gapMs)) ? Math.max(0, Number(gapMs)) : 0;
+    let currentGap = 0;
+    let successStreak = 0;
+    let queue = Promise.resolve();
+    let nextStartAt = 0;
+    async function waitForRequestSlot() {
+      const previous = queue;
+      let release;
+      queue = new Promise((resolve) => { release = resolve; });
+      await previous;
+      const delay = Math.max(0, nextStartAt - Date.now());
+      if (delay) await new Promise((resolve) => windowObj.setTimeout(resolve, delay));
+      nextStartAt = Date.now() + currentGap;
+      release();
+    }
+    function observeResponse(status) {
+      if (status === 429 || status >= 500) {
+        currentGap = Math.min(1_000, Math.max(cooldownGap, currentGap ? currentGap * 2 : cooldownGap));
+        successStreak = 0;
+        return;
+      }
+      if (status >= 200 && status < 300) {
+        successStreak += 1;
+        if (successStreak >= 8 && currentGap > 0) {
+          currentGap = Math.max(0, currentGap - 25);
+          successStreak = 0;
+        }
+      }
+    }
+    return Object.freeze({ waitForRequestSlot, observeResponse });
+  }
+
   function collectPageRecords(info, root, page) {
     const state = getDocState(root);
     return getCommentItems(root)
@@ -651,7 +837,9 @@ function createPageLoader({ windowObj, maxPage, concurrency, fetchHtml, parseHtm
 
   async function fetchPostPages(info, firstDocument, options = {}) {
     const noStore = options.noStore !== false;
-    const pageDocs = new Map([[info.page, firstDocument]]);
+    const retainDocuments = options.retainDocuments !== false;
+    const pageDocs = retainDocuments ? new Map([[info.page, firstDocument]]) : null;
+    const loadedPages = new Set([info.page]);
     const failedPages = [];
     const pages = new Set([info.page]);
     const discovered = getPageNumbers(firstDocument, info.postId);
@@ -666,15 +854,25 @@ function createPageLoader({ windowObj, maxPage, concurrency, fetchHtml, parseHtm
     pages.delete(info.page);
 
     const pending = Array.from(pages).sort((a, b) => a - b);
+    const requestGate = createRequestGate(options.requestGapMs ?? requestGapMs);
+    options.onPageLoaded?.(info.page, firstDocument);
     const worker = async () => {
       while (pending.length) {
         if (options.isAborted?.()) return;
         const page = pending.shift();
-        if (page === undefined || pageDocs.has(page)) continue;
+        if (page === undefined || loadedPages.has(page)) continue;
         try {
-          const { html } = await fetchHtml(new URL(`/post-${info.postId}-${page}`, windowObj.location.origin), { noStore });
-          const parsed = parseHtml(html);
-          pageDocs.set(page, parsed);
+          const response = await fetchHtml(new URL(`/post-${info.postId}-${page}`, windowObj.location.origin), {
+            noStore,
+            allowCache: options.allowCache === true,
+            signal: options.signal,
+            beforeRequest: requestGate.waitForRequestSlot,
+            onResponse: requestGate.observeResponse,
+          });
+          const parsed = parseHtml(response.html, response.url);
+          loadedPages.add(page);
+          if (pageDocs) pageDocs.set(page, parsed);
+          options.onPageLoaded?.(page, parsed);
           getPageNumbers(parsed, info.postId).forEach((foundPage) => {
             if (foundPage <= maxPage && !pages.has(foundPage) && foundPage !== info.page) {
               pages.add(foundPage);
@@ -689,20 +887,27 @@ function createPageLoader({ windowObj, maxPage, concurrency, fetchHtml, parseHtm
 
     const workerCount = Math.min(concurrency, Math.max(1, pending.length));
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
-    return { pageDocs, failedPages, truncated, totalPages };
+    return { pageDocs, loadedPages: loadedPages.size, failedPages, truncated, totalPages };
   }
 
   async function loadPreviewRecords(info, firstDocument, options = {}) {
-    const { pageDocs, failedPages, truncated, totalPages } = await fetchPostPages(info, firstDocument, options);
-    const allRecords = [];
-    pageDocs.forEach((root, page) => allRecords.push(...collectPageRecords(info, root, page)));
+    const initialRecords = Array.isArray(options.initialRecords) ? options.initialRecords : null;
+    const allRecords = initialRecords ? [...initialRecords] : [];
+    const { loadedPages, failedPages, truncated, totalPages } = await fetchPostPages(info, firstDocument, {
+      ...options,
+      retainDocuments: false,
+      onPageLoaded: (page, root) => {
+        if (initialRecords && page === info.page) return;
+        allRecords.push(...collectPageRecords(info, root, page));
+      },
+    });
     const unique = new Map();
     allRecords.forEach((record) => {
       if (!unique.has(record.floor)) unique.set(record.floor, record);
     });
     return {
       records: Array.from(unique.values()),
-      loadedPages: pageDocs.size,
+      loadedPages,
       failedPages,
       truncated,
       totalPages,
@@ -716,6 +921,7 @@ const xnsPageLoader = createPageLoader({
   windowObj: window,
   maxPage: MAX_PAGE,
   concurrency: PAGE_CONCURRENCY,
+  requestGapMs: PAGE_REQUEST_GAP,
   fetchHtml,
   parseHtml,
   getPageNumbers,
@@ -1336,10 +1542,12 @@ function createPreviewRenderer({
     qs(section, ':scope > .xns-preview-empty')?.remove();
     qsa(section, ':scope > .xns-page-loading, :scope > .xns-page-failed').forEach((node) => node.remove());
     if (records.length) {
-      buildReplyTree(records).forEach((record) => appendNestedRecord(record, thread, 0));
+      const fragment = document.createDocumentFragment();
+      buildReplyTree(records).forEach((record) => appendNestedRecord(record, fragment, 0));
       records.forEach((record) => {
         if (record.page !== info.page) addRemoteNote(record, info.postId);
       });
+      thread.replaceChildren(fragment);
     } else {
       section.appendChild(createElement('p', 'xns-status xns-preview-empty', '没有读取到评论。'));
     }
@@ -1503,17 +1711,36 @@ function createVoteFeature({
     link.replaceWith(buildVotePanel(vote));
   }
 
-  function installPreviewVotePanels(root) {
-    qsa(root, 'a[data-href^="nsapp://vote"], a[href^="nsapp://vote"]').forEach((link) => {
-      if (link.dataset.xnsVoteBound === 'true') return;
-      const voteId = getVoteIdFromLink(link);
-      if (voteId === null) return;
-      link.dataset.xnsVoteBound = 'true';
+  function scheduleVoteInfo(link, voteId) {
+    const load = () => {
+      if (!link.isConnected) return;
       void fetchVoteInfo(voteId)
         .then((data) => mountVotePanel(link, data))
         .catch(() => {
           if (link.isConnected) link.textContent = link.textContent || `投票 #${voteId}（需登录）`;
         });
+    };
+    if (typeof windowObj.IntersectionObserver === 'function') {
+      let observer;
+      observer = new windowObj.IntersectionObserver((entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer.disconnect();
+        load();
+      }, { rootMargin: '600px 0px' });
+      observer.observe(link);
+      return;
+    }
+    if (typeof windowObj.requestIdleCallback === 'function') windowObj.requestIdleCallback(load, { timeout: 1_000 });
+    else windowObj.setTimeout(load, 0);
+  }
+
+  function installPreviewVotePanels(root) {
+    qsa(root, '.xns-preview-content a[data-href^="nsapp://vote"], .xns-preview-content a[href^="nsapp://vote"]').forEach((link) => {
+      if (link.dataset.xnsVoteBound === 'true') return;
+      const voteId = getVoteIdFromLink(link);
+      if (voteId === null) return;
+      link.dataset.xnsVoteBound = 'true';
+      scheduleVoteInfo(link, voteId);
     });
   }
 
@@ -1711,7 +1938,7 @@ function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createE
   }
 
   function installPreviewImageFallback(root) {
-    qsa(root, 'img').forEach((image) => {
+    qsa(root, '.xns-preview-content img').forEach((image) => {
       if (image.dataset.xnsImageBound === 'true') return;
       image.dataset.xnsImageBound = 'true';
       image.setAttribute('tabindex', '0');
@@ -1830,6 +2057,7 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
 
   function closeModal() {
     closeImageLightbox();
+    state.modal?.requestController?.abort();
     state.modal?.refreshScrollCleanup?.();
     state.modal?.scrollCleanup?.();
     state.modal?.overlay?.remove();
@@ -2234,7 +2462,12 @@ function createPreviewController({
     section.appendChild(thread);
     renderPreviewRecords(section, info, currentRecords, { loading: hasRemotePages });
     wrapper.appendChild(section);
-    const hydrate = loadPreviewRecords(info, parsed, { noStore: options.noStore === true }).then((preview) => {
+    const hydrate = loadPreviewRecords(info, parsed, {
+      noStore: options.noStore === true,
+      allowCache: options.allowCache === true,
+      initialRecords: currentRecords,
+      signal: options.signal,
+    }).then((preview) => {
       if (section.isConnected || options.renderDetached === true) renderPreviewRecords(section, info, preview.records, preview);
       return preview;
     });
@@ -2415,6 +2648,10 @@ function createPreviewController({
   async function loadPreviewModal(modal, loadingText, options = {}) {
     if (!modal || modal.loading) return false;
     const preserveContent = Boolean(options.preserveContent);
+    const fresh = preserveContent || options.noStore === true;
+    const requestController = windowObj.AbortController ? new windowObj.AbortController() : null;
+    modal.requestController?.abort();
+    modal.requestController = requestController;
     modal.refreshScrollCleanup?.();
     modal.loading = true;
     const generation = (modal.loadGeneration || 0) + 1;
@@ -2429,8 +2666,13 @@ function createPreviewController({
       modal.body.appendChild(createElement('p', 'xns-loading', loadingText));
     }
     try {
-      const { html } = await fetchHtml(modal.url, { noStore: true });
-      const preview = buildPreviewContent(modal.url, parseHtml(html), { noStore: true, renderDetached: preserveContent });
+      const response = await fetchHtml(modal.url, { noStore: fresh, allowCache: !fresh, signal: requestController?.signal });
+      const preview = buildPreviewContent(modal.url, parseHtml(response.html, response.url), {
+        noStore: fresh,
+        allowCache: !fresh,
+        renderDetached: preserveContent,
+        signal: requestController?.signal,
+      });
       if (preserveContent && preview.hydrate) await preview.hydrate;
       if (state.modal !== modal || modal.loadGeneration !== generation) return false;
       const scrollSnapshot = preserveContent ? capturePreviewScroll(modal.body) : null;
@@ -2451,6 +2693,7 @@ function createPreviewController({
         else showPreviewLoadError(modal, error);
       }
     } finally {
+      if (modal.requestController === requestController) modal.requestController = null;
       modal.loading = false;
       refresh?.classList.remove('xns-action-pending');
       refresh?.removeAttribute('aria-busy');
@@ -2491,7 +2734,7 @@ function createPreviewController({
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, loading: false, loadGeneration: 0 };
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, loading: false, loadGeneration: 0, requestController: null };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }
@@ -2607,15 +2850,18 @@ function createPostPageController({
       this.list = null;
       this.originalChildren = [];
       this.records = [];
-      this.pageDocs = new Map();
+      this.loadedPages = 0;
       this.failedPages = [];
       this.truncated = false;
       this.totalPages = null;
       this.toolbar = null;
       this.statusNode = null;
       this.loadingNode = null;
+      this.loading = false;
+      this.hasRemotePages = false;
       this.generation = 0;
       this.composer = null;
+      this.requestController = null;
     }
 
     async init() {
@@ -2668,18 +2914,28 @@ function createPostPageController({
     async reloadPages(options = {}) {
       if (!this.list) return;
       const generation = ++this.generation;
+      this.requestController?.abort();
+      const requestController = windowObj.AbortController ? new windowObj.AbortController() : null;
+      this.requestController = requestController;
+      this.loading = true;
       this.showLoading('正在读取评论分页…');
       try {
-        if (options.refreshCurrentPage) await this.adoptNewReplies(generation);
-        await this.loadPages(generation, options);
+        if (options.refreshCurrentPage) await this.adoptNewReplies(generation, requestController?.signal);
         if (generation !== this.generation) return;
+        this.loadCurrentPage();
+        if (appState.mode === 'thread') this.render({ progressive: true });
+        await this.loadPages(generation, options, requestController?.signal);
+        if (generation !== this.generation) return;
+        this.loading = false;
         this.render();
       } catch (error) {
         if (generation !== this.generation) return;
         this.restoreOriginal();
         this.showStatus(`楼中楼读取失败：${error.message || '网络错误'}，已保留原版布局。`);
       } finally {
+        if (this.requestController === requestController) this.requestController = null;
         if (generation === this.generation) {
+          this.loading = false;
           this.loadingNode?.remove();
           this.loadingNode = null;
           this.updateToolbar();
@@ -2687,11 +2943,32 @@ function createPostPageController({
       }
     }
 
-    async adoptNewReplies(generation) {
+    loadCurrentPage() {
+      const state = getDocState(documentObj);
+      const records = [];
+      this.originalChildren.forEach((item, index) => {
+        if (item.nodeType !== 1) return;
+        const record = getCommentRecord(item, this.info.postId, this.info.page, index, true, {
+          keepCommentMenu: true,
+          state,
+          getCurrentUserUid,
+        });
+        if (record) records.push(record);
+      });
+      this.records = records;
+      this.loadedPages = 1;
+      this.failedPages = [];
+      const discovered = getPageNumbers(documentObj, this.info.postId);
+      this.totalPages = discovered.size ? Math.max(...discovered, this.info.page) : this.info.page;
+      this.truncated = this.totalPages > maxPage;
+      this.hasRemotePages = this.totalPages > 1 || this.info.page > 1;
+    }
+
+    async adoptNewReplies(generation, signal) {
       try {
-        const { html } = await fetchHtml(new URL(`/post-${this.info.postId}-${this.info.page}`, windowObj.location.origin), { noStore: true });
+        const response = await fetchHtml(new URL(`/post-${this.info.postId}-${this.info.page}`, windowObj.location.origin), { noStore: true, signal });
         if (generation !== this.generation) return;
-        const parsed = parseHtml(html);
+        const parsed = parseHtml(response.html, response.url);
         const knownFloors = new Set(this.originalChildren
           .filter((node) => node.nodeType === Node.ELEMENT_NODE)
           .map((node) => getFloor(node))
@@ -2710,41 +2987,44 @@ function createPostPageController({
       }
     }
 
-    async loadPages(generation, options = {}) {
-      this.records = [];
+    async loadPages(generation, options = {}, signal) {
       this.failedPages = [];
-      const { pageDocs, failedPages, truncated, totalPages } = await fetchPostPages(this.info, documentObj, {
-        noStore: options.noStore !== false,
+      const remoteRecords = [];
+      const fresh = options.noStore === true || options.refreshCurrentPage === true;
+      const { loadedPages, failedPages, truncated, totalPages } = await fetchPostPages(this.info, documentObj, {
+        noStore: fresh,
+        allowCache: !fresh,
+        retainDocuments: false,
+        signal,
+        onPageLoaded: (page, root) => {
+          if (page !== this.info.page) remoteRecords.push(...this.collectRemoteRecords(root, page));
+        },
         isAborted: () => generation !== this.generation,
       });
       if (generation !== this.generation) return;
-      this.pageDocs = pageDocs;
+      this.loadedPages = loadedPages;
       this.failedPages = failedPages;
       this.truncated = truncated;
       this.totalPages = totalPages;
 
-      const allRecords = [];
-      this.pageDocs.forEach((root, page) => {
-        const state = getDocState(root);
-        if (root === documentObj && this.originalChildren.length) {
-          this.originalChildren.forEach((item, index) => {
-            if (item.nodeType !== 1) return;
-            const record = getCommentRecord(item, this.info.postId, page, index, true, { keepCommentMenu: true, state, getCurrentUserUid });
-            if (record) allRecords.push(record);
-          });
-          return;
-        }
-        getCommentItems(root).forEach((item, index) => {
-          const record = getCommentRecord(item, this.info.postId, page, index, root === documentObj, { keepCommentMenu: true, state, getCurrentUserUid });
-          if (record) allRecords.push(record);
-        });
-      });
+      const allRecords = [...this.records, ...remoteRecords];
       const unique = new Map();
       allRecords.forEach((record) => {
         const previous = unique.get(record.floor);
         if (!previous || record.current) unique.set(record.floor, record);
       });
       this.records = Array.from(unique.values());
+    }
+
+    collectRemoteRecords(root, page) {
+      const state = getDocState(root);
+      return getCommentItems(root)
+        .map((item, index) => getCommentRecord(item, this.info.postId, page, index, false, {
+          keepCommentMenu: true,
+          state,
+          getCurrentUserUid,
+        }))
+        .filter(Boolean);
     }
 
     setMode(mode) {
@@ -2768,18 +3048,30 @@ function createPostPageController({
       this.list?.closest(selectors.commentContainer)?.insertAdjacentElement('beforebegin', this.statusNode);
     }
 
-    render() {
+    render(options = {}) {
       if (!this.list || appState.mode !== 'thread') return;
       this.restoreOriginal();
-      buildReplyTree(this.records).forEach((record) => appendNestedRecord(record, this.list, 0));
-      this.records.filter((record) => record.node.hasAttribute('data-xns-remote')).forEach((record) => {
+      const recordNodes = new Set(this.records.map((record) => record.node));
+      const fragment = documentObj.createDocumentFragment();
+      Array.from(this.list.childNodes).forEach((node) => {
+        if (!recordNodes.has(node)) fragment.appendChild(node);
+      });
+      buildReplyTree(this.records).forEach((record) => appendNestedRecord(record, fragment, 0));
+      this.list.replaceChildren(fragment);
+      const remoteRecords = this.records.filter((record) => record.node.hasAttribute('data-xns-remote'));
+      remoteRecords.forEach((record) => {
         addRemoteNote(record, this.info.postId);
         record.node.classList.add('xns-preview-content');
-        installPreviewFeatures(record.node);
       });
-      const loadedPages = this.pageDocs.size;
+      // 内容特性会各自查询图片、代码块、标签页和投票链接。以评论列表为根一次扫描，
+      // 避免父楼层包含子楼层时反复遍历同一棵 DOM；当前页原生节点不带此标记，不会被改写。
+      if (remoteRecords.length) installPreviewFeatures(this.list);
+      const loadedPages = this.loadedPages;
+      const loading = this.loading || options.progressive;
       let status = this.failedPages.length
         ? `楼中楼已整理：读取 ${loadedPages} 页，${this.failedPages.length} 页失败。`
+        : loading && this.hasRemotePages
+          ? `楼中楼已整理：已读取 ${loadedPages} 页，正在读取其他分页…`
         : `楼中楼已整理：共读取 ${loadedPages} 页。`;
       if (this.truncated) status += ` 帖子共 ${this.totalPages} 页，只读取了前 ${maxPage} 页，后面页的楼层没有显示。`;
       this.showStatus(status);

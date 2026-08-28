@@ -1,6 +1,39 @@
 // 帖子分页读取服务。
 // 只负责“读哪些页、如何并发、如何合并”，不创建 DOM，也不决定如何展示失败。
-function createPageLoader({ windowObj, maxPage, concurrency, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid }) {
+function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid }) {
+  function createRequestGate(gapMs) {
+    const cooldownGap = Number.isFinite(Number(gapMs)) ? Math.max(0, Number(gapMs)) : 0;
+    let currentGap = 0;
+    let successStreak = 0;
+    let queue = Promise.resolve();
+    let nextStartAt = 0;
+    async function waitForRequestSlot() {
+      const previous = queue;
+      let release;
+      queue = new Promise((resolve) => { release = resolve; });
+      await previous;
+      const delay = Math.max(0, nextStartAt - Date.now());
+      if (delay) await new Promise((resolve) => windowObj.setTimeout(resolve, delay));
+      nextStartAt = Date.now() + currentGap;
+      release();
+    }
+    function observeResponse(status) {
+      if (status === 429 || status >= 500) {
+        currentGap = Math.min(1_000, Math.max(cooldownGap, currentGap ? currentGap * 2 : cooldownGap));
+        successStreak = 0;
+        return;
+      }
+      if (status >= 200 && status < 300) {
+        successStreak += 1;
+        if (successStreak >= 8 && currentGap > 0) {
+          currentGap = Math.max(0, currentGap - 25);
+          successStreak = 0;
+        }
+      }
+    }
+    return Object.freeze({ waitForRequestSlot, observeResponse });
+  }
+
   function collectPageRecords(info, root, page) {
     const state = getDocState(root);
     return getCommentItems(root)
@@ -10,7 +43,9 @@ function createPageLoader({ windowObj, maxPage, concurrency, fetchHtml, parseHtm
 
   async function fetchPostPages(info, firstDocument, options = {}) {
     const noStore = options.noStore !== false;
-    const pageDocs = new Map([[info.page, firstDocument]]);
+    const retainDocuments = options.retainDocuments !== false;
+    const pageDocs = retainDocuments ? new Map([[info.page, firstDocument]]) : null;
+    const loadedPages = new Set([info.page]);
     const failedPages = [];
     const pages = new Set([info.page]);
     const discovered = getPageNumbers(firstDocument, info.postId);
@@ -25,15 +60,25 @@ function createPageLoader({ windowObj, maxPage, concurrency, fetchHtml, parseHtm
     pages.delete(info.page);
 
     const pending = Array.from(pages).sort((a, b) => a - b);
+    const requestGate = createRequestGate(options.requestGapMs ?? requestGapMs);
+    options.onPageLoaded?.(info.page, firstDocument);
     const worker = async () => {
       while (pending.length) {
         if (options.isAborted?.()) return;
         const page = pending.shift();
-        if (page === undefined || pageDocs.has(page)) continue;
+        if (page === undefined || loadedPages.has(page)) continue;
         try {
-          const { html } = await fetchHtml(new URL(`/post-${info.postId}-${page}`, windowObj.location.origin), { noStore });
-          const parsed = parseHtml(html);
-          pageDocs.set(page, parsed);
+          const response = await fetchHtml(new URL(`/post-${info.postId}-${page}`, windowObj.location.origin), {
+            noStore,
+            allowCache: options.allowCache === true,
+            signal: options.signal,
+            beforeRequest: requestGate.waitForRequestSlot,
+            onResponse: requestGate.observeResponse,
+          });
+          const parsed = parseHtml(response.html, response.url);
+          loadedPages.add(page);
+          if (pageDocs) pageDocs.set(page, parsed);
+          options.onPageLoaded?.(page, parsed);
           getPageNumbers(parsed, info.postId).forEach((foundPage) => {
             if (foundPage <= maxPage && !pages.has(foundPage) && foundPage !== info.page) {
               pages.add(foundPage);
@@ -48,20 +93,27 @@ function createPageLoader({ windowObj, maxPage, concurrency, fetchHtml, parseHtm
 
     const workerCount = Math.min(concurrency, Math.max(1, pending.length));
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
-    return { pageDocs, failedPages, truncated, totalPages };
+    return { pageDocs, loadedPages: loadedPages.size, failedPages, truncated, totalPages };
   }
 
   async function loadPreviewRecords(info, firstDocument, options = {}) {
-    const { pageDocs, failedPages, truncated, totalPages } = await fetchPostPages(info, firstDocument, options);
-    const allRecords = [];
-    pageDocs.forEach((root, page) => allRecords.push(...collectPageRecords(info, root, page)));
+    const initialRecords = Array.isArray(options.initialRecords) ? options.initialRecords : null;
+    const allRecords = initialRecords ? [...initialRecords] : [];
+    const { loadedPages, failedPages, truncated, totalPages } = await fetchPostPages(info, firstDocument, {
+      ...options,
+      retainDocuments: false,
+      onPageLoaded: (page, root) => {
+        if (initialRecords && page === info.page) return;
+        allRecords.push(...collectPageRecords(info, root, page));
+      },
+    });
     const unique = new Map();
     allRecords.forEach((record) => {
       if (!unique.has(record.floor)) unique.set(record.floor, record);
     });
     return {
       records: Array.from(unique.values()),
-      loadedPages: pageDocs.size,
+      loadedPages,
       failedPages,
       truncated,
       totalPages,
@@ -75,6 +127,7 @@ const xnsPageLoader = createPageLoader({
   windowObj: window,
   maxPage: MAX_PAGE,
   concurrency: PAGE_CONCURRENCY,
+  requestGapMs: PAGE_REQUEST_GAP,
   fetchHtml,
   parseHtml,
   getPageNumbers,

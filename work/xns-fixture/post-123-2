@@ -6,7 +6,7 @@
   <div class="comment-container">
     <div class="nsk-pager post-top-pager"><a class="pager-pos" href="/post-123-1">1</a><span class="pager-pos pager-cur">2</span></div>
     <ul class="comments">
-      <li id="4" data-comment-id="104" class="content-item"><div class="nsk-content-meta-info"><a href="/space/4">Carol</a></div><span class="floor-link-wrapper"><a class="floor-link" href="#4">#4</a></span><article class="post-content"><p>@Alice <a href="/post-123-2#2">#2</a> 跨页回复</p><pre><code class="language-js">const page = 2;</code></pre></article></li>
+      <li id="4" data-comment-id="104" class="content-item"><div class="nsk-content-meta-info"><a href="/space/4">Carol</a></div><span class="floor-link-wrapper"><a class="floor-link" href="#4">#4</a></span><article class="post-content"><p>@Alice <a href="/post-123-2#2">#2</a> 跨页回复</p><script>window.__fixtureShouldNotRun = true;</script><style>.fixture-danger { color: red; }</style><iframe src="https://example.invalid/fixture"></iframe><a href="javascript:alert(1)" onclick="alert(1)" style="color:red">危险链接</a><pre><code class="language-js">const page = 2;</code></pre></article></li>
       <li id="5" data-comment-id="105" class="content-item"><div class="nsk-content-meta-info"><a href="/space/5">Dave</a></div><span class="floor-link-wrapper"><a class="floor-link" href="#5">#5</a></span><article class="post-content"><p>第二页普通评论</p></article></li>
     </ul>
     <div class="nsk-pager post-bottom-pager"><a class="pager-pos" href="/post-123-1">1</a><span class="pager-pos pager-cur">2</span></div>

@@ -13,16 +13,27 @@ function createContentParser({
   getPostContent,
   getCurrentUserUid,
 }) {
+const DANGEROUS_IMPORTED_SELECTOR = 'script,style,link,meta,base,iframe,object,embed,form,input,textarea,select,option,button';
+const COMMENT_MENU_SELECTOR = '.comment-menu, .comment-actions';
+const ssrCommentIndexes = new WeakMap();
+
 function sanitizeImportedNode(sourceNode, options = {}) {
   if (!sourceNode) return null;
   const imported = documentObj.importNode(sourceNode, true);
-  const dangerous = 'script,style,link,meta,base,iframe,object,embed,form,input,textarea,select,option,button';
-  qsa(imported, dangerous).forEach((node) => node.remove());
-  if (imported.matches?.(dangerous)) imported.remove();
-  if (!options.keepCommentMenu) qsa(imported, '.comment-menu, .comment-actions').forEach((node) => node.remove());
-  qsa(imported, '[id]').forEach((node) => node.removeAttribute('id'));
+  if (imported.matches?.(DANGEROUS_IMPORTED_SELECTOR)) return null;
   const all = [imported, ...qsa(imported, '*')].filter((node) => node.nodeType === 1);
   all.forEach((node) => {
+    if (node !== imported && node.matches?.(DANGEROUS_IMPORTED_SELECTOR)) {
+      node.remove();
+      return;
+    }
+    if (node !== imported && !options.keepCommentMenu && node.matches?.(COMMENT_MENU_SELECTOR)) {
+      node.remove();
+      return;
+    }
+    // 保留克隆根节点的楼层 id；旧实现的 [id] 查询只覆盖后代节点，
+    // 预览和帖子页回复流程依赖根 id 继续识别楼层。
+    if (node !== imported && node.hasAttribute('id')) node.removeAttribute('id');
     Array.from(node.attributes).forEach((attribute) => {
       const name = attribute.name.toLowerCase();
       if (name.startsWith('on') || ['style', 'srcdoc', 'srcset', 'formaction', 'contenteditable', 'ping'].includes(name)) {
@@ -103,7 +114,21 @@ function getCommentRecord(item, postId, page, index, current, options = {}) {
 }
 
 function getSsrCommentCounts(stateValue, commentId) {
-  const comment = stateValue?.postData?.comments?.find((item) => String(item.commentId) === String(commentId));
+  if (!stateValue || typeof stateValue !== 'object') return null;
+  let index = ssrCommentIndexes.get(stateValue);
+  if (!index) {
+    index = new Map();
+    const comments = stateValue?.postData?.comments;
+    if (Array.isArray(comments)) {
+      comments.forEach((item) => {
+        if (item?.commentId !== undefined && item?.commentId !== null && !index.has(String(item.commentId))) {
+          index.set(String(item.commentId), item);
+        }
+      });
+    }
+    ssrCommentIndexes.set(stateValue, index);
+  }
+  const comment = index.get(String(commentId));
   if (!comment) return null;
   return {
     like: safeCount(comment.upvoteCount), chicken: safeCount(comment.likeCount), dislike: safeCount(comment.dislikeCount),

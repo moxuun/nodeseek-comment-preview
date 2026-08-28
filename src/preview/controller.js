@@ -47,7 +47,12 @@ function createPreviewController({
     section.appendChild(thread);
     renderPreviewRecords(section, info, currentRecords, { loading: hasRemotePages });
     wrapper.appendChild(section);
-    const hydrate = loadPreviewRecords(info, parsed, { noStore: options.noStore === true }).then((preview) => {
+    const hydrate = loadPreviewRecords(info, parsed, {
+      noStore: options.noStore === true,
+      allowCache: options.allowCache === true,
+      initialRecords: currentRecords,
+      signal: options.signal,
+    }).then((preview) => {
       if (section.isConnected || options.renderDetached === true) renderPreviewRecords(section, info, preview.records, preview);
       return preview;
     });
@@ -228,6 +233,10 @@ function createPreviewController({
   async function loadPreviewModal(modal, loadingText, options = {}) {
     if (!modal || modal.loading) return false;
     const preserveContent = Boolean(options.preserveContent);
+    const fresh = preserveContent || options.noStore === true;
+    const requestController = windowObj.AbortController ? new windowObj.AbortController() : null;
+    modal.requestController?.abort();
+    modal.requestController = requestController;
     modal.refreshScrollCleanup?.();
     modal.loading = true;
     const generation = (modal.loadGeneration || 0) + 1;
@@ -242,8 +251,13 @@ function createPreviewController({
       modal.body.appendChild(createElement('p', 'xns-loading', loadingText));
     }
     try {
-      const { html } = await fetchHtml(modal.url, { noStore: true });
-      const preview = buildPreviewContent(modal.url, parseHtml(html), { noStore: true, renderDetached: preserveContent });
+      const response = await fetchHtml(modal.url, { noStore: fresh, allowCache: !fresh, signal: requestController?.signal });
+      const preview = buildPreviewContent(modal.url, parseHtml(response.html, response.url), {
+        noStore: fresh,
+        allowCache: !fresh,
+        renderDetached: preserveContent,
+        signal: requestController?.signal,
+      });
       if (preserveContent && preview.hydrate) await preview.hydrate;
       if (state.modal !== modal || modal.loadGeneration !== generation) return false;
       const scrollSnapshot = preserveContent ? capturePreviewScroll(modal.body) : null;
@@ -264,6 +278,7 @@ function createPreviewController({
         else showPreviewLoadError(modal, error);
       }
     } finally {
+      if (modal.requestController === requestController) modal.requestController = null;
       modal.loading = false;
       refresh?.classList.remove('xns-action-pending');
       refresh?.removeAttribute('aria-busy');
@@ -304,7 +319,7 @@ function createPreviewController({
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, loading: false, loadGeneration: 0 };
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, loading: false, loadGeneration: 0, requestController: null };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }

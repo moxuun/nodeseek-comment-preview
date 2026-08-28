@@ -5,6 +5,12 @@ const MAX_RESPONSE_BYTES = 2_000_000;
 const MAX_PAGE = 50;
 // NodeSeek 对连续分页请求有明显的限流；保留少量并发，避免长帖读取时成批 429。
 const PAGE_CONCURRENCY = 2;
+// 发生限流后，分页请求之间错开起始时间；正常情况下不人为降低吞吐。
+const PAGE_REQUEST_GAP = 150;
+const HTML_CACHE_TTL = 30_000;
+const HTML_CACHE_MAX_ENTRIES = 16;
+const HTML_CACHE_MAX_BYTES = 4_000_000;
+const HTML_CACHE_ITEM_MAX_BYTES = 512_000;
 const STYLE_ID = `${PREFIX}-style`;
 const DEFAULT_MODE = 'thread';
 

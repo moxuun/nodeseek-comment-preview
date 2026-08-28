@@ -77,6 +77,7 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
 
   function closeModal() {
     closeImageLightbox();
+    state.modal?.requestController?.abort();
     state.modal?.refreshScrollCleanup?.();
     state.modal?.scrollCleanup?.();
     state.modal?.overlay?.remove();

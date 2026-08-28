@@ -105,10 +105,12 @@ function createPreviewRenderer({
     qs(section, ':scope > .xns-preview-empty')?.remove();
     qsa(section, ':scope > .xns-page-loading, :scope > .xns-page-failed').forEach((node) => node.remove());
     if (records.length) {
-      buildReplyTree(records).forEach((record) => appendNestedRecord(record, thread, 0));
+      const fragment = document.createDocumentFragment();
+      buildReplyTree(records).forEach((record) => appendNestedRecord(record, fragment, 0));
       records.forEach((record) => {
         if (record.page !== info.page) addRemoteNote(record, info.postId);
       });
+      thread.replaceChildren(fragment);
     } else {
       section.appendChild(createElement('p', 'xns-status xns-preview-empty', '没有读取到评论。'));
     }

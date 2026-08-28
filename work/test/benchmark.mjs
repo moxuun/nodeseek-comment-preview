@@ -1,0 +1,235 @@
+// NodeSeek 楼中楼预览加载基准。
+// 对比当前工作树与 HEAD 中的构建产物，使用同一个 fixture 和真实 Chrome。
+
+import { spawn, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import net from 'node:net';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import puppeteer from 'puppeteer-core';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(here, '..', '..');
+const fixtureServer = path.join(repoRoot, 'work', 'xns-fixture-server.mjs');
+const outputRelativePath = 'outputs/nodeseek-comment-preview.user.js';
+const currentScript = fs.readFileSync(path.join(repoRoot, outputRelativePath), 'utf8');
+const baselineResult = spawnSync('git', ['show', `HEAD:${outputRelativePath}`], { cwd: repoRoot, encoding: 'utf8' });
+if (baselineResult.status !== 0 || !baselineResult.stdout) {
+  throw new Error(`无法读取 HEAD 构建产物：${baselineResult.stderr || 'git show 失败'}`);
+}
+const baselineScript = baselineResult.stdout;
+const runs = Math.max(3, Number(process.env.XNS_BENCH_RUNS || 5));
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function findChrome() {
+  const candidates = [
+    process.env.CHROME_PATH,
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    '/usr/bin/chromium',
+    '/usr/bin/google-chrome',
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+  }
+  const which = process.platform === 'win32' ? 'where' : 'which';
+  for (const name of ['chrome', 'chromium', 'google-chrome', 'msedge']) {
+    const result = spawnSync(which, [name], { encoding: 'utf8' });
+    if (result.status === 0 && result.stdout.trim()) return result.stdout.trim().split(/\r?\n/)[0];
+  }
+  return null;
+}
+
+function findFreePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const port = server.address().port;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+function startServer(port) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [fixtureServer, String(port)], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error('fixture 服务器启动超时'));
+    }, 10_000);
+    child.stdout.on('data', (chunk) => {
+      output += chunk;
+      if (/XNS_FIXTURE_READY/.test(output)) {
+        clearTimeout(timer);
+        resolve(child);
+      }
+    });
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      reject(new Error(`fixture 服务器提前退出（code ${code}）`));
+    });
+  });
+}
+
+function percentile(values, ratio) {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * ratio))];
+}
+
+function summary(values) {
+  return {
+    median: Math.round(percentile(values, 0.5)),
+    p90: Math.round(percentile(values, 0.9)),
+    min: Math.round(Math.min(...values)),
+    max: Math.round(Math.max(...values)),
+  };
+}
+
+async function waitForPreviewFirst(page) {
+  return page.evaluate(() => new Promise((resolve) => {
+    const check = () => {
+      if (document.querySelector('.xns-preview-post')) resolve(true);
+      else requestAnimationFrame(check);
+    };
+    check();
+  }));
+}
+
+async function waitForPreviewComplete(page, expected) {
+  return page.evaluate((expectedText) => new Promise((resolve) => {
+    const check = () => {
+      const heading = document.querySelector('.xns-preview-comments h3')?.textContent || '';
+      if (heading.includes(expectedText)) resolve(true);
+      else requestAnimationFrame(check);
+    };
+    check();
+  }), expected);
+}
+
+async function waitForPostCurrent(page) {
+  return page.evaluate(() => new Promise((resolve) => {
+    const check = () => {
+      if (document.querySelector('.xns-post-toolbar .xns-toolbar-status')) resolve(true);
+      else requestAnimationFrame(check);
+    };
+    check();
+  }));
+}
+
+async function waitForPostComplete(page, expected) {
+  return page.evaluate((expectedText) => new Promise((resolve) => {
+    const check = () => {
+      const status = document.querySelector('.xns-toolbar-status')?.textContent || '';
+      if (status.includes(expectedText)) resolve(true);
+      else requestAnimationFrame(check);
+    };
+    check();
+  }), expected);
+}
+
+async function measure(browser, base, script, scenario) {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 800 });
+  await page.setCacheEnabled(false);
+  const requests = [];
+  page.on('request', (request) => {
+    if (request.method() === 'GET') requests.push(request.url());
+    const requestUrl = new URL(request.url());
+    if (requestUrl.pathname === `/${outputRelativePath}`) {
+      void request.respond({ status: 200, contentType: 'application/javascript; charset=utf-8', body: script });
+    } else {
+      void request.continue();
+    }
+  });
+  await page.setRequestInterception(true);
+  let started = performance.now();
+  let first;
+  let complete;
+  if (scenario.kind === 'preview') {
+    await page.goto(`${base}${scenario.listPath}`, { waitUntil: 'domcontentloaded' });
+    if (scenario.warm) {
+      await page.click(`a[href="${scenario.postPath}"]`);
+      await waitForPreviewComplete(page, scenario.expected);
+      await page.click('.xns-modal-close');
+      await page.evaluate(() => new Promise((resolve) => {
+        const check = () => {
+          if (!document.querySelector('.xns-modal')) resolve(true);
+          else requestAnimationFrame(check);
+        };
+        check();
+      }));
+    }
+    started = performance.now();
+    await page.click(`a[href="${scenario.postPath}"]`);
+    await waitForPreviewFirst(page);
+    first = performance.now() - started;
+    await waitForPreviewComplete(page, scenario.expected);
+    complete = performance.now() - started;
+  } else {
+    await page.goto(`${base}${scenario.postPath}`, { waitUntil: 'domcontentloaded' });
+    await waitForPostCurrent(page);
+    first = performance.now() - started;
+    await waitForPostComplete(page, scenario.expected);
+    complete = performance.now() - started;
+  }
+  const result = {
+    first: Math.round(first),
+    complete: Math.round(complete),
+    total: Math.round(performance.now() - started),
+    postGets: requests.filter((url) => /\/post-\d+-\d+(?:$|[?#])/.test(new URL(url).pathname)).length,
+    voteGets: requests.filter((url) => url.includes('/api/vote/info/')).length,
+  };
+  await page.close();
+  return result;
+}
+
+const scenarios = [
+  { name: '普通帖子预览', kind: 'preview', listPath: '/list', postPath: '/post-123-1', expected: '9 条回复' },
+  { name: '延迟分页帖子预览', kind: 'preview', listPath: '/list-124', postPath: '/post-124-1', expected: '4 条回复' },
+  { name: '预览重复打开（热缓存）', kind: 'preview', warm: true, listPath: '/list', postPath: '/post-123-1', expected: '9 条回复' },
+  { name: '120 条评论预览', kind: 'preview', listPath: '/list-128', postPath: '/post-128-1', expected: '120 条回复' },
+  { name: '120 条评论帖子页', kind: 'post', postPath: '/post-128-1', expected: '120 条评论' },
+  { name: '50 页帖子页', kind: 'post', postPath: '/post-456-1', expected: '50 条评论' },
+];
+
+const chromePath = findChrome();
+if (!chromePath) throw new Error('未找到 Chrome/Chromium，请设置 CHROME_PATH。');
+const port = await findFreePort();
+const base = `http://127.0.0.1:${port}`;
+const server = await startServer(port);
+let browser;
+try {
+  browser = await puppeteer.launch({
+    executablePath: chromePath,
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  });
+  console.log(`浏览器：${chromePath}`);
+  console.log(`重复次数：${runs}`);
+  console.log('单位：ms；首屏=脚本接管并显示当前内容，完成=目标内容全部就绪。');
+  for (const scenario of scenarios) {
+    const rows = { baseline: [], current: [] };
+    for (const [label, script] of [['baseline', baselineScript], ['current', currentScript]]) {
+      for (let index = 0; index < runs; index += 1) {
+        rows[label].push(await measure(browser, base, script, scenario));
+        await sleep(80);
+      }
+    }
+    console.log(`\n[${scenario.name}]`);
+    for (const label of ['baseline', 'current']) {
+      const values = rows[label];
+      console.log(`${label.padEnd(8)} 首屏 ${JSON.stringify(summary(values.map((item) => item.first)))} | 完成 ${JSON.stringify(summary(values.map((item) => item.complete)))} | 总计 ${JSON.stringify(summary(values.map((item) => item.total)))} | 请求 ${values.map((item) => `${item.postGets}页/${item.voteGets}投票`).join(', ')}`);
+    }
+    const before = summary(rows.baseline.map((item) => item.complete)).median;
+    const after = summary(rows.current.map((item) => item.complete)).median;
+    const delta = before ? ((before - after) / before) * 100 : 0;
+    console.log(`完成耗时中位数变化：${before}ms → ${after}ms（${delta >= 0 ? '-' : '+'}${Math.abs(delta).toFixed(1)}%）`);
+  }
+} finally {
+  if (browser) await browser.close().catch(() => {});
+  server.kill();
+}
