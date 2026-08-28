@@ -183,6 +183,13 @@ async function measure(browser, base, script, scenario) {
     postGets: requests.filter((url) => /\/post-\d+-\d+(?:$|[?#])/.test(new URL(url).pathname)).length,
     voteGets: requests.filter((url) => url.includes('/api/vote/info/')).length,
   };
+  await page.evaluate(() => {
+    if (typeof window.gc === 'function') window.gc();
+  });
+  const chromeMetrics = await page.metrics();
+  result.jsHeapUsedMB = Math.round((chromeMetrics.JSHeapUsedSize / 1024 / 1024) * 10) / 10;
+  result.domNodes = chromeMetrics.Nodes;
+  result.documents = chromeMetrics.Documents;
   await page.close();
   return result;
 }
@@ -206,7 +213,7 @@ try {
   browser = await puppeteer.launch({
     executablePath: chromePath,
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--js-flags=--expose-gc'],
   });
   console.log(`浏览器：${chromePath}`);
   console.log(`重复次数：${runs}`);
@@ -222,7 +229,7 @@ try {
     console.log(`\n[${scenario.name}]`);
     for (const label of ['baseline', 'current']) {
       const values = rows[label];
-      console.log(`${label.padEnd(8)} 首屏 ${JSON.stringify(summary(values.map((item) => item.first)))} | 完成 ${JSON.stringify(summary(values.map((item) => item.complete)))} | 总计 ${JSON.stringify(summary(values.map((item) => item.total)))} | 请求 ${values.map((item) => `${item.postGets}页/${item.voteGets}投票`).join(', ')}`);
+      console.log(`${label.padEnd(8)} 首屏 ${JSON.stringify(summary(values.map((item) => item.first)))} | 完成 ${JSON.stringify(summary(values.map((item) => item.complete)))} | 总计 ${JSON.stringify(summary(values.map((item) => item.total)))} | JS堆 ${JSON.stringify(summary(values.map((item) => item.jsHeapUsedMB)))}MB | DOM ${JSON.stringify(summary(values.map((item) => item.domNodes)))} | Document ${JSON.stringify(summary(values.map((item) => item.documents)))} | 请求 ${values.map((item) => `${item.postGets}页/${item.voteGets}投票`).join(', ')}`);
     }
     const before = summary(rows.baseline.map((item) => item.complete)).median;
     const after = summary(rows.current.map((item) => item.complete)).median;

@@ -60,7 +60,10 @@ function createHttpClient({
       if (oldest === undefined) break;
       removeCacheEntry(oldest);
     }
-    htmlCache.set(url.href, { html, url: url.href, postId: postIdFromUrl(url), createdAt: Date.now(), bytes, document: null });
+    // 只缓存原始 HTML；不要把解析后的 Document 放进缓存。
+    // Document 会持有整棵 DOM 树和 SSR 状态，原始 HTML 的字节上限无法反映
+    // 它实际占用的渲染器内存，长帖重复打开时尤其容易放大占用。
+    htmlCache.set(url.href, { html, url: url.href, postId: postIdFromUrl(url), createdAt: Date.now(), bytes });
     htmlCacheBytes += bytes;
   }
 
@@ -154,13 +157,9 @@ function createHttpClient({
     throw new Error('抓取失败');
   }
 
-  function parseHtml(html, cacheKey = '') {
-    const key = typeof cacheKey === 'string' ? cacheKey : cacheKey?.href || '';
-    const cached = key ? htmlCache.get(key) : null;
-    if (cached?.html === html && cached.document) return cached.document;
+  function parseHtml(html) {
     const doc = new DOMParserCtor().parseFromString(html, 'text/html');
     doc.__xnsState = extractSsrState(doc);
-    if (cached?.html === html) cached.document = doc;
     return doc;
   }
 

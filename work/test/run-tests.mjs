@@ -441,7 +441,7 @@ scenario('预览首屏第一页评论不重复克隆', async (ctx) => {
   await page.close();
 });
 
-scenario('短期缓存命中时复用解析文档，刷新时重新解析', async (ctx) => {
+scenario('短期缓存命中 HTML 但不保留 Document，刷新时重新抓取', async (ctx) => {
   const page = await ctx.newPage();
   await installParserCounter(page);
   await page.goto(`${ctx.base}/list`, { waitUntil: 'networkidle0' });
@@ -455,7 +455,7 @@ scenario('短期缓存命中时复用解析文档，刷新时重新解析', asyn
   await link.click();
   await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 9 条回复', 5_000, '缓存解析完成');
   const cachedCount = await page.evaluate(() => window.__xnsParserStats.count);
-  assert(cachedCount === firstCount, `缓存预览不应重复 DOMParser，实际 ${firstCount} -> ${cachedCount}`);
+  assert(cachedCount >= firstCount + 2, `HTML 缓存命中后仍应释放旧 Document 并重新解析两个页面，实际 ${firstCount} -> ${cachedCount}`);
   await page.locator('.xns-refresh-post').click();
   await waitFor(page, () => !document.querySelector('.xns-refresh-post')?.hasAttribute('aria-busy'), 15_000, '强制刷新解析完成');
   const refreshedCount = await page.evaluate(() => window.__xnsParserStats.count);
