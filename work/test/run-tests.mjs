@@ -449,12 +449,18 @@ scenario('弹窗发送回复后重排', async (ctx) => {
     const pending = document.querySelector('.xns-refresh-post')?.classList.contains('xns-action-pending');
     return heading && /9 条回复/.test(heading.textContent || '') && !pending;
   }, 15_000, '弹窗回复后重排完成');
+  await waitFor(page, () => !document.querySelector('.xns-preview-composer'), 15_000, '回复成功后编辑器移除');
   const state = await page.evaluate(() => ({
     items: document.querySelectorAll('.xns-preview-thread .content-item[data-xns-floor]').length,
     notes: document.querySelectorAll('.xns-preview-thread .xns-remote-floor-link').length,
+    composers: document.querySelectorAll('.xns-preview-composer').length,
+    statusText: document.querySelector('.xns-preview-composer-status')?.textContent || null,
+    bodyTail: document.querySelector('.xns-modal-body')?.textContent?.slice(-120) || null,
   }));
   assert(state.items === 9, `回复后应保持 9 条回复，实际 ${state.items}`);
   assert(state.notes === 2, `回复后跨页来源链接应保持 2 个，实际 ${state.notes}`);
+  assert(state.composers === 0, `回复成功后编辑器应移除，实际残留 ${state.composers} 个`);
+  assert(state.statusText === null, `回复成功后状态提示应消失，实际残留 “${state.statusText}”`);
 });
 
 scenario('帖子页回复后新楼层出现在楼中楼（0.5.14 回归）', async (ctx) => {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.17
+// @version      0.5.18
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -1408,8 +1408,16 @@
         textarea.readOnly = true;
         submit.remove();
         if (actionContext.modal && state.modal === actionContext.modal) {
+          // 回复已完成使命：刷新前清掉引用，防止 loadPreviewModal 把
+          // 已发送的编辑器当“进行中的草稿”重新挂回 body。
+          if (actionContext.modal.composer === composer) actionContext.modal.composer = null;
           const refreshed = await loadPreviewModal(actionContext.modal, '正在更新回复…', { preserveContent: true });
-          if (!refreshed) status.textContent = '回复已发送。帖子正在刷新中，楼中楼可能暂未包含新回复，请稍后再点刷新。';
+          if (refreshed) {
+            // 发送并刷新成功：编辑器连同状态提示一起移除，不留残留。
+            composer.remove();
+          } else {
+            status.textContent = '回复已发送。帖子正在刷新中，楼中楼可能暂未包含新回复，请稍后再点刷新。';
+          }
         } else if (state.post) {
           const post = state.post;
           if (post.composer === composer) post.composer = null;
