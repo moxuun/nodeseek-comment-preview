@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.19
+// @version      0.5.20
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -223,6 +223,28 @@
     });
   }
 
+  function getCurrentUserUid() {
+    try {
+      const m = document.cookie.match(/(?:^|;\s*)pjwt=([^;]+)/);
+      if (!m) return null;
+      const payload = m[1].split('.')[1];
+      if (!payload) return null;
+      const b64 = payload.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - payload.length % 4) % 4);
+      const data = JSON.parse(atob(b64()));
+      return typeof data.id !== 'undefined' ? String(data.id) : null;
+    } catch (e) { return null; }
+  }
+
+  function getCommentAuthorUid(item) {
+    try {
+      const a = qs(item, '.nsk-content-meta-info a.author-name, .author-name');
+      const href = a ? a.getAttribute('href') : null;
+      if (!href) return null;
+      const m = href.match(/\/space\/(\d+)/);
+      return m ? m[1] : null;
+    } catch (e) { return null; }
+  }
+
   function getCommentRecord(item, postId, page, index, current, options = {}) {
     const floor = getFloor(item);
     if (floor === null) return null;
@@ -232,11 +254,12 @@
     return {
       floor,
       page,
+      postId,
       index,
       current,
       // 自己的评论：NodeSeek 只在当前用户的评论菜单里渲染“编辑”项（Vue v-if，
       // 且仅在 Vue 挂载的原版节点里存在；SSR 克隆里全是占位注释）。
-      isMine: current && hasOwnEditOption(item),
+      isMine: hasOwnEditOption(item) || getCommentAuthorUid(item) === getCurrentUserUid(),
       pinned: isPinnedComment(item),
       author: getAuthorName(item),
       reply: extractReplyMetadata(item, postId),
@@ -1581,7 +1604,7 @@
 
       event.preventDefault();
       event.stopPropagation();
-      const postId = pageInfo?.postId || getPostInfo(window.location.href)?.postId || '';
+      const postId = record.postId || pageInfo?.postId || getPostInfo(window.location.href)?.postId || '';
       const floor = record?.floor;
       const url = `/post-${postId}-${record.page || 1}${floor >= 0 ? '#' + floor : ''}`;
       window.open(url, '_blank', 'noopener');

@@ -489,6 +489,27 @@ scenario('楼中楼显示自己的评论编辑入口（0.5.19 回归）', async 
 });
 11
 
+scenario('弹窗预览自己的评论出现编辑入口（0.5.20 回归）', async (ctx) => {
+  // 预览弹窗的评论走 SSR 克隆；fixture 的官方“编辑”项模拟原版节点，
+  // 脚本须识别为 isMine 并接管（菜单保留单个编辑项）。
+  const page = await ctx.newPage();
+  await page.setCookie({ name: 'pjwt', value: 'x.eyJpZCI6MSwibmFtZSI6IlJvb3QiLCJ0cyI6MX0.y', url: ctx.base });
+  await page.goto(`${ctx.base}/list`, { waitUntil: 'networkidle0' });
+  await page.click('a[href="/post-123-1"]');
+  await waitFor(page, () => {
+    const heading = document.querySelector('.xns-modal .xns-preview-comments h3');
+    return heading && /9 条回复/.test(heading.textContent || '');
+  },15_000, '预览弹窗加载');
+  const state = await page.evaluate(() => {
+    const menu = document.querySelector('.xns-modal .xns-preview-thread .xns-comment-root > .comment-menu');
+    const kids = menu ? Array.from(menu.children) : [];
+    const items = kids.map(function (el) { return (el.textContent || '' ).trim(); });
+    return { hasEdit: items.includes('编辑'), count: items.length };
+  });
+  assert(state.hasEdit, '预览弹窗里自己的评论应显示编辑入口');
+  assert(state.count === 6, `预览编辑菜单应有 6 项（5 标准 + 编辑），实际 ${state.count}`);
+});
+
 scenario('帖子页回复后新楼层出现在楼中楼（0.5.14 回归）', async (ctx) => {
   // 验证 B1：当前页在分页抓取里永不重抓，回复后若不重抓当前页，刚发的回复看不到。
   const page = await ctx.newPage();
