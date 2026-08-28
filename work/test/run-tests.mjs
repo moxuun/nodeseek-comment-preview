@@ -587,9 +587,11 @@ scenario('原版/楼中楼切换', async (ctx) => {
   const original = await page.evaluate(() => ({
     children: document.querySelector('.comment-container > ul.comments')?.children.length,
     threaded: !!document.querySelector('.comment-container > ul.comments .xns-comment-root'),
+    remote: document.querySelectorAll('.comment-container > ul.comments [data-xns-remote]').length,
   }));
   assert(original.children === 7, `原版应有 7 个原始评论，实际 ${original.children}`);
   assert(!original.threaded, '原版不应保留楼中楼结构');
+  assert(original.remote === 0, `原版不应保留跨页评论节点，实际 ${original.remote}`);
 
   await page.evaluate(() => {
     [...document.querySelectorAll('.xns-post-toolbar [data-mode]')].find((button) => button.dataset.mode === 'thread').click();
@@ -597,9 +599,11 @@ scenario('原版/楼中楼切换', async (ctx) => {
   const thread = await page.evaluate(() => ({
     roots: document.querySelectorAll('.comment-container > ul.comments > .xns-comment-root').length,
     replyLists: document.querySelectorAll('.comment-container > ul.comments .xns-reply-list').length,
+    items: document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length,
   }));
   assert(thread.roots === 3, `楼中楼应有 3 个根楼层，实际 ${thread.roots}`);
   assert(thread.replyLists === 2, `楼中楼应有 2 个嵌套回复列表，实际 ${thread.replyLists}`);
+  assert(thread.items === 9, `切回楼中楼后应恢复 9 个楼层，实际 ${thread.items}`);
 });
 
 scenario('点击楼层链接跳转并高亮', async (ctx) => {

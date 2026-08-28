@@ -16,6 +16,7 @@ function createPreviewRenderer({
   getSsrCommentCounts,
   safeCount,
   sanitizeImportedNode,
+  materializeCommentNode,
   getDirectCommentMenu,
   ensurePreviewMenu,
   stripRenderArtifacts,
@@ -47,25 +48,29 @@ function createPreviewRenderer({
   }
 
   function prepareCommentRecord(record, depth) {
+    const node = materializeCommentNode(record);
+    if (!node) return null;
     stripRenderArtifacts(record.node);
-    record.node.setAttribute('data-xns-floor', String(record.floor));
+    node.setAttribute('data-xns-floor', String(record.floor));
     if (!record.current) {
-      record.node.setAttribute('data-xns-remote', 'true');
-      record.node.setAttribute('data-xns-source-page', String(record.page));
+      node.setAttribute('data-xns-remote', 'true');
+      node.setAttribute('data-xns-source-page', String(record.page));
     }
-    record.node.classList.add(depth === 0 ? 'xns-comment-root' : 'xns-comment-child');
-    if (depth > 0 && record.parent) record.node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
-    ensurePreviewMenu(record.node, { includeFavorite: false, counts: record.counts || undefined });
-    ensurePreviewEditOption(record.node, record);
+    node.classList.add(depth === 0 ? 'xns-comment-root' : 'xns-comment-child');
+    if (depth > 0 && record.parent) node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
+    ensurePreviewMenu(node, { includeFavorite: false, counts: record.counts || undefined });
+    ensurePreviewEditOption(node, record);
+    return node;
   }
 
   function appendNestedRecord(record, container, depth) {
-    prepareCommentRecord(record, depth);
-    container.appendChild(record.node);
+    const node = prepareCommentRecord(record, depth);
+    if (!node) return;
+    container.appendChild(node);
     if (!record.children.length) return;
     const replyList = createElement('ul', 'xns-reply-list');
     record.children.forEach((child) => appendNestedRecord(child, replyList, depth + 1));
-    record.node.appendChild(replyList);
+    node.appendChild(replyList);
   }
 
   function buildPreviewPostNode(parsed, info) {
@@ -148,6 +153,7 @@ const xnsPreviewRenderer = createPreviewRenderer({
   getSsrCommentCounts,
   safeCount,
   sanitizeImportedNode,
+  materializeCommentNode,
   getDirectCommentMenu,
   ensurePreviewMenu,
   stripRenderArtifacts,

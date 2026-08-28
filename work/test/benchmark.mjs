@@ -175,6 +175,10 @@ async function measure(browser, base, script, scenario) {
     first = performance.now() - started;
     await waitForPostComplete(page, scenario.expected);
     complete = performance.now() - started;
+    if (scenario.after === 'original') {
+      await page.click('.xns-post-toolbar [data-mode="original"]');
+      await page.waitForFunction(() => !document.querySelector('.xns-post-toolbar [data-mode="original"]')?.getAttribute('aria-pressed') || document.querySelector('.xns-post-toolbar [data-mode="original"]')?.getAttribute('aria-pressed') === 'true');
+    }
   }
   const result = {
     first: Math.round(first),
@@ -201,6 +205,7 @@ const scenarios = [
   { name: '120 条评论预览', kind: 'preview', listPath: '/list-128', postPath: '/post-128-1', expected: '120 条回复' },
   { name: '120 条评论帖子页', kind: 'post', postPath: '/post-128-1', expected: '120 条评论' },
   { name: '50 页帖子页', kind: 'post', postPath: '/post-456-1', expected: '50 条评论' },
+  { name: '50 页帖子页切换原版', kind: 'post', after: 'original', postPath: '/post-456-1', expected: '50 条评论' },
 ];
 
 const chromePath = findChrome();

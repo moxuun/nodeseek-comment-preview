@@ -15,6 +15,7 @@ function createPostPageController({
   getFloor,
   getCommentItems,
   sanitizeImportedNode,
+  releaseCommentNode,
   getDocState,
   getCurrentUserUid,
   getCommentRecord,
@@ -232,14 +233,14 @@ function createPostPageController({
     render(options = {}) {
       if (!this.list || appState.mode !== 'thread') return;
       this.restoreOriginal();
-      const recordNodes = new Set(this.records.map((record) => record.node));
+      const recordNodes = new Set(this.records.map((record) => record.node).filter(Boolean));
       const fragment = documentObj.createDocumentFragment();
       Array.from(this.list.childNodes).forEach((node) => {
         if (!recordNodes.has(node)) fragment.appendChild(node);
       });
       buildReplyTree(this.records).forEach((record) => appendNestedRecord(record, fragment, 0));
       this.list.replaceChildren(fragment);
-      const remoteRecords = this.records.filter((record) => record.node.hasAttribute('data-xns-remote'));
+      const remoteRecords = this.records.filter((record) => record.node?.hasAttribute('data-xns-remote'));
       remoteRecords.forEach((record) => {
         addRemoteNote(record, this.info.postId);
         record.node.classList.add('xns-preview-content');
@@ -265,6 +266,7 @@ function createPostPageController({
       this.originalChildren.forEach(stripRenderArtifacts);
       while (this.list.firstChild) this.list.removeChild(this.list.firstChild);
       this.originalChildren.forEach((node) => this.list.appendChild(node));
+      this.records.forEach(releaseCommentNode);
       this.statusNode?.remove();
       this.statusNode = null;
       this.updateToolbar();
@@ -287,6 +289,7 @@ const PostEnhancer = createPostPageController({
   getFloor,
   getCommentItems,
   sanitizeImportedNode,
+  releaseCommentNode,
   getDocState,
   getCurrentUserUid,
   getCommentRecord,

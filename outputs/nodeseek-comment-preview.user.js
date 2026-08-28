@@ -483,8 +483,25 @@ function getCommentRecord(item, postId, page, index, current, options = {}) {
     author: getAuthorName(item),
     reply: extractReplyMetadata(item, postId),
     counts: commentId !== null && options.state ? getSsrCommentCounts(options.state, commentId) : null,
-    node, parent: null, children: [],
+    // 跨页评论在原版布局下不会展示；只保留经过清洗的 HTML，避免控制器
+    // 长期持有一整棵脱离文档的 DOM 子树。楼中楼重新渲染时再物化节点。
+    node: current ? node : null,
+    html: current ? null : node.outerHTML,
+    parent: null, children: [],
   };
+}
+
+function materializeCommentNode(record) {
+  if (record?.node) return record.node;
+  if (typeof record?.html !== 'string' || !record.html) return null;
+  const template = documentObj.createElement('template');
+  template.innerHTML = record.html;
+  record.node = template.content.firstElementChild || null;
+  return record.node;
+}
+
+function releaseCommentNode(record) {
+  if (record && !record.current) record.node = null;
 }
 
 function getSsrCommentCounts(stateValue, commentId) {
@@ -517,6 +534,8 @@ function getSsrCommentCounts(stateValue, commentId) {
     hasOwnEditOption,
     getCommentAuthorUid,
     getCommentRecord,
+    materializeCommentNode,
+    releaseCommentNode,
     getSsrCommentCounts,
   });
 }
@@ -541,6 +560,8 @@ const isPinnedComment = (...args) => xnsContentParser.isPinnedComment(...args);
 const hasOwnEditOption = (...args) => xnsContentParser.hasOwnEditOption(...args);
 const getCommentAuthorUid = (...args) => xnsContentParser.getCommentAuthorUid(...args);
 const getCommentRecord = (...args) => xnsContentParser.getCommentRecord(...args);
+const materializeCommentNode = (...args) => xnsContentParser.materializeCommentNode(...args);
+const releaseCommentNode = (...args) => xnsContentParser.releaseCommentNode(...args);
 const getSsrCommentCounts = (...args) => xnsContentParser.getSsrCommentCounts(...args);
 
 
@@ -1452,6 +1473,7 @@ function createPreviewRenderer({
   getSsrCommentCounts,
   safeCount,
   sanitizeImportedNode,
+  materializeCommentNode,
   getDirectCommentMenu,
   ensurePreviewMenu,
   stripRenderArtifacts,
@@ -1483,25 +1505,29 @@ function createPreviewRenderer({
   }
 
   function prepareCommentRecord(record, depth) {
+    const node = materializeCommentNode(record);
+    if (!node) return null;
     stripRenderArtifacts(record.node);
-    record.node.setAttribute('data-xns-floor', String(record.floor));
+    node.setAttribute('data-xns-floor', String(record.floor));
     if (!record.current) {
-      record.node.setAttribute('data-xns-remote', 'true');
-      record.node.setAttribute('data-xns-source-page', String(record.page));
+      node.setAttribute('data-xns-remote', 'true');
+      node.setAttribute('data-xns-source-page', String(record.page));
     }
-    record.node.classList.add(depth === 0 ? 'xns-comment-root' : 'xns-comment-child');
-    if (depth > 0 && record.parent) record.node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
-    ensurePreviewMenu(record.node, { includeFavorite: false, counts: record.counts || undefined });
-    ensurePreviewEditOption(record.node, record);
+    node.classList.add(depth === 0 ? 'xns-comment-root' : 'xns-comment-child');
+    if (depth > 0 && record.parent) node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
+    ensurePreviewMenu(node, { includeFavorite: false, counts: record.counts || undefined });
+    ensurePreviewEditOption(node, record);
+    return node;
   }
 
   function appendNestedRecord(record, container, depth) {
-    prepareCommentRecord(record, depth);
-    container.appendChild(record.node);
+    const node = prepareCommentRecord(record, depth);
+    if (!node) return;
+    container.appendChild(node);
     if (!record.children.length) return;
     const replyList = createElement('ul', 'xns-reply-list');
     record.children.forEach((child) => appendNestedRecord(child, replyList, depth + 1));
-    record.node.appendChild(replyList);
+    node.appendChild(replyList);
   }
 
   function buildPreviewPostNode(parsed, info) {
@@ -1584,6 +1610,7 @@ const xnsPreviewRenderer = createPreviewRenderer({
   getSsrCommentCounts,
   safeCount,
   sanitizeImportedNode,
+  materializeCommentNode,
   getDirectCommentMenu,
   ensurePreviewMenu,
   stripRenderArtifacts,
@@ -2833,6 +2860,7 @@ function createPostPageController({
   getFloor,
   getCommentItems,
   sanitizeImportedNode,
+  releaseCommentNode,
   getDocState,
   getCurrentUserUid,
   getCommentRecord,
@@ -3050,14 +3078,14 @@ function createPostPageController({
     render(options = {}) {
       if (!this.list || appState.mode !== 'thread') return;
       this.restoreOriginal();
-      const recordNodes = new Set(this.records.map((record) => record.node));
+      const recordNodes = new Set(this.records.map((record) => record.node).filter(Boolean));
       const fragment = documentObj.createDocumentFragment();
       Array.from(this.list.childNodes).forEach((node) => {
         if (!recordNodes.has(node)) fragment.appendChild(node);
       });
       buildReplyTree(this.records).forEach((record) => appendNestedRecord(record, fragment, 0));
       this.list.replaceChildren(fragment);
-      const remoteRecords = this.records.filter((record) => record.node.hasAttribute('data-xns-remote'));
+      const remoteRecords = this.records.filter((record) => record.node?.hasAttribute('data-xns-remote'));
       remoteRecords.forEach((record) => {
         addRemoteNote(record, this.info.postId);
         record.node.classList.add('xns-preview-content');
@@ -3083,6 +3111,7 @@ function createPostPageController({
       this.originalChildren.forEach(stripRenderArtifacts);
       while (this.list.firstChild) this.list.removeChild(this.list.firstChild);
       this.originalChildren.forEach((node) => this.list.appendChild(node));
+      this.records.forEach(releaseCommentNode);
       this.statusNode?.remove();
       this.statusNode = null;
       this.updateToolbar();
@@ -3105,6 +3134,7 @@ const PostEnhancer = createPostPageController({
   getFloor,
   getCommentItems,
   sanitizeImportedNode,
+  releaseCommentNode,
   getDocState,
   getCurrentUserUid,
   getCommentRecord,

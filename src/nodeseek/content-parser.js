@@ -109,8 +109,25 @@ function getCommentRecord(item, postId, page, index, current, options = {}) {
     author: getAuthorName(item),
     reply: extractReplyMetadata(item, postId),
     counts: commentId !== null && options.state ? getSsrCommentCounts(options.state, commentId) : null,
-    node, parent: null, children: [],
+    // 跨页评论在原版布局下不会展示；只保留经过清洗的 HTML，避免控制器
+    // 长期持有一整棵脱离文档的 DOM 子树。楼中楼重新渲染时再物化节点。
+    node: current ? node : null,
+    html: current ? null : node.outerHTML,
+    parent: null, children: [],
   };
+}
+
+function materializeCommentNode(record) {
+  if (record?.node) return record.node;
+  if (typeof record?.html !== 'string' || !record.html) return null;
+  const template = documentObj.createElement('template');
+  template.innerHTML = record.html;
+  record.node = template.content.firstElementChild || null;
+  return record.node;
+}
+
+function releaseCommentNode(record) {
+  if (record && !record.current) record.node = null;
 }
 
 function getSsrCommentCounts(stateValue, commentId) {
@@ -143,6 +160,8 @@ function getSsrCommentCounts(stateValue, commentId) {
     hasOwnEditOption,
     getCommentAuthorUid,
     getCommentRecord,
+    materializeCommentNode,
+    releaseCommentNode,
     getSsrCommentCounts,
   });
 }
@@ -167,4 +186,6 @@ const isPinnedComment = (...args) => xnsContentParser.isPinnedComment(...args);
 const hasOwnEditOption = (...args) => xnsContentParser.hasOwnEditOption(...args);
 const getCommentAuthorUid = (...args) => xnsContentParser.getCommentAuthorUid(...args);
 const getCommentRecord = (...args) => xnsContentParser.getCommentRecord(...args);
+const materializeCommentNode = (...args) => xnsContentParser.materializeCommentNode(...args);
+const releaseCommentNode = (...args) => xnsContentParser.releaseCommentNode(...args);
 const getSsrCommentCounts = (...args) => xnsContentParser.getSsrCommentCounts(...args);
