@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.15
+// @version      0.5.16
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -159,12 +159,8 @@
     // 跨页帖子评论默认是只读克隆；预览页和新标签页统一接管楼层菜单点击。
     if (!options.keepCommentMenu) qsa(imported, '.comment-menu, .comment-actions').forEach((node) => node.remove());
     qsa(imported, '[id]').forEach((node) => node.removeAttribute('id'));
-    // NodeSeek 的评论头部有一个灰色楼层按钮；预览已有自己的来源链接，移除这个无效控件。
-    qsa(imported, '.nsk-content-meta-info .floor-link, .nsk-content-meta-info [class*="floor-link"]').forEach((node) => node.remove());
-    qsa(imported, '.nsk-content-meta-info a, .nsk-content-meta-info span').forEach((node) => {
-      if (/^#\d+$/.test((node.textContent || '').trim())) node.remove();
-    });
-
+    // 保留官方 .floor-link 楼号（右上角灰色 #N）：预览里当前页评论直接显示，
+    // 跨页评论由 addRemoteNote 改造 href 指向来源页。
     const all = [imported, ...qsa(imported, '*')].filter((node) => node.nodeType === Node.ELEMENT_NODE);
     all.forEach((node) => {
       Array.from(node.attributes).forEach((attribute) => {
@@ -2182,18 +2178,30 @@
 
   function addRemoteNote(record, postId) {
     if (!record.node?.hasAttribute('data-xns-remote')) return;
-    // 复用官方楼号结构与类名：floor-link-wrapper + floor-link，
-    // 真实站点上官方 CSS 自然生效（右上角灰色楼号）；xns-remote-floor-link
-    // 只是脚本侧标记（剥离/重建时识别），不参与视觉。
+    // 复用官方楼号结构：优先改造已有的官方 floor-link（href 指向来源页），
+    // 没有官方楼号时才创建。xns-remote-floor-link 只是脚本侧标记，不参与视觉。
     const meta = qs(record.node, ':scope > .nsk-content-meta-info');
-    const wrapper = createElement('div', 'floor-link-wrapper xns-remote-floor-link');
-    const source = createElement('a', 'floor-link', `#${record.floor}`);
+    let source = qs(record.node, '.floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link');
+    let wrapper = source?.closest('.floor-link-wrapper');
+    if (!source) {
+      wrapper = createElement('div', 'floor-link-wrapper');
+      source = createElement('a', 'floor-link', `#${record.floor}`);
+      wrapper.appendChild(source);
+      (meta || record.node).appendChild(wrapper);
+    } else {
+      source.textContent = `#${record.floor}`;
+      wrapper = wrapper || (function () {
+        const w = createElement('div', 'floor-link-wrapper');
+        source.replaceWith(w);
+        w.appendChild(source);
+        return w;
+      }());
+    }
     source.href = `/post-${postId}-${record.page}#${record.floor}`;
     source.target = '_blank';
     source.rel = 'noopener noreferrer';
     source.title = `打开原楼层 #${record.floor}`;
-    wrapper.appendChild(source);
-    (meta || record.node).appendChild(wrapper);
+    wrapper?.classList.add('xns-remote-floor-link');
   }
 
   class PostEnhancer {

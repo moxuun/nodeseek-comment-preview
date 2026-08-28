@@ -191,11 +191,14 @@ scenario('帖子页楼中楼构建与跨页来源链接', async (ctx) => {
     replyLists: document.querySelectorAll('.comment-container > ul.comments .xns-reply-list').length,
     noteOwners: [...document.querySelectorAll('.comment-container > ul.comments .xns-remote-floor-link')]
       .map((note) => note.closest('.content-item')?.getAttribute('data-xns-floor')).sort(),
+    // 当前页原始节点自带官方楼号，楼中楼里应原样显示（7 层当前页 + 2 层跨页改造 = 9 个楼号链接）。
+    floorLinks: document.querySelectorAll('.comment-container > ul.comments .floor-link-wrapper > .floor-link').length,
   }));
   assert(state.toolbar === '9 条评论', `工具栏应显示 9 条评论，实际 ${state.toolbar}`);
   assert(state.items === 9, `应有 9 个楼层，实际 ${state.items}`);
   assert(state.replyLists === 2, `应有 2 个嵌套回复列表，实际 ${state.replyLists}`);
   assert(JSON.stringify(state.noteOwners) === JSON.stringify(['4', '5']), `跨页来源链接应只在 #4 #5，实际 ${JSON.stringify(state.noteOwners)}`);
+  assert(state.floorLinks === 9, `楼中楼里 9 层评论都应显示楼号，实际 ${state.floorLinks}`);
   assert(dataOf(page).pageErrors.length === 0, `页面出现未捕获异常：${dataOf(page).pageErrors.join('; ')}`);
 });
 
@@ -349,10 +352,20 @@ scenario('弹窗跨页来源链接只出现在跨页评论（0.5.8 回归）', a
     return {
       count: notes.length,
       owners: notes.map((note) => note.closest('.content-item')?.getAttribute('data-xns-floor')).sort(),
+      // 当前页评论应保留官方灰色楼号 #N（右上角），不能因消毒丢失。
+      floorLinks: [...document.querySelectorAll('.xns-preview-thread .floor-link-wrapper > .floor-link')]
+        .map((link) => {
+          const floor = link.closest('.content-item')?.getAttribute('data-xns-floor');
+          return { floor, text: link.textContent.trim(), href: link.getAttribute('href') };
+        }),
     };
   });
   assert(state.count === 2, `弹窗跨页来源链接应为 2 个，实际 ${state.count}`);
   assert(JSON.stringify(state.owners) === JSON.stringify(['4', '5']), `应只出现在 #4 #5，实际 ${JSON.stringify(state.owners)}`);
+  const currentPageLinks = state.floorLinks.filter((l) => l.floor !== '4' && l.floor !== '5');
+  assert(currentPageLinks.length === 7, `当前页 7 层评论都应显示官方楼号，实际 ${currentPageLinks.length}：${JSON.stringify(state.floorLinks)}`);
+  assert(currentPageLinks.every((l) => /^#\d+$/.test(l.text)), `楼号文本应为官方 #N 格式，实际 ${JSON.stringify(currentPageLinks.map((l) => l.text))}`);
+  assert(currentPageLinks.every((l) => l.href === `#${l.floor}` || l.href.endsWith(`#${l.floor}`)), `当前页楼号 href 应为官方 #N，实际 ${JSON.stringify(currentPageLinks.map((l) => l.href))}`);
 });
 
 scenario('弹窗点赞与收藏', async (ctx) => {
