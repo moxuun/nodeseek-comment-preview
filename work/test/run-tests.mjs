@@ -316,7 +316,8 @@ scenario('列表页预览弹窗结构与操作菜单', async (ctx) => {
   });
   assert(state.title === 'Fixture NodeSeek 帖子', `弹窗标题应为帖子标题，实际 ${state.title}`);
   assert(JSON.stringify(state.postActions) === JSON.stringify(['like', 'chicken', 'dislike', 'favorite', 'quote', 'reply']), `主帖应有 6 项操作，实际 ${JSON.stringify(state.postActions)}`);
-  assert(JSON.stringify(state.floorActions) === JSON.stringify(['like', 'chicken', 'dislike', 'quote', 'reply']), `回复楼层不应有收藏，实际 ${JSON.stringify(state.floorActions)}`);
+  assert(JSON.stringify(state.floorActions.slice(0, 5)) === JSON.stringify(['like', 'chicken', 'dislike', 'quote', 'reply']), `回复楼层应有 5 项标准操作（不含收藏），实际 ${JSON.stringify(state.floorActions.slice(0, 5))}`);
+  assert(state.floorActions[5] === null, `回复楼层第 6 项应为官方编辑项（null），实际 ${JSON.stringify(state.floorActions[5])}`);
   assert(state.items === 9, `弹窗应有 9 条回复，实际 ${state.items}`);
 });
 scenario('弹窗点赞/鸡腿/反对/收藏计数来自 SSR 状态（0.5.9 回归）', async (ctx) => {
@@ -462,6 +463,31 @@ scenario('弹窗发送回复后重排', async (ctx) => {
   assert(state.composers === 0, `回复成功后编辑器应移除，实际残留 ${state.composers} 个`);
   assert(state.statusText === null, `回复成功后状态提示应消失，实际残留 “${state.statusText}”`);
 });
+
+scenario('楼中楼显示自己的评论编辑入口（0.5.19 回归）', async (ctx) => {
+  // 自己的评论：官方只在 isMine 渲染“编辑”菜单项；楼中楼重排后 Vue 卸载，
+  // 脚本必须识别并补回入口，点击在新标签打开原帖该楼层（Vue 全新、可编辑）。
+  const page = await openPostPage(ctx);
+ await waitFor(page, () => {
+    const menu = document.querySelector('.comment-container > ul.comments .content-item[data-xns-floor="1"] > .comment-menu');
+    return menu && Array.from(menu.children).some((el) => (el.textContent || '' ).trim() === '编辑');
+  }, 15_000, '楼中楼里自己的评论显示编辑入口');
+ const url = await page.evaluate(() => {
+    const item = Array.from(document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor="1"] .menu-item')).find((el) => (el.textContent || '' ).trim() === '编辑');
+    item.click();
+    return { href: location.href };
+  });
+ const popup = await new Promise((resolveRes) => {
+    const t = setTimeout(() => resolveRes(null), 8000);
+    page.once('popup', (p) => { clearTimeout(t); resolveRes(p); });
+  });
+ assert(popup, '点击编辑应打开新标签');
+ await new Promise((res) => setTimeout(res, 1500));
+ const popupUrl = popup.url();
+ assert(popupUrl === `${ctx.base}/post-123-1#1`, `新标签应打开原帖 #1，实际 ${popupUrl}`);
+ await popup.close();
+});
+11
 
 scenario('帖子页回复后新楼层出现在楼中楼（0.5.14 回归）', async (ctx) => {
   // 验证 B1：当前页在分页抓取里永不重抓，回复后若不重抓当前页，刚发的回复看不到。

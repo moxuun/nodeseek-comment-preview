@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.18
+// @version      0.5.19
 // @description  楼中楼、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -214,6 +214,15 @@
     return Boolean(qs(item, '.nsk-content-meta-info .hot-badge, .nsk-content-meta-info .pined-comment-badge, .nsk-content-meta-info [title="置顶"], .nsk-content-meta-info [title*="HOT"], .nsk-content-meta-info [class*="hot"]'));
   }
 
+  function hasOwnEditOption(item) {
+    if (!item?.querySelector) return false;
+    const items = qsa(item, ':scope > .comment-menu > .menu-item');
+    return items.some((el) => {
+      const text = (el.textContent || '' ).trim();
+      return text === '编辑' && !el.dataset?.xnsAction;
+    });
+  }
+
   function getCommentRecord(item, postId, page, index, current, options = {}) {
     const floor = getFloor(item);
     if (floor === null) return null;
@@ -225,6 +234,9 @@
       page,
       index,
       current,
+      // 自己的评论：NodeSeek 只在当前用户的评论菜单里渲染“编辑”项（Vue v-if，
+      // 且仅在 Vue 挂载的原版节点里存在；SSR 克隆里全是占位注释）。
+      isMine: current && hasOwnEditOption(item),
       pinned: isPinnedComment(item),
       author: getAuthorName(item),
       reply: extractReplyMetadata(item, postId),
@@ -1548,6 +1560,34 @@
     return { records: Array.from(unique.values()), loadedPages: pageDocs.size, failedPages, truncated, totalPages };
   }
 
+  function ensurePreviewEditOption(node, record) {
+    if (!node || !record?.isMine) return;
+    const menu = getDirectCommentMenu(node);
+    if (!menu) return;
+    // 楼中楼重排会卸载 Vue 组件，官方“编辑”项即使残留也已失效；
+    // 找到官方项直接接管（附脚本点击，无官方项才创建）。
+    let item = qsa(menu, ':scope > .menu-item').find((el) => (el.textContent || '' ).trim() === '编辑' && !el.dataset?.xnsAction);
+    if (!item) {
+      item = createElement('span', 'menu-item');
+      item.setAttribute('role', 'button');
+      item.tabIndex = 0;
+      item.innerHTML = '<svg class="iconpark-icon" aria-hidden="true"><use href="#edit"></use></svg><span>编辑</span>';
+      menu.appendChild(item);
+    }
+    if (item.dataset.xnsEditBound === 'true') return;
+    item.dataset.xnsEditBound = 'true';
+    item.addEventListener('click', function (event) {
+      // 新标签打开原帖该楼层，Vue 全新挂载后可正常编辑。
+
+      event.preventDefault();
+      event.stopPropagation();
+      const postId = pageInfo?.postId || getPostInfo(window.location.href)?.postId || '';
+      const floor = record?.floor;
+      const url = `/post-${postId}-${record.page || 1}${floor >= 0 ? '#' + floor : ''}`;
+      window.open(url, '_blank', 'noopener');
+    });
+  }
+
   function prepareCommentRecord(record, depth) {
     stripRenderArtifacts(record.node);
     record.node.setAttribute('data-xns-floor', String(record.floor));
@@ -1558,6 +1598,7 @@
     record.node.classList.add(depth === 0 ? 'xns-comment-root' : 'xns-comment-child');
     if (depth > 0 && record.parent) record.node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
     ensurePreviewMenu(record.node, { includeFavorite: false, counts: record.counts || undefined });
+    ensurePreviewEditOption(record.node, record);
   }
 
   function appendNestedRecord(record, container, depth, prepareRecord) {
