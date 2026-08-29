@@ -16,6 +16,7 @@ function createPostPageController({
   getCommentItems,
   sanitizeImportedNode,
   releaseCommentNode,
+  releaseCommentHtml,
   getDocState,
   getCurrentUserUid,
   getCommentRecord,
@@ -242,7 +243,12 @@ function createPostPageController({
       appState.mode = mode;
       this.updateToolbar();
       if (mode === 'original') this.restoreOriginal();
-      else if (this.records.length) this.render();
+      else if (this.records.length) {
+        // 原版布局会同时释放远端节点和序列化快照；切回时按正常分页流程重建。
+        const needsReload = this.records.some((record) => !record.current && !record.node && !record.html);
+        if (needsReload) this.reloadPages();
+        else this.render();
+      }
       else this.reloadPages();
     }
 
@@ -272,6 +278,7 @@ function createPostPageController({
       remoteRecords.forEach((record) => {
         addRemoteNote(record, this.info.postId);
         record.node.classList.add('xns-preview-content');
+        releaseCommentHtml(record);
       });
       // 内容特性会各自查询图片、代码块、标签页和投票链接。以评论列表为根一次扫描，
       // 避免父楼层包含子楼层时反复遍历同一棵 DOM；当前页原生节点不带此标记，不会被改写。
@@ -320,6 +327,7 @@ const PostEnhancer = createPostPageController({
   getCommentItems,
   sanitizeImportedNode,
   releaseCommentNode,
+  releaseCommentHtml,
   getDocState,
   getCurrentUserUid,
   getCommentRecord,

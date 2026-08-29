@@ -90,6 +90,17 @@ function summary(values) {
   };
 }
 
+function summaryDecimal(values, digits = 2) {
+  const scale = 10 ** digits;
+  const round = (value) => Math.round(value * scale) / scale;
+  return {
+    median: round(percentile(values, 0.5)),
+    p90: round(percentile(values, 0.9)),
+    min: round(Math.min(...values)),
+    max: round(Math.max(...values)),
+  };
+}
+
 async function waitForPreviewFirst(page) {
   return page.evaluate(() => new Promise((resolve) => {
     const check = () => {
@@ -229,7 +240,7 @@ async function measure(browser, base, script, scenario) {
     if (typeof window.gc === 'function') window.gc();
   });
   const chromeMetrics = await page.metrics();
-  result.jsHeapUsedMB = Math.round((chromeMetrics.JSHeapUsedSize / 1024 / 1024) * 10) / 10;
+  result.jsHeapUsedMB = Math.round((chromeMetrics.JSHeapUsedSize / 1024 / 1024) * 100) / 100;
   result.domNodes = chromeMetrics.Nodes;
   result.documents = chromeMetrics.Documents;
   if (scenario.featureQueryCounter) {
@@ -321,7 +332,7 @@ try {
       const menuText = values[0]?.detachedMenuItems === undefined ? '' : ` | 脱离文档菜单项 ${JSON.stringify(summary(values.map((item) => item.detachedMenuItems)))}`;
       const menuQueryText = values[0]?.menuQueries === undefined ? '' : ` | 菜单查询 ${JSON.stringify(summary(values.map((item) => item.menuQueries)))}`;
       const nodeText = values[0]?.remoteCodeButtons === undefined ? '' : ` | 评论 ${JSON.stringify(summary(values.map((item) => item.totalComments)))}（远端 ${JSON.stringify(summary(values.map((item) => item.remoteComments)))}） | 图片 ${JSON.stringify(summary(values.map((item) => item.totalImages)))} | pre ${JSON.stringify(summary(values.map((item) => item.totalPre)))} | 元素 ${JSON.stringify(summary(values.map((item) => item.totalElements)))} | DOM遍历节点 ${JSON.stringify(summary(values.map((item) => item.treeNodes)))} | HTML ${JSON.stringify(summary(values.map((item) => item.bodyHtmlBytes)))}字节 | 远端代码按钮 ${JSON.stringify(summary(values.map((item) => item.remoteCodeButtons)))} | 远端图片绑定 ${JSON.stringify(summary(values.map((item) => item.remoteImagesBound)))} | 远端图片有源 ${JSON.stringify(summary(values.map((item) => item.remoteImagesWithSrc)))} | 远端图片待恢复 ${JSON.stringify(summary(values.map((item) => item.remoteImagesDeferred)))}`;
-      console.log(`${label.padEnd(8)} 首屏 ${JSON.stringify(summary(values.map((item) => item.first)))} | 完成 ${JSON.stringify(summary(values.map((item) => item.complete)))} | 总计 ${JSON.stringify(summary(values.map((item) => item.total)))} | JS堆 ${JSON.stringify(summary(values.map((item) => item.jsHeapUsedMB)))}MB | DOM ${JSON.stringify(summary(values.map((item) => item.domNodes)))} | Document ${JSON.stringify(summary(values.map((item) => item.documents)))}${featureText}${menuText}${menuQueryText}${nodeText} | 请求 ${values.map((item) => `${item.postGets}页/${item.voteGets}投票`).join(', ')}`);
+      console.log(`${label.padEnd(8)} 首屏 ${JSON.stringify(summary(values.map((item) => item.first)))} | 完成 ${JSON.stringify(summary(values.map((item) => item.complete)))} | 总计 ${JSON.stringify(summary(values.map((item) => item.total)))} | JS堆 ${JSON.stringify(summaryDecimal(values.map((item) => item.jsHeapUsedMB)))}MB | DOM ${JSON.stringify(summary(values.map((item) => item.domNodes)))} | Document ${JSON.stringify(summary(values.map((item) => item.documents)))}${featureText}${menuText}${menuQueryText}${nodeText} | 请求 ${values.map((item) => `${item.postGets}页/${item.voteGets}投票`).join(', ')}`);
     }
     const before = summary(rows.baseline.map((item) => item.complete)).median;
     const after = summary(rows.current.map((item) => item.complete)).median;

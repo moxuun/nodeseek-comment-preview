@@ -17,6 +17,7 @@ function createPreviewRenderer({
   safeCount,
   sanitizeImportedNode,
   materializeCommentNode,
+  releaseCommentHtml,
   getDirectCommentMenu,
   ensurePreviewMenu,
   stripRenderArtifacts,
@@ -114,6 +115,7 @@ function createPreviewRenderer({
       buildReplyTree(records).forEach((record) => appendNestedRecord(record, fragment, 0));
       records.forEach((record) => {
         if (record.page !== info.page) addRemoteNote(record, info.postId);
+        releaseCommentHtml(record);
       });
       thread.replaceChildren(fragment);
     } else {
@@ -154,6 +156,7 @@ const xnsPreviewRenderer = createPreviewRenderer({
   safeCount,
   sanitizeImportedNode,
   materializeCommentNode,
+  releaseCommentHtml,
   getDirectCommentMenu,
   ensurePreviewMenu,
   stripRenderArtifacts,

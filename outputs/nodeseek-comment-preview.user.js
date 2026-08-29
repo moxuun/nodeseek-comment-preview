@@ -486,8 +486,8 @@ function getCommentRecord(item, postId, page, index, current, options = {}) {
     author: getAuthorName(item),
     reply: extractReplyMetadata(item, postId),
     counts: commentId !== null && options.state ? getSsrCommentCounts(options.state, commentId) : null,
-    // 跨页评论在原版布局下不会展示；只保留经过清洗的 HTML，避免控制器
-    // 长期持有一整棵脱离文档的 DOM 子树。楼中楼重新渲染时再物化节点。
+    // 跨页评论在原版布局下不会展示；首次进入楼中楼前只保留经过清洗的 HTML，
+    // 物化成节点后由渲染器释放这份重复字符串；切回楼中楼时若两者都已释放则重读分页。
     node: current ? node : null,
     html: current ? null : node.outerHTML,
     parent: null, children: [],
@@ -505,6 +505,10 @@ function materializeCommentNode(record) {
 
 function releaseCommentNode(record) {
   if (record && !record.current) record.node = null;
+}
+
+function releaseCommentHtml(record) {
+  if (record && !record.current && record.node) record.html = null;
 }
 
 function getSsrCommentCounts(stateValue, commentId) {
@@ -539,6 +543,7 @@ function getSsrCommentCounts(stateValue, commentId) {
     getCommentRecord,
     materializeCommentNode,
     releaseCommentNode,
+    releaseCommentHtml,
     getSsrCommentCounts,
   });
 }
@@ -565,6 +570,7 @@ const getCommentAuthorUid = (...args) => xnsContentParser.getCommentAuthorUid(..
 const getCommentRecord = (...args) => xnsContentParser.getCommentRecord(...args);
 const materializeCommentNode = (...args) => xnsContentParser.materializeCommentNode(...args);
 const releaseCommentNode = (...args) => xnsContentParser.releaseCommentNode(...args);
+const releaseCommentHtml = (...args) => xnsContentParser.releaseCommentHtml(...args);
 const getSsrCommentCounts = (...args) => xnsContentParser.getSsrCommentCounts(...args);
 
 
@@ -1487,6 +1493,7 @@ function createPreviewRenderer({
   safeCount,
   sanitizeImportedNode,
   materializeCommentNode,
+  releaseCommentHtml,
   getDirectCommentMenu,
   ensurePreviewMenu,
   stripRenderArtifacts,
@@ -1584,6 +1591,7 @@ function createPreviewRenderer({
       buildReplyTree(records).forEach((record) => appendNestedRecord(record, fragment, 0));
       records.forEach((record) => {
         if (record.page !== info.page) addRemoteNote(record, info.postId);
+        releaseCommentHtml(record);
       });
       thread.replaceChildren(fragment);
     } else {
@@ -1624,6 +1632,7 @@ const xnsPreviewRenderer = createPreviewRenderer({
   safeCount,
   sanitizeImportedNode,
   materializeCommentNode,
+  releaseCommentHtml,
   getDirectCommentMenu,
   ensurePreviewMenu,
   stripRenderArtifacts,
@@ -2964,6 +2973,7 @@ function createPostPageController({
   getCommentItems,
   sanitizeImportedNode,
   releaseCommentNode,
+  releaseCommentHtml,
   getDocState,
   getCurrentUserUid,
   getCommentRecord,
@@ -3190,7 +3200,12 @@ function createPostPageController({
       appState.mode = mode;
       this.updateToolbar();
       if (mode === 'original') this.restoreOriginal();
-      else if (this.records.length) this.render();
+      else if (this.records.length) {
+        // 原版布局会同时释放远端节点和序列化快照；切回时按正常分页流程重建。
+        const needsReload = this.records.some((record) => !record.current && !record.node && !record.html);
+        if (needsReload) this.reloadPages();
+        else this.render();
+      }
       else this.reloadPages();
     }
 
@@ -3220,6 +3235,7 @@ function createPostPageController({
       remoteRecords.forEach((record) => {
         addRemoteNote(record, this.info.postId);
         record.node.classList.add('xns-preview-content');
+        releaseCommentHtml(record);
       });
       // 内容特性会各自查询图片、代码块、标签页和投票链接。以评论列表为根一次扫描，
       // 避免父楼层包含子楼层时反复遍历同一棵 DOM；当前页原生节点不带此标记，不会被改写。
@@ -3268,6 +3284,7 @@ const PostEnhancer = createPostPageController({
   getCommentItems,
   sanitizeImportedNode,
   releaseCommentNode,
+  releaseCommentHtml,
   getDocState,
   getCurrentUserUid,
   getCommentRecord,

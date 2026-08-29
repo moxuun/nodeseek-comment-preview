@@ -670,6 +670,7 @@ scenario('原版/楼中楼切换', async (ctx) => {
   await page.evaluate(() => {
     [...document.querySelectorAll('.xns-post-toolbar [data-mode]')].find((button) => button.dataset.mode === 'thread').click();
   });
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '9 条评论', 15_000, '释放远端快照后重新构建楼中楼');
   const thread = await page.evaluate(() => ({
     roots: document.querySelectorAll('.comment-container > ul.comments > .xns-comment-root').length,
     replyLists: document.querySelectorAll('.comment-container > ul.comments .xns-reply-list').length,
