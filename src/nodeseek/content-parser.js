@@ -87,15 +87,22 @@ function isPinnedComment(item) {
 
 function hasOwnEditOption(item) {
   if (!item?.querySelector) return false;
-  return qsa(item, ':scope > .comment-menu > .menu-item').some((el) => (el.textContent || '').trim() === '编辑' && !el.dataset?.xnsAction);
+  return qsa(item, ':scope > .comment-menu > .menu-item, :scope > .comment-actions > .menu-item')
+    .some((el) => (el.textContent || '').trim() === '编辑' && !el.dataset?.xnsAction);
 }
 
 function getCommentAuthorUid(item) {
   try {
-    const author = qs(item, '.nsk-content-meta-info a.author-name, .author-name');
+    const author = qs(item, '.nsk-content-meta-info a[href*="/space/"], .author-name, a[href*="/space/"]');
     const match = (author?.getAttribute('href') || '').match(/\/space\/(\d+)/);
     return match ? match[1] : null;
   } catch { return null; }
+}
+
+function getStateUserUid(state) {
+  const user = state?.user;
+  const value = user && (user.id ?? user.uid ?? user.userId ?? user.memberId ?? user.member_id);
+  return value === undefined || value === null ? null : String(value);
 }
 
 function getCommentRecord(item, postId, page, index, current, options = {}) {
@@ -104,7 +111,8 @@ function getCommentRecord(item, postId, page, index, current, options = {}) {
   const node = current ? item : sanitizeImportedNode(item, { ...options, deferImages: true });
   if (!node) return null;
   const commentId = getCommentId(item);
-  const currentUserUid = typeof options.getCurrentUserUid === 'function' ? options.getCurrentUserUid() : getCurrentUserUid();
+  const currentUserUid = (typeof options.getCurrentUserUid === 'function' ? options.getCurrentUserUid() : getCurrentUserUid())
+    || getStateUserUid(options.state);
   return {
     floor, page, postId, index, current,
     isMine: hasOwnEditOption(item) || (currentUserUid !== null && getCommentAuthorUid(item) === currentUserUid),

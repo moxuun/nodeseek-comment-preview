@@ -954,28 +954,38 @@ scenario('弹窗发送回复后重排', async (ctx) => {
   assert(state.statusText === null, `回复成功后状态提示应消失，实际残留 “${state.statusText}”`);
 });
 
-scenario('楼中楼显示自己的评论编辑入口（0.5.19 回归）', async (ctx) => {
-  // 自己的评论：官方只在 isMine 渲染“编辑”菜单项；楼中楼重排后 Vue 卸载，
-  // 脚本必须识别并补回入口，点击在新标签打开原帖该楼层（Vue 全新、可编辑）。
+scenario('楼中楼显示自己的评论编辑入口并保留官方编辑器（0.5.19 回归）', async (ctx) => {
+  // 自己的评论：官方只在 isMine 渲染“编辑”菜单项；楼中楼重排后仍应保留
+  // 这个原生入口，点击后由官方在楼层下方展开编辑器，不能被脚本改成跳转。
   const page = await openPostPage(ctx);
- await waitFor(page, () => {
+  await waitFor(page, () => {
     const menu = document.querySelector('.comment-container > ul.comments .content-item[data-xns-floor="1"] > .comment-menu');
     return menu && Array.from(menu.children).some((el) => (el.textContent || '' ).trim() === '编辑');
   }, 15_000, '楼中楼里自己的评论显示编辑入口');
- const url = await page.evaluate(() => {
+  const state = await page.evaluate(() => {
     const item = Array.from(document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor="1"] .menu-item')).find((el) => (el.textContent || '' ).trim() === '编辑');
+    const comment = item.closest('.content-item');
+    const originalOpen = window.open;
+    let openCalls = 0;
+    window.open = (...args) => { openCalls += 1; return null; };
+    item.addEventListener('click', (event) => {
+      event.preventDefault();
+      const editor = document.createElement('textarea');
+      editor.className = 'official-edit-composer';
+      editor.value = '官方编辑器';
+      comment.appendChild(editor);
+    });
     item.click();
-    return { href: location.href };
+    window.open = originalOpen;
+    return {
+      href: location.href,
+      openCalls,
+      hasEditor: !!comment.querySelector('.official-edit-composer'),
+    };
   });
- const popup = await new Promise((resolveRes) => {
-    const t = setTimeout(() => resolveRes(null), 8000);
-    page.once('popup', (p) => { clearTimeout(t); resolveRes(p); });
-  });
- assert(popup, '点击编辑应打开新标签');
- await new Promise((res) => setTimeout(res, 1500));
- const popupUrl = popup.url();
- assert(popupUrl === `${ctx.base}/post-123-1#1`, `新标签应打开原帖 #1，实际 ${popupUrl}`);
- await popup.close();
+  assert(state.href === `${ctx.base}/post-123-1`, `帖子页编辑不应改变 URL，实际 ${state.href}`);
+  assert(state.openCalls === 0, `帖子页编辑不应调用 window.open，实际 ${state.openCalls} 次`);
+  assert(state.hasEditor, '点击帖子页编辑应保留官方楼层下方编辑器');
 });
 11
 
@@ -984,6 +994,17 @@ scenario('弹窗预览自己的评论出现编辑入口（0.5.20 回归）', asy
   // 脚本须识别为 isMine 并接管（菜单保留单个编辑项）。
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/list`, { waitUntil: 'networkidle0' });
+  await page.evaluate(() => {
+    // 真实列表页可能没有可直接解析的用户菜单，只在 SSR 状态中提供当前用户。
+    document.querySelector('.user-menu')?.remove();
+    const state = { user: { member_id: 1 } };
+    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(state))));
+    const script = document.createElement('script');
+    script.id = 'temp-script';
+    script.type = 'application/json';
+    script.textContent = encoded;
+    document.body.appendChild(script);
+  });
   await page.click('a[href="/post-123-1"]');
   await waitFor(page, () => {
     const heading = document.querySelector('.xns-modal .xns-preview-comments h3');

@@ -29,6 +29,11 @@ function createPreviewRenderer({
     const menu = getDirectCommentMenu(node);
     if (!menu) return;
     let item = qsa(menu, ':scope > .menu-item').find((el) => (el.textContent || '').trim() === '编辑' && !el.dataset?.xnsAction);
+    // 帖子详情页已有 NodeSeek/Vue 原生编辑项时直接保留。它带有官方事件
+    // 处理器，由官方在楼层下方展开编辑器；脚本不能覆盖成打开新标签。
+    // 如果原生项没有渲染出来，仍要先补回可见入口；后面不接管当前页的点击，
+    // 避免把“修复显示”又回归成跳转行为。
+    if (record.current && item) return;
     if (!item) {
       item = createElement('span', 'menu-item');
       item.setAttribute('role', 'button');
@@ -36,6 +41,7 @@ function createPreviewRenderer({
       item.innerHTML = '<svg class="iconpark-icon" aria-hidden="true"><use href="#edit"></use></svg><span>编辑</span>';
       menu.appendChild(item);
     }
+    if (record.current) return;
     if (item.dataset.xnsEditBound === 'true') return;
     item.dataset.xnsEditBound = 'true';
     item.addEventListener('click', (event) => {

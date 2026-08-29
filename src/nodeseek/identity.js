@@ -11,7 +11,7 @@ function createIdentityService({ documentObj, extractSsrState }) {
 
   function fromPageState() {
     const user = extractSsrState(documentObj)?.user;
-    const value = user && (user.id ?? user.uid ?? user.userId ?? user.memberId);
+    const value = user && (user.id ?? user.uid ?? user.userId ?? user.memberId ?? user.member_id);
     return value === undefined || value === null ? null : String(value);
   }
 

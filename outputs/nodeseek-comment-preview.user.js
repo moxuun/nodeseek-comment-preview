@@ -208,7 +208,12 @@ function createSsrStateService({ documentObj, qs }) {
       if (!encoded) return null;
       const json = decodeURIComponent(escape(atob(encoded)));
       const data = JSON.parse(json);
-      return data && data.postData && Array.isArray(data.postData.comments) ? data : null;
+      // 列表页通常只有 user，没有 postData.comments；身份服务也需要读取这种状态。
+      // 帖子统计仍由调用方检查 postData.comments，不把列表状态当成评论状态使用。
+      return data && typeof data === 'object' && (
+        data.user !== undefined
+        || (data.postData && Array.isArray(data.postData.comments))
+      ) ? data : null;
     } catch { return null; }
   }
 
@@ -331,7 +336,7 @@ function createIdentityService({ documentObj, extractSsrState }) {
 
   function fromPageState() {
     const user = extractSsrState(documentObj)?.user;
-    const value = user && (user.id ?? user.uid ?? user.userId ?? user.memberId);
+    const value = user && (user.id ?? user.uid ?? user.userId ?? user.memberId ?? user.member_id);
     return value === undefined || value === null ? null : String(value);
   }
 
@@ -461,15 +466,22 @@ function isPinnedComment(item) {
 
 function hasOwnEditOption(item) {
   if (!item?.querySelector) return false;
-  return qsa(item, ':scope > .comment-menu > .menu-item').some((el) => (el.textContent || '').trim() === '编辑' && !el.dataset?.xnsAction);
+  return qsa(item, ':scope > .comment-menu > .menu-item, :scope > .comment-actions > .menu-item')
+    .some((el) => (el.textContent || '').trim() === '编辑' && !el.dataset?.xnsAction);
 }
 
 function getCommentAuthorUid(item) {
   try {
-    const author = qs(item, '.nsk-content-meta-info a.author-name, .author-name');
+    const author = qs(item, '.nsk-content-meta-info a[href*="/space/"], .author-name, a[href*="/space/"]');
     const match = (author?.getAttribute('href') || '').match(/\/space\/(\d+)/);
     return match ? match[1] : null;
   } catch { return null; }
+}
+
+function getStateUserUid(state) {
+  const user = state?.user;
+  const value = user && (user.id ?? user.uid ?? user.userId ?? user.memberId ?? user.member_id);
+  return value === undefined || value === null ? null : String(value);
 }
 
 function getCommentRecord(item, postId, page, index, current, options = {}) {
@@ -478,7 +490,8 @@ function getCommentRecord(item, postId, page, index, current, options = {}) {
   const node = current ? item : sanitizeImportedNode(item, { ...options, deferImages: true });
   if (!node) return null;
   const commentId = getCommentId(item);
-  const currentUserUid = typeof options.getCurrentUserUid === 'function' ? options.getCurrentUserUid() : getCurrentUserUid();
+  const currentUserUid = (typeof options.getCurrentUserUid === 'function' ? options.getCurrentUserUid() : getCurrentUserUid())
+    || getStateUserUid(options.state);
   return {
     floor, page, postId, index, current,
     isMine: hasOwnEditOption(item) || (currentUserUid !== null && getCommentAuthorUid(item) === currentUserUid),
@@ -1505,6 +1518,11 @@ function createPreviewRenderer({
     const menu = getDirectCommentMenu(node);
     if (!menu) return;
     let item = qsa(menu, ':scope > .menu-item').find((el) => (el.textContent || '').trim() === '编辑' && !el.dataset?.xnsAction);
+    // 帖子详情页已有 NodeSeek/Vue 原生编辑项时直接保留。它带有官方事件
+    // 处理器，由官方在楼层下方展开编辑器；脚本不能覆盖成打开新标签。
+    // 如果原生项没有渲染出来，仍要先补回可见入口；后面不接管当前页的点击，
+    // 避免把“修复显示”又回归成跳转行为。
+    if (record.current && item) return;
     if (!item) {
       item = createElement('span', 'menu-item');
       item.setAttribute('role', 'button');
@@ -1512,6 +1530,7 @@ function createPreviewRenderer({
       item.innerHTML = '<svg class="iconpark-icon" aria-hidden="true"><use href="#edit"></use></svg><span>编辑</span>';
       menu.appendChild(item);
     }
+    if (record.current) return;
     if (item.dataset.xnsEditBound === 'true') return;
     item.dataset.xnsEditBound = 'true';
     item.addEventListener('click', (event) => {
