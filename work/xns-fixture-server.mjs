@@ -107,10 +107,11 @@ function richLongPage(postId, page) {
   const commentsPerPage = 10;
   const linkAt = (target) => `<a class="pager-pos${target === page ? ' pager-cur' : ''}" href="/post-${postId}-${target}">${target}</a>`;
   const pager = [1, 2, pageCount].map(linkAt).join('');
+  const nativeMenu = '<div class="comment-menu"><span class="menu-item" title="点赞" data-action="like">♡ <span>0</span></span><span class="menu-item" title="加鸡腿" data-action="chicken">🍗 <span>0</span></span><span class="menu-item" title="反对" data-action="dislike">♧ <span>0</span></span><span class="menu-item" title="引用" data-action="quote">❝ 引用</span><span class="menu-item" title="回复" data-action="reply">↩ 回复</span></div>';
   const items = Array.from({ length: commentsPerPage }, (_, index) => {
     const floor = (page - 1) * commentsPerPage + index + 1;
     const code = index % 5 === 0 ? `<pre><code>console.log('comment-${floor}');</code></pre>` : '';
-    return `<li id="${floor}" data-comment-id="${postId}${floor}" class="content-item"><div class="nsk-content-meta-info"><a href="/space/${floor}">U${floor}</a></div><article class="post-content"><p>第 ${floor} 条富内容评论。</p><img src="/test.png" alt="图片 ${floor}">${code}</article></li>`;
+    return `<li id="${floor}" data-comment-id="${postId}${floor}" class="content-item"><div class="nsk-content-meta-info"><a href="/space/${floor}">U${floor}</a></div><article class="post-content"><p>第 ${floor} 条富内容评论。</p><img src="/test.png" alt="图片 ${floor}">${code}</article>${nativeMenu}</li>`;
   }).join('');
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Fixture rich long post ${postId} page ${page}</title></head><body><div class="nsk-post"><div class="content-item" id="0"><h1 class="post-title">富内容长帖 Fixture</h1><article class="post-content"><p>用于验证大量远端评论的按视口增强。</p></article></div></div><div class="comment-container"><div class="nsk-pager post-top-pager">${pager}</div><ul class="comments">${items}</ul><div class="nsk-pager post-bottom-pager">${pager}</div></div><script src="/outputs/nodeseek-comment-preview.user.js"></script></body></html>`;
 }

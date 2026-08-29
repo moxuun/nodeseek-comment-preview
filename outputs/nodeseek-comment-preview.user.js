@@ -1069,6 +1069,15 @@ function createCommentActions({
   postAction,
   loadPreviewModal,
 }) {
+  const PREVIEW_ACTIONS = [
+    ['like', '点赞', '♡', true],
+    ['chicken', '加鸡腿', '🍗', true],
+    ['dislike', '反对', '♧', true],
+    ['favorite', '收藏', '☆', true],
+    ['quote', '引用', '❝', false],
+    ['reply', '回复', '↩', false],
+  ];
+
   function getDirectCommentMenu(comment) {
     return Array.from(comment?.children || []).find((child) => child.matches?.('.comment-menu, .comment-actions')) || null;
   }
@@ -1090,29 +1099,25 @@ function createCommentActions({
     return '';
   }
 
+  function createPreviewMenuItem([key, label, icon, withCount]) {
+    const item = createElement('span', 'menu-item');
+    item.dataset.xnsAction = key;
+    item.title = label;
+    item.setAttribute('role', 'button');
+    item.tabIndex = 0;
+    const iconNode = createElement('span', 'xns-action-icon', icon);
+    iconNode.setAttribute('aria-hidden', 'true');
+    item.appendChild(iconNode);
+    if (withCount) item.appendChild(createElement('span', 'xns-action-count', '0'));
+    item.appendChild(createElement('span', 'xns-action-label', label));
+    return item;
+  }
+
   function createPreviewMenu(includeFavorite = true) {
     const menu = createElement('div', 'comment-menu xns-preview-menu');
-    const actions = [
-      ['like', '点赞', '♡', true],
-      ['chicken', '加鸡腿', '🍗', true],
-      ['dislike', '反对', '♧', true],
-      ['favorite', '收藏', '☆', true],
-      ['quote', '引用', '❝', false],
-      ['reply', '回复', '↩', false],
-    ].filter(([key]) => includeFavorite || key !== 'favorite');
-    actions.forEach(([key, label, icon, withCount]) => {
-      const item = createElement('span', 'menu-item');
-      item.dataset.xnsAction = key;
-      item.title = label;
-      item.setAttribute('role', 'button');
-      item.tabIndex = 0;
-      const iconNode = createElement('span', 'xns-action-icon', icon);
-      iconNode.setAttribute('aria-hidden', 'true');
-      item.appendChild(iconNode);
-      if (withCount) item.appendChild(createElement('span', 'xns-action-count', '0'));
-      item.appendChild(createElement('span', 'xns-action-label', label));
-      menu.appendChild(item);
-    });
+    PREVIEW_ACTIONS
+      .filter(([key]) => includeFavorite || key !== 'favorite')
+      .forEach((action) => menu.appendChild(createPreviewMenuItem(action)));
     return menu;
   }
 
@@ -1130,10 +1135,10 @@ function createCommentActions({
       menu.classList.add('comment-menu', 'xns-preview-menu');
       if (!includeFavorite) qsa(menu, ':scope > .menu-item').filter((item) => getMenuActionKey(item) === 'favorite').forEach((item) => item.remove());
       const existingActions = new Set(qsa(menu, ':scope > .menu-item').map(getMenuActionKey).filter(Boolean));
-      qsa(createPreviewMenu(includeFavorite), ':scope > .menu-item').forEach((item) => {
-        const action = item.dataset.xnsAction;
-        if (action && !existingActions.has(action)) menu.appendChild(item);
-      });
+      PREVIEW_ACTIONS
+        .filter(([key]) => includeFavorite || key !== 'favorite')
+        .filter(([key]) => !existingActions.has(key))
+        .forEach((action) => menu.appendChild(createPreviewMenuItem(action)));
     }
     qsa(menu, ':scope > .menu-item').forEach((item) => {
       const action = getMenuActionKey(item);
