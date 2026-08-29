@@ -120,12 +120,18 @@ function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createE
     overlay.focus();
   }
 
-  function installPreviewImageFallback(root) {
-    const selector = root?.matches?.('.xns-preview-content') ? 'img' : '.xns-preview-content img';
+  function installPreviewImageFallback(root, options = {}) {
+    const isPreviewRoot = root?.matches?.('.xns-preview-content') || root?.closest?.('.xns-preview-content');
+    const selector = isPreviewRoot ? 'img' : '.xns-preview-content img';
     const images = [];
     if (root?.matches?.('.xns-preview-content img')) images.push(root);
+    const owner = root?.matches?.('.content-item') ? root : null;
     images.push(...qsa(root, selector));
-    images.forEach((image) => {
+    images.filter((image) => {
+      if (owner && image.closest?.('.content-item') !== owner) return false;
+      if (options.skipRemote && (image.matches?.('[data-xns-remote]') || image.closest?.('[data-xns-remote]'))) return false;
+      return true;
+    }).forEach((image) => {
       if (image.dataset.xnsImageBound === 'true') return;
       image.dataset.xnsImageBound = 'true';
       image.setAttribute('tabindex', '0');

@@ -115,27 +115,33 @@ function createContentFeatures({
     code.dataset.xnsAnsiRendered = 'true';
   }
 
-  function queryPreviewContent(root, selector) {
+  function queryPreviewContent(root, selector, options = {}) {
     if (!root) return [];
-    if (root.matches?.('.xns-preview-content')) {
-      const relativeSelector = selector
+    const isPreviewRoot = root.matches?.('.xns-preview-content') || root.closest?.('.xns-preview-content');
+    let querySelector = selector;
+    if (isPreviewRoot) {
+      querySelector = selector
         .split(',')
         .map((part) => part.trim().replace(/^\.xns-preview-content\s+/, ''))
         .join(', ');
-      return qsa(root, relativeSelector);
     }
     const matches = [];
     if (root.matches?.(selector)) matches.push(root);
-    matches.push(...qsa(root, selector));
-    return matches;
+    matches.push(...qsa(root, querySelector));
+    const owner = root.matches?.('.content-item') ? root : null;
+    return matches.filter((node) => {
+      if (owner && node.closest?.('.content-item') !== owner) return false;
+      if (options.skipRemote && (node.matches?.('[data-xns-remote]') || node.closest?.('[data-xns-remote]'))) return false;
+      return true;
+    });
   }
 
-  function installPreviewAnsiBlocks(root) {
-    queryPreviewContent(root, '.xns-preview-content pre').forEach(renderAnsiCodeBlock);
+  function installPreviewAnsiBlocks(root, options = {}) {
+    queryPreviewContent(root, '.xns-preview-content pre', options).forEach(renderAnsiCodeBlock);
   }
 
-  function installPreviewMagicTabs(root) {
-    queryPreviewContent(root, '.xns-preview-content .nsk-magic-tabs').forEach((tabs) => {
+  function installPreviewMagicTabs(root, options = {}) {
+    queryPreviewContent(root, '.xns-preview-content .nsk-magic-tabs', options).forEach((tabs) => {
       if (tabs.dataset.xnsMagicTabsBound === 'true') return;
       const titles = qsa(tabs, ':scope > .nsk-magic-tab-title');
       const bodies = qsa(tabs, ':scope > .nsk-magic-tab-body');
@@ -176,9 +182,9 @@ function createContentFeatures({
     return match?.[1]?.trim() || '标签页';
   }
 
-  function installPreviewMarkdownTabs(root) {
+  function installPreviewMarkdownTabs(root, options = {}) {
     const selector = '.xns-preview-content .post-content, .xns-preview-content article.post-content';
-    const contents = queryPreviewContent(root, selector);
+    const contents = queryPreviewContent(root, selector, options);
     contents.forEach((content) => {
       if (content.dataset.xnsTabsBound === 'true') return;
       const children = Array.from(content.children);
@@ -273,8 +279,8 @@ function createContentFeatures({
     return fallbackCopyText(text) ? Promise.resolve() : Promise.reject(new Error('copy failed'));
   }
 
-  function installPreviewCodeBlocks(root) {
-    queryPreviewContent(root, '.xns-preview-content pre').forEach((pre) => {
+  function installPreviewCodeBlocks(root, options = {}) {
+    queryPreviewContent(root, '.xns-preview-content pre', options).forEach((pre) => {
       if (pre.dataset.xnsCodeBound === 'true') return;
       const code = qs(pre, ':scope > code') || qs(pre, 'code');
       if (!code) return;
@@ -307,13 +313,13 @@ function createContentFeatures({
     });
   }
 
-  function installPreviewFeatures(root) {
-    installPreviewMagicTabs(root);
-    installPreviewMarkdownTabs(root);
-    installPreviewAnsiBlocks(root);
-    installPreviewImageFallback(root);
-    installPreviewCodeBlocks(root);
-    installPreviewVotePanels(root);
+  function installPreviewFeatures(root, options = {}) {
+    installPreviewMagicTabs(root, options);
+    installPreviewMarkdownTabs(root, options);
+    installPreviewAnsiBlocks(root, options);
+    installPreviewImageFallback(root, options);
+    installPreviewCodeBlocks(root, options);
+    installPreviewVotePanels(root, options);
   }
 
   return Object.freeze({ installPreviewFeatures, installPreviewCodeBlocks });

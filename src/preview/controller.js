@@ -59,6 +59,36 @@ function createPreviewController({
     return { title, content: wrapper, hydrate };
   }
 
+  function schedulePreviewFeatures(modal) {
+    modal.featureCleanup?.();
+    modal.featureCleanup = null;
+    const body = modal.body;
+    installPreviewFeatures(body, { skipRemote: true });
+    const remoteItems = qsa(body, '.xns-preview-thread .content-item[data-xns-remote]');
+    if (!remoteItems.length) return;
+    if (typeof windowObj.IntersectionObserver !== 'function') {
+      installPreviewFeatures(body);
+      return;
+    }
+    const pending = new Set(remoteItems);
+    let observer = null;
+    const cleanup = () => {
+      observer?.disconnect();
+      if (modal.featureCleanup === cleanup) modal.featureCleanup = null;
+    };
+    observer = new windowObj.IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting || !pending.has(entry.target)) return;
+        pending.delete(entry.target);
+        observer.unobserve(entry.target);
+        installPreviewFeatures(entry.target);
+      });
+      if (!pending.size) cleanup();
+    }, { root: body, rootMargin: '0px' });
+    remoteItems.forEach((item) => observer.observe(item));
+    modal.featureCleanup = cleanup;
+  }
+
   function getPreviewScrollOwners(body) {
     return qsa(body, '.xns-preview-post, .xns-preview-thread .content-item[data-comment-id], .xns-preview-thread .content-item[data-xns-floor]');
   }
@@ -238,6 +268,8 @@ function createPreviewController({
     modal.requestController?.abort();
     modal.requestController = requestController;
     modal.refreshScrollCleanup?.();
+    modal.featureCleanup?.();
+    modal.featureCleanup = null;
     modal.loading = true;
     const generation = (modal.loadGeneration || 0) + 1;
     modal.loadGeneration = generation;
@@ -265,11 +297,11 @@ function createPreviewController({
       clearElement(modal.body);
       modal.body.appendChild(preview.content);
       if (modal.composer && !modal.composer.isConnected) modal.body.appendChild(modal.composer);
-      installPreviewFeatures(modal.body);
+      schedulePreviewFeatures(modal);
       if (!preserveContent && preview.hydrate) {
         await preview.hydrate;
         if (state.modal !== modal || modal.loadGeneration !== generation) return false;
-        installPreviewFeatures(modal.body);
+        schedulePreviewFeatures(modal);
       }
       if (preserveContent) stabilizePreviewScroll(modal, scrollSnapshot, generation);
     } catch (error) {
@@ -319,7 +351,7 @@ function createPreviewController({
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, loading: false, loadGeneration: 0, requestController: null };
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, loading: false, loadGeneration: 0, requestController: null };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }

@@ -528,6 +528,33 @@ scenario('富内容远端评论滚动后仍能增强根节点', async (ctx) => {
   await page.close();
 });
 
+scenario('预览弹窗远端内容滚动后才增强', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.goto(`${ctx.base}/list-460`, { waitUntil: 'networkidle0' });
+  await page.click('a[href="/post-460-1"]');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 500 条回复', 30_000, '富内容预览加载完成');
+  const before = await page.evaluate(() => ({
+    remoteCodeBlocks: document.querySelectorAll('.xns-modal [data-xns-remote] pre').length,
+    remoteCopyButtons: document.querySelectorAll('.xns-modal [data-xns-remote] .xns-code-copy-btn').length,
+  }));
+  assert(before.remoteCodeBlocks > 0, `富内容预览应包含远端代码块，实际 ${JSON.stringify(before)}`);
+  await page.evaluate(() => {
+    const blocks = document.querySelectorAll('.xns-modal [data-xns-remote] pre');
+    blocks[blocks.length - 1]?.scrollIntoView({ block: 'center' });
+  });
+  await waitFor(page, () => {
+    const blocks = document.querySelectorAll('.xns-modal [data-xns-remote] pre');
+    return Boolean(blocks[blocks.length - 1]?.querySelector('.xns-code-copy-btn'));
+  }, 5_000, '预览滚动后增强远端评论');
+  const after = await page.evaluate(() => ({
+    remoteCopyButtons: document.querySelectorAll('.xns-modal [data-xns-remote] .xns-code-copy-btn').length,
+    remoteImagesBound: document.querySelectorAll('.xns-modal [data-xns-remote] img[data-xns-image-bound="true"]').length,
+  }));
+  assert(after.remoteCopyButtons > before.remoteCopyButtons, `预览滚动后应增强远端代码块：${JSON.stringify({ before, after })}`);
+  assert(after.remoteImagesBound > 0, `预览滚动后应增强远端图片：${JSON.stringify(after)}`);
+  await page.close();
+});
+
 scenario('帖子页当前页优先渲染，远端分页后台加载', async (ctx) => {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/post-124-1`, { waitUntil: 'domcontentloaded' });
@@ -964,6 +991,10 @@ scenario('帖子页回复后新楼层出现在楼中楼（0.5.14 回归）', asy
 
 scenario('内容特性：标签页/ANSI/复制按钮', async (ctx) => {
   const page = await openPreviewModal(ctx);
+  await page.evaluate(() => {
+    document.querySelector('.xns-modal [data-xns-remote] pre')?.scrollIntoView({ block: 'center' });
+  });
+  await waitFor(page, () => document.querySelectorAll('.xns-code-copy-btn').length === 3, 5_000, '预览远端代码增强');
   const state = await page.evaluate(() => {
     const tabs = document.querySelector('.xns-preview-post .nsk-magic-tabs');
     const titles = [...tabs.querySelectorAll('.nsk-magic-tab-title')].map((title) => title.textContent.trim());

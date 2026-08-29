@@ -133,15 +133,21 @@ function createVoteFeature({
     else windowObj.setTimeout(load, 0);
   }
 
-  function installPreviewVotePanels(root) {
+  function installPreviewVotePanels(root, options = {}) {
     const selector = '.xns-preview-content a[data-href^="nsapp://vote"], .xns-preview-content a[href^="nsapp://vote"]';
-    const relativeSelector = root?.matches?.('.xns-preview-content')
+    const isPreviewRoot = root?.matches?.('.xns-preview-content') || root?.closest?.('.xns-preview-content');
+    const relativeSelector = isPreviewRoot
       ? 'a[data-href^="nsapp://vote"], a[href^="nsapp://vote"]'
       : selector;
+    const owner = root?.matches?.('.content-item') ? root : null;
     const links = [];
     if (root?.matches?.(selector)) links.push(root);
     links.push(...qsa(root, relativeSelector));
-    links.forEach((link) => {
+    links.filter((link) => {
+      if (owner && link.closest?.('.content-item') !== owner) return false;
+      if (options.skipRemote && (link.matches?.('[data-xns-remote]') || link.closest?.('[data-xns-remote]'))) return false;
+      return true;
+    }).forEach((link) => {
       if (link.dataset.xnsVoteBound === 'true') return;
       const voteId = getVoteIdFromLink(link);
       if (voteId === null) return;

@@ -241,6 +241,11 @@ const server = http.createServer((req, res) => {
     res.end(delayedPostList(124));
     return;
   }
+  if (pathname === '/list-460') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(delayedPostList(460));
+    return;
+  }
   // 长帖分页截断回归：456 帖共 52 页，每页 1 楼；分页器链接到最后一页，
   // 用于验证 MAX_PAGE 截断时状态栏明示“只读取了前 N 页”，而不是静默丢楼层。
   if (/^\/post-456-(\d+)$/.test(pathname)) {

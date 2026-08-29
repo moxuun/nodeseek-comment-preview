@@ -1770,15 +1770,21 @@ function createVoteFeature({
     else windowObj.setTimeout(load, 0);
   }
 
-  function installPreviewVotePanels(root) {
+  function installPreviewVotePanels(root, options = {}) {
     const selector = '.xns-preview-content a[data-href^="nsapp://vote"], .xns-preview-content a[href^="nsapp://vote"]';
-    const relativeSelector = root?.matches?.('.xns-preview-content')
+    const isPreviewRoot = root?.matches?.('.xns-preview-content') || root?.closest?.('.xns-preview-content');
+    const relativeSelector = isPreviewRoot
       ? 'a[data-href^="nsapp://vote"], a[href^="nsapp://vote"]'
       : selector;
+    const owner = root?.matches?.('.content-item') ? root : null;
     const links = [];
     if (root?.matches?.(selector)) links.push(root);
     links.push(...qsa(root, relativeSelector));
-    links.forEach((link) => {
+    links.filter((link) => {
+      if (owner && link.closest?.('.content-item') !== owner) return false;
+      if (options.skipRemote && (link.matches?.('[data-xns-remote]') || link.closest?.('[data-xns-remote]'))) return false;
+      return true;
+    }).forEach((link) => {
       if (link.dataset.xnsVoteBound === 'true') return;
       const voteId = getVoteIdFromLink(link);
       if (voteId === null) return;
@@ -1980,12 +1986,18 @@ function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createE
     overlay.focus();
   }
 
-  function installPreviewImageFallback(root) {
-    const selector = root?.matches?.('.xns-preview-content') ? 'img' : '.xns-preview-content img';
+  function installPreviewImageFallback(root, options = {}) {
+    const isPreviewRoot = root?.matches?.('.xns-preview-content') || root?.closest?.('.xns-preview-content');
+    const selector = isPreviewRoot ? 'img' : '.xns-preview-content img';
     const images = [];
     if (root?.matches?.('.xns-preview-content img')) images.push(root);
+    const owner = root?.matches?.('.content-item') ? root : null;
     images.push(...qsa(root, selector));
-    images.forEach((image) => {
+    images.filter((image) => {
+      if (owner && image.closest?.('.content-item') !== owner) return false;
+      if (options.skipRemote && (image.matches?.('[data-xns-remote]') || image.closest?.('[data-xns-remote]'))) return false;
+      return true;
+    }).forEach((image) => {
       if (image.dataset.xnsImageBound === 'true') return;
       image.dataset.xnsImageBound = 'true';
       image.setAttribute('tabindex', '0');
@@ -2105,6 +2117,7 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
   function closeModal() {
     closeImageLightbox();
     state.modal?.requestController?.abort();
+    state.modal?.featureCleanup?.();
     state.modal?.refreshScrollCleanup?.();
     state.modal?.scrollCleanup?.();
     state.modal?.overlay?.remove();
@@ -2254,27 +2267,33 @@ function createContentFeatures({
     code.dataset.xnsAnsiRendered = 'true';
   }
 
-  function queryPreviewContent(root, selector) {
+  function queryPreviewContent(root, selector, options = {}) {
     if (!root) return [];
-    if (root.matches?.('.xns-preview-content')) {
-      const relativeSelector = selector
+    const isPreviewRoot = root.matches?.('.xns-preview-content') || root.closest?.('.xns-preview-content');
+    let querySelector = selector;
+    if (isPreviewRoot) {
+      querySelector = selector
         .split(',')
         .map((part) => part.trim().replace(/^\.xns-preview-content\s+/, ''))
         .join(', ');
-      return qsa(root, relativeSelector);
     }
     const matches = [];
     if (root.matches?.(selector)) matches.push(root);
-    matches.push(...qsa(root, selector));
-    return matches;
+    matches.push(...qsa(root, querySelector));
+    const owner = root.matches?.('.content-item') ? root : null;
+    return matches.filter((node) => {
+      if (owner && node.closest?.('.content-item') !== owner) return false;
+      if (options.skipRemote && (node.matches?.('[data-xns-remote]') || node.closest?.('[data-xns-remote]'))) return false;
+      return true;
+    });
   }
 
-  function installPreviewAnsiBlocks(root) {
-    queryPreviewContent(root, '.xns-preview-content pre').forEach(renderAnsiCodeBlock);
+  function installPreviewAnsiBlocks(root, options = {}) {
+    queryPreviewContent(root, '.xns-preview-content pre', options).forEach(renderAnsiCodeBlock);
   }
 
-  function installPreviewMagicTabs(root) {
-    queryPreviewContent(root, '.xns-preview-content .nsk-magic-tabs').forEach((tabs) => {
+  function installPreviewMagicTabs(root, options = {}) {
+    queryPreviewContent(root, '.xns-preview-content .nsk-magic-tabs', options).forEach((tabs) => {
       if (tabs.dataset.xnsMagicTabsBound === 'true') return;
       const titles = qsa(tabs, ':scope > .nsk-magic-tab-title');
       const bodies = qsa(tabs, ':scope > .nsk-magic-tab-body');
@@ -2315,9 +2334,9 @@ function createContentFeatures({
     return match?.[1]?.trim() || '标签页';
   }
 
-  function installPreviewMarkdownTabs(root) {
+  function installPreviewMarkdownTabs(root, options = {}) {
     const selector = '.xns-preview-content .post-content, .xns-preview-content article.post-content';
-    const contents = queryPreviewContent(root, selector);
+    const contents = queryPreviewContent(root, selector, options);
     contents.forEach((content) => {
       if (content.dataset.xnsTabsBound === 'true') return;
       const children = Array.from(content.children);
@@ -2412,8 +2431,8 @@ function createContentFeatures({
     return fallbackCopyText(text) ? Promise.resolve() : Promise.reject(new Error('copy failed'));
   }
 
-  function installPreviewCodeBlocks(root) {
-    queryPreviewContent(root, '.xns-preview-content pre').forEach((pre) => {
+  function installPreviewCodeBlocks(root, options = {}) {
+    queryPreviewContent(root, '.xns-preview-content pre', options).forEach((pre) => {
       if (pre.dataset.xnsCodeBound === 'true') return;
       const code = qs(pre, ':scope > code') || qs(pre, 'code');
       if (!code) return;
@@ -2446,13 +2465,13 @@ function createContentFeatures({
     });
   }
 
-  function installPreviewFeatures(root) {
-    installPreviewMagicTabs(root);
-    installPreviewMarkdownTabs(root);
-    installPreviewAnsiBlocks(root);
-    installPreviewImageFallback(root);
-    installPreviewCodeBlocks(root);
-    installPreviewVotePanels(root);
+  function installPreviewFeatures(root, options = {}) {
+    installPreviewMagicTabs(root, options);
+    installPreviewMarkdownTabs(root, options);
+    installPreviewAnsiBlocks(root, options);
+    installPreviewImageFallback(root, options);
+    installPreviewCodeBlocks(root, options);
+    installPreviewVotePanels(root, options);
   }
 
   return Object.freeze({ installPreviewFeatures, installPreviewCodeBlocks });
@@ -2532,6 +2551,36 @@ function createPreviewController({
       return preview;
     });
     return { title, content: wrapper, hydrate };
+  }
+
+  function schedulePreviewFeatures(modal) {
+    modal.featureCleanup?.();
+    modal.featureCleanup = null;
+    const body = modal.body;
+    installPreviewFeatures(body, { skipRemote: true });
+    const remoteItems = qsa(body, '.xns-preview-thread .content-item[data-xns-remote]');
+    if (!remoteItems.length) return;
+    if (typeof windowObj.IntersectionObserver !== 'function') {
+      installPreviewFeatures(body);
+      return;
+    }
+    const pending = new Set(remoteItems);
+    let observer = null;
+    const cleanup = () => {
+      observer?.disconnect();
+      if (modal.featureCleanup === cleanup) modal.featureCleanup = null;
+    };
+    observer = new windowObj.IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting || !pending.has(entry.target)) return;
+        pending.delete(entry.target);
+        observer.unobserve(entry.target);
+        installPreviewFeatures(entry.target);
+      });
+      if (!pending.size) cleanup();
+    }, { root: body, rootMargin: '0px' });
+    remoteItems.forEach((item) => observer.observe(item));
+    modal.featureCleanup = cleanup;
   }
 
   function getPreviewScrollOwners(body) {
@@ -2713,6 +2762,8 @@ function createPreviewController({
     modal.requestController?.abort();
     modal.requestController = requestController;
     modal.refreshScrollCleanup?.();
+    modal.featureCleanup?.();
+    modal.featureCleanup = null;
     modal.loading = true;
     const generation = (modal.loadGeneration || 0) + 1;
     modal.loadGeneration = generation;
@@ -2740,11 +2791,11 @@ function createPreviewController({
       clearElement(modal.body);
       modal.body.appendChild(preview.content);
       if (modal.composer && !modal.composer.isConnected) modal.body.appendChild(modal.composer);
-      installPreviewFeatures(modal.body);
+      schedulePreviewFeatures(modal);
       if (!preserveContent && preview.hydrate) {
         await preview.hydrate;
         if (state.modal !== modal || modal.loadGeneration !== generation) return false;
-        installPreviewFeatures(modal.body);
+        schedulePreviewFeatures(modal);
       }
       if (preserveContent) stabilizePreviewScroll(modal, scrollSnapshot, generation);
     } catch (error) {
@@ -2794,7 +2845,7 @@ function createPreviewController({
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, loading: false, loadGeneration: 0, requestController: null };
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, loading: false, loadGeneration: 0, requestController: null };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }
