@@ -1143,14 +1143,6 @@ function createCommentActions({
       }
       if (!item.hasAttribute('role')) item.setAttribute('role', 'button');
       if (!item.hasAttribute('tabindex')) item.tabIndex = 0;
-      if (item.dataset.xnsKeyBound !== 'true') {
-        item.dataset.xnsKeyBound = 'true';
-        item.addEventListener('keydown', (event) => {
-          if (event.key !== 'Enter' && event.key !== ' ') return;
-          event.preventDefault();
-          item.click();
-        });
-      }
     });
     const counts = options.counts || null;
     if (counts) {
@@ -2841,6 +2833,12 @@ function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPr
   }
 
   function handleKeydown(event) {
+    const menuItem = event.target.closest?.('.xns-preview-menu > .menu-item');
+    if (menuItem && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      menuItem.click();
+      return;
+    }
     if (event.key !== 'Escape') return;
     if (event.target.closest?.('textarea, input, [contenteditable="true"]')) return;
     if (state.lightbox) {

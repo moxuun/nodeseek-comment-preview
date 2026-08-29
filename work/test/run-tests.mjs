@@ -699,6 +699,19 @@ scenario('列表页预览弹窗结构与操作菜单', async (ctx) => {
   assert(state.items === 9, `弹窗应有 9 条回复，实际 ${state.items}`);
 });
 
+scenario('预览菜单键盘操作使用全局事件代理', async (ctx) => {
+  const page = await openPreviewModal(ctx);
+  await page.evaluate(() => document.querySelector('.xns-modal .xns-preview-menu > .menu-item[data-xns-action="quote"]')?.focus());
+  await page.keyboard.press('Enter');
+  await waitFor(page, () => Boolean(document.querySelector('.xns-modal .xns-preview-composer')), 5_000, '键盘打开引用编辑器');
+  const state = await page.evaluate(() => ({
+    composer: Boolean(document.querySelector('.xns-modal .xns-preview-composer')),
+    focusedAction: document.activeElement?.dataset?.xnsAction || '',
+  }));
+  assert(state.composer, `键盘 Enter 应打开引用编辑器：${JSON.stringify(state)}`);
+  await page.close();
+});
+
 scenario('同一页面重复打开帖子命中短期缓存，手动刷新强制重抓', async (ctx) => {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/list`, { waitUntil: 'networkidle0' });

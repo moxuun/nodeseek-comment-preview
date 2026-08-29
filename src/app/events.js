@@ -15,6 +15,12 @@ function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPr
   }
 
   function handleKeydown(event) {
+    const menuItem = event.target.closest?.('.xns-preview-menu > .menu-item');
+    if (menuItem && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      menuItem.click();
+      return;
+    }
     if (event.key !== 'Escape') return;
     if (event.target.closest?.('textarea, input, [contenteditable="true"]')) return;
     if (state.lightbox) {

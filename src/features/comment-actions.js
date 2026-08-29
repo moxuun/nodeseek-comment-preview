@@ -92,14 +92,6 @@ function createCommentActions({
       }
       if (!item.hasAttribute('role')) item.setAttribute('role', 'button');
       if (!item.hasAttribute('tabindex')) item.tabIndex = 0;
-      if (item.dataset.xnsKeyBound !== 'true') {
-        item.dataset.xnsKeyBound = 'true';
-        item.addEventListener('keydown', (event) => {
-          if (event.key !== 'Enter' && event.key !== ' ') return;
-          event.preventDefault();
-          item.click();
-        });
-      }
     });
     const counts = options.counts || null;
     if (counts) {
