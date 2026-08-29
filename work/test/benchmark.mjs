@@ -19,6 +19,7 @@ if (baselineResult.status !== 0 || !baselineResult.stdout) {
 }
 const baselineScript = baselineResult.stdout;
 const runs = Math.max(3, Number(process.env.XNS_BENCH_RUNS || 5));
+const scenarioFilter = process.env.XNS_BENCH_FILTER || '';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -242,11 +243,34 @@ async function measure(browser, base, script, scenario) {
   }
   if (scenario.featureNodeCounter) {
     const featureNodes = await page.evaluate(() => ({
+      totalComments: document.querySelectorAll('.content-item').length,
+      remoteComments: document.querySelectorAll('.content-item[data-xns-remote]').length,
+      totalImages: document.querySelectorAll('img').length,
+      totalElements: document.querySelectorAll('*').length,
+      bodyHtmlBytes: document.body?.innerHTML.length || 0,
+      treeNodes: (() => {
+        const walker = document.createTreeWalker(document, NodeFilter.SHOW_ALL);
+        let count = 0;
+        while (walker.nextNode()) count += 1;
+        return count;
+      })(),
       remoteCodeButtons: document.querySelectorAll('[data-xns-remote] .xns-code-copy-btn').length,
+      totalPre: document.querySelectorAll('pre').length,
       remoteImagesBound: document.querySelectorAll('[data-xns-remote] img[data-xns-image-bound="true"]').length,
+      remoteImagesWithSrc: [...document.querySelectorAll('[data-xns-remote] img')].filter((image) => image.getAttribute('src')).length,
+      remoteImagesDeferred: document.querySelectorAll('[data-xns-remote] img[data-xns-deferred-src]').length,
     }));
     result.remoteCodeButtons = featureNodes.remoteCodeButtons;
+    result.totalComments = featureNodes.totalComments;
+    result.remoteComments = featureNodes.remoteComments;
+    result.totalImages = featureNodes.totalImages;
+    result.totalElements = featureNodes.totalElements;
+    result.bodyHtmlBytes = featureNodes.bodyHtmlBytes;
+    result.treeNodes = featureNodes.treeNodes;
+    result.totalPre = featureNodes.totalPre;
     result.remoteImagesBound = featureNodes.remoteImagesBound;
+    result.remoteImagesWithSrc = featureNodes.remoteImagesWithSrc;
+    result.remoteImagesDeferred = featureNodes.remoteImagesDeferred;
   }
   await page.close();
   return result;
@@ -264,6 +288,8 @@ const scenarios = [
   { name: '500 条富内容帖子页', kind: 'post', featureQueryCounter: true, featureNodeCounter: true, detachedMenuCounter: true, menuQueryCounter: true, postPath: '/post-460-1', expected: '500 条评论' },
   { name: '500 条富内容预览', kind: 'preview', featureQueryCounter: true, featureNodeCounter: true, listPath: '/list-460', postPath: '/post-460-1', expected: '500 条回复' },
 ];
+const selectedScenarios = scenarioFilter ? scenarios.filter((scenario) => scenario.name.includes(scenarioFilter)) : scenarios;
+if (!selectedScenarios.length) throw new Error(`没有匹配的 benchmark 场景：${scenarioFilter}`);
 
 const chromePath = findChrome();
 if (!chromePath) throw new Error('未找到 Chrome/Chromium，请设置 CHROME_PATH。');
@@ -280,7 +306,7 @@ try {
   console.log(`浏览器：${chromePath}`);
   console.log(`重复次数：${runs}`);
   console.log('单位：ms；首屏=脚本接管并显示当前内容，完成=目标内容全部就绪。');
-  for (const scenario of scenarios) {
+  for (const scenario of selectedScenarios) {
     const rows = { baseline: [], current: [] };
     for (const [label, script] of [['baseline', baselineScript], ['current', currentScript]]) {
       for (let index = 0; index < runs; index += 1) {
@@ -294,7 +320,7 @@ try {
       const featureText = values[0]?.featureQueries === undefined ? '' : ` | 增强查询 ${JSON.stringify(summary(values.map((item) => item.featureQueries)))}`;
       const menuText = values[0]?.detachedMenuItems === undefined ? '' : ` | 脱离文档菜单项 ${JSON.stringify(summary(values.map((item) => item.detachedMenuItems)))}`;
       const menuQueryText = values[0]?.menuQueries === undefined ? '' : ` | 菜单查询 ${JSON.stringify(summary(values.map((item) => item.menuQueries)))}`;
-      const nodeText = values[0]?.remoteCodeButtons === undefined ? '' : ` | 远端代码按钮 ${JSON.stringify(summary(values.map((item) => item.remoteCodeButtons)))} | 远端图片绑定 ${JSON.stringify(summary(values.map((item) => item.remoteImagesBound)))}`;
+      const nodeText = values[0]?.remoteCodeButtons === undefined ? '' : ` | 评论 ${JSON.stringify(summary(values.map((item) => item.totalComments)))}（远端 ${JSON.stringify(summary(values.map((item) => item.remoteComments)))}） | 图片 ${JSON.stringify(summary(values.map((item) => item.totalImages)))} | pre ${JSON.stringify(summary(values.map((item) => item.totalPre)))} | 元素 ${JSON.stringify(summary(values.map((item) => item.totalElements)))} | DOM遍历节点 ${JSON.stringify(summary(values.map((item) => item.treeNodes)))} | HTML ${JSON.stringify(summary(values.map((item) => item.bodyHtmlBytes)))}字节 | 远端代码按钮 ${JSON.stringify(summary(values.map((item) => item.remoteCodeButtons)))} | 远端图片绑定 ${JSON.stringify(summary(values.map((item) => item.remoteImagesBound)))} | 远端图片有源 ${JSON.stringify(summary(values.map((item) => item.remoteImagesWithSrc)))} | 远端图片待恢复 ${JSON.stringify(summary(values.map((item) => item.remoteImagesDeferred)))}`;
       console.log(`${label.padEnd(8)} 首屏 ${JSON.stringify(summary(values.map((item) => item.first)))} | 完成 ${JSON.stringify(summary(values.map((item) => item.complete)))} | 总计 ${JSON.stringify(summary(values.map((item) => item.total)))} | JS堆 ${JSON.stringify(summary(values.map((item) => item.jsHeapUsedMB)))}MB | DOM ${JSON.stringify(summary(values.map((item) => item.domNodes)))} | Document ${JSON.stringify(summary(values.map((item) => item.documents)))}${featureText}${menuText}${menuQueryText}${nodeText} | 请求 ${values.map((item) => `${item.postGets}页/${item.voteGets}投票`).join(', ')}`);
     }
     const before = summary(rows.baseline.map((item) => item.complete)).median;

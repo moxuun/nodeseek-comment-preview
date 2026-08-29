@@ -419,7 +419,10 @@ function sanitizeImportedNode(sourceNode, options = {}) {
         const urlName = name === 'poster' ? 'src' : name === 'xlink:href' ? 'href' : name;
         const safeValue = safeFragment ? attribute.value : getSafeUrlAttribute(urlName, attribute.value);
         if (!safeValue) node.removeAttribute(attribute.name);
-        else node.setAttribute(attribute.name, safeValue);
+        else if (options.deferImages && node.localName === 'img' && name === 'src') {
+          node.setAttribute('data-xns-deferred-src', safeValue);
+          node.removeAttribute(attribute.name);
+        } else node.setAttribute(attribute.name, safeValue);
       }
     });
     if (node.localName === 'a' && (node.hasAttribute('href') || node.hasAttribute('xlink:href'))) {
@@ -472,7 +475,7 @@ function getCommentAuthorUid(item) {
 function getCommentRecord(item, postId, page, index, current, options = {}) {
   const floor = getFloor(item);
   if (floor === null) return null;
-  const node = current ? item : sanitizeImportedNode(item, options);
+  const node = current ? item : sanitizeImportedNode(item, { ...options, deferImages: true });
   if (!node) return null;
   const commentId = getCommentId(item);
   const currentUserUid = typeof options.getCurrentUserUid === 'function' ? options.getCurrentUserUid() : getCurrentUserUid();
@@ -1998,6 +2001,11 @@ function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createE
       if (options.skipRemote && (image.matches?.('[data-xns-remote]') || image.closest?.('[data-xns-remote]'))) return false;
       return true;
     }).forEach((image) => {
+      const deferredSource = image.getAttribute('data-xns-deferred-src');
+      if (deferredSource) {
+        if (!image.getAttribute('src')) image.setAttribute('src', deferredSource);
+        image.removeAttribute('data-xns-deferred-src');
+      }
       if (image.dataset.xnsImageBound === 'true') return;
       image.dataset.xnsImageBound = 'true';
       image.setAttribute('tabindex', '0');

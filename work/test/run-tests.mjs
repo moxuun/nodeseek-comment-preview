@@ -507,6 +507,28 @@ scenario('帖子页远端内容增强功能保留', async (ctx) => {
   await page.close();
 });
 
+scenario('远端评论图片进入视口后才恢复源地址', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.goto(`${ctx.base}/post-460-1`, { waitUntil: 'domcontentloaded' });
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '500 条评论', 30_000, '富内容长帖加载完成');
+  const before = await page.evaluate(() => {
+    const images = [...document.querySelectorAll('.comment-container [data-xns-remote] img')];
+    return {
+      total: images.length,
+      withSrc: images.filter((image) => image.getAttribute('src')).length,
+      deferred: images.filter((image) => image.getAttribute('data-xns-deferred-src')).length,
+    };
+  });
+  assert(before.total > 0, `远端评论应包含图片，实际 ${JSON.stringify(before)}`);
+  assert(before.deferred > 0 && before.withSrc < before.total, `远端图片首屏应延迟恢复源地址：${JSON.stringify(before)}`);
+  await page.evaluate(() => document.querySelector('.comment-container [data-xns-remote][data-xns-floor="500"]')?.scrollIntoView({ block: 'center' }));
+  await waitFor(page, () => {
+    const image = document.querySelector('.comment-container [data-xns-remote][data-xns-floor="500"] img');
+    return Boolean(image?.getAttribute('src') && image.dataset.xnsImageBound === 'true');
+  }, 5_000, '远端图片进入视口后恢复');
+  await page.close();
+});
+
 scenario('富内容远端评论滚动后仍能增强根节点', async (ctx) => {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/post-460-1`, { waitUntil: 'networkidle0' });
