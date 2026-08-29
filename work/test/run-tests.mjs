@@ -333,7 +333,7 @@ scenario('长帖分页截断明示（0.5.13 回归）', async (ctx) => {
   await page.close();
 });
 
-scenario('长帖内容增强只扫描一次评论根节点', async (ctx) => {
+scenario('长帖内容增强按可视远端评论执行', async (ctx) => {
   const page = await ctx.newPage();
   await installFeatureQueryCounter(page);
   await page.goto(`${ctx.base}/post-456-1`, { waitUntil: 'networkidle0' });
@@ -343,7 +343,7 @@ scenario('长帖内容增强只扫描一次评论根节点', async (ctx) => {
     return /只读取了前/.test(status) && items === 50;
   }, 30_000, '长帖内容增强扫描完成');
   const stats = await page.evaluate(() => window.__xnsFeatureQueryStats);
-  assert(stats.count === 6, `长帖应只执行一轮 6 组内容增强查询，实际 ${stats.count} 次：${JSON.stringify(stats.selectors)}`);
+  assert(stats.count < 6 * 49, `首屏不应一次处理全部 49 个远端评论，实际执行 ${stats.count} 次：${JSON.stringify(stats.selectors)}`);
   await page.close();
 });
 
@@ -495,12 +495,36 @@ scenario('关闭预览会取消未完成的远端分页请求', async (ctx) => {
 
 scenario('帖子页远端内容增强功能保留', async (ctx) => {
   const page = await openPostPage(ctx);
+  await waitFor(page, () => document.querySelector('.comment-container [data-xns-remote] pre'), 5_000, '远端代码块出现');
+  await page.evaluate(() => document.querySelector('.comment-container [data-xns-remote] pre')?.scrollIntoView({ block: 'center' }));
+  await waitFor(page, () => document.querySelectorAll('.comment-container [data-xns-remote] .xns-code-copy-btn').length === 1, 5_000, '远端代码块增强');
   const state = await page.evaluate(() => ({
     remoteCodeBlocks: document.querySelectorAll('.comment-container [data-xns-remote] pre').length,
     remoteCopyButtons: document.querySelectorAll('.comment-container [data-xns-remote] .xns-code-copy-btn').length,
   }));
   assert(state.remoteCodeBlocks === 1, `远端评论应保留 1 个代码块，实际 ${state.remoteCodeBlocks}`);
   assert(state.remoteCopyButtons === 1, `远端代码块应保留 1 个复制按钮，实际 ${state.remoteCopyButtons}`);
+  await page.close();
+});
+
+scenario('富内容远端评论滚动后仍能增强根节点', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.goto(`${ctx.base}/post-460-1`, { waitUntil: 'networkidle0' });
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '500 条评论', 30_000, '富内容长帖加载完成');
+  const before = await page.evaluate(() => ({
+    remoteCodeBlocks: document.querySelectorAll('.comment-container [data-xns-remote] pre').length,
+    remoteCopyButtons: document.querySelectorAll('.comment-container [data-xns-remote] .xns-code-copy-btn').length,
+  }));
+  assert(before.remoteCodeBlocks > 0, `富内容长帖应包含远端代码块，实际 ${JSON.stringify(before)}`);
+  await page.evaluate(() => document.querySelector('.comment-container [data-xns-remote] pre')?.scrollIntoView({ block: 'center' }));
+  await waitFor(page, () => Boolean(document.querySelector('.comment-container [data-xns-remote] pre .xns-code-copy-btn')), 5_000, '滚动后增强远端根评论');
+  const after = await page.evaluate(() => ({
+    remoteCodeBlocks: document.querySelectorAll('.comment-container [data-xns-remote] pre').length,
+    remoteCopyButtons: document.querySelectorAll('.comment-container [data-xns-remote] .xns-code-copy-btn').length,
+    remoteImagesBound: document.querySelectorAll('.comment-container [data-xns-remote] img[data-xns-image-bound="true"]').length,
+  }));
+  assert(after.remoteCopyButtons > before.remoteCopyButtons, `滚动后应增强远端根评论代码块：${JSON.stringify({ before, after })}`);
+  assert(after.remoteImagesBound > 0, `滚动后应增强远端根评论图片：${JSON.stringify(after)}`);
   await page.close();
 });
 

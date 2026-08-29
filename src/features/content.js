@@ -115,12 +115,27 @@ function createContentFeatures({
     code.dataset.xnsAnsiRendered = 'true';
   }
 
+  function queryPreviewContent(root, selector) {
+    if (!root) return [];
+    if (root.matches?.('.xns-preview-content')) {
+      const relativeSelector = selector
+        .split(',')
+        .map((part) => part.trim().replace(/^\.xns-preview-content\s+/, ''))
+        .join(', ');
+      return qsa(root, relativeSelector);
+    }
+    const matches = [];
+    if (root.matches?.(selector)) matches.push(root);
+    matches.push(...qsa(root, selector));
+    return matches;
+  }
+
   function installPreviewAnsiBlocks(root) {
-    qsa(root, '.xns-preview-content pre').forEach(renderAnsiCodeBlock);
+    queryPreviewContent(root, '.xns-preview-content pre').forEach(renderAnsiCodeBlock);
   }
 
   function installPreviewMagicTabs(root) {
-    qsa(root, '.xns-preview-content .nsk-magic-tabs').forEach((tabs) => {
+    queryPreviewContent(root, '.xns-preview-content .nsk-magic-tabs').forEach((tabs) => {
       if (tabs.dataset.xnsMagicTabsBound === 'true') return;
       const titles = qsa(tabs, ':scope > .nsk-magic-tab-title');
       const bodies = qsa(tabs, ':scope > .nsk-magic-tab-body');
@@ -163,9 +178,7 @@ function createContentFeatures({
 
   function installPreviewMarkdownTabs(root) {
     const selector = '.xns-preview-content .post-content, .xns-preview-content article.post-content';
-    const contents = [];
-    if (root?.matches?.(selector)) contents.push(root);
-    contents.push(...qsa(root, selector));
+    const contents = queryPreviewContent(root, selector);
     contents.forEach((content) => {
       if (content.dataset.xnsTabsBound === 'true') return;
       const children = Array.from(content.children);
@@ -261,7 +274,7 @@ function createContentFeatures({
   }
 
   function installPreviewCodeBlocks(root) {
-    qsa(root, '.xns-preview-content pre').forEach((pre) => {
+    queryPreviewContent(root, '.xns-preview-content pre').forEach((pre) => {
       if (pre.dataset.xnsCodeBound === 'true') return;
       const code = qs(pre, ':scope > code') || qs(pre, 'code');
       if (!code) return;

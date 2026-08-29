@@ -41,6 +41,7 @@ function createPostPageController({
       this.loadingNode = null;
       this.loading = false;
       this.hasRemotePages = false;
+      this.remoteFeatureObserver = null;
       this.generation = 0;
       this.composer = null;
       this.requestController = null;
@@ -198,6 +199,33 @@ function createPostPageController({
       this.records = Array.from(unique.values());
     }
 
+    scheduleRemoteFeatures() {
+      this.remoteFeatureObserver?.disconnect();
+      this.remoteFeatureObserver = null;
+      if (!this.list) return;
+      const remoteItems = qsa(this.list, '.content-item[data-xns-remote]');
+      if (!remoteItems.length) return;
+      if (typeof windowObj.IntersectionObserver !== 'function') {
+        installPreviewFeatures(this.list);
+        return;
+      }
+      const pending = new Set(remoteItems);
+      const observer = new windowObj.IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting || !pending.has(entry.target)) return;
+          pending.delete(entry.target);
+          observer.unobserve(entry.target);
+          installPreviewFeatures(entry.target);
+        });
+        if (!pending.size) {
+          observer.disconnect();
+          if (this.remoteFeatureObserver === observer) this.remoteFeatureObserver = null;
+        }
+      }, { rootMargin: '0px' });
+      remoteItems.forEach((item) => observer.observe(item));
+      this.remoteFeatureObserver = observer;
+    }
+
     collectRemoteRecords(root, page) {
       const state = getDocState(root);
       return getCommentItems(root)
@@ -247,7 +275,7 @@ function createPostPageController({
       });
       // 内容特性会各自查询图片、代码块、标签页和投票链接。以评论列表为根一次扫描，
       // 避免父楼层包含子楼层时反复遍历同一棵 DOM；当前页原生节点不带此标记，不会被改写。
-      if (remoteRecords.length) installPreviewFeatures(this.list);
+      if (remoteRecords.length) this.scheduleRemoteFeatures();
       const loadedPages = this.loadedPages;
       const loading = this.loading || options.progressive;
       let status = this.failedPages.length
@@ -262,6 +290,8 @@ function createPostPageController({
 
     restoreOriginal() {
       if (!this.list) return;
+      this.remoteFeatureObserver?.disconnect();
+      this.remoteFeatureObserver = null;
       qsa(this.list, '.xns-reply-list, .xns-remote-note').forEach((node) => node.remove());
       this.originalChildren.forEach(stripRenderArtifacts);
       while (this.list.firstChild) this.list.removeChild(this.list.firstChild);

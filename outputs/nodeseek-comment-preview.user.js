@@ -1761,7 +1761,14 @@ function createVoteFeature({
   }
 
   function installPreviewVotePanels(root) {
-    qsa(root, '.xns-preview-content a[data-href^="nsapp://vote"], .xns-preview-content a[href^="nsapp://vote"]').forEach((link) => {
+    const selector = '.xns-preview-content a[data-href^="nsapp://vote"], .xns-preview-content a[href^="nsapp://vote"]';
+    const relativeSelector = root?.matches?.('.xns-preview-content')
+      ? 'a[data-href^="nsapp://vote"], a[href^="nsapp://vote"]'
+      : selector;
+    const links = [];
+    if (root?.matches?.(selector)) links.push(root);
+    links.push(...qsa(root, relativeSelector));
+    links.forEach((link) => {
       if (link.dataset.xnsVoteBound === 'true') return;
       const voteId = getVoteIdFromLink(link);
       if (voteId === null) return;
@@ -1964,7 +1971,11 @@ function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createE
   }
 
   function installPreviewImageFallback(root) {
-    qsa(root, '.xns-preview-content img').forEach((image) => {
+    const selector = root?.matches?.('.xns-preview-content') ? 'img' : '.xns-preview-content img';
+    const images = [];
+    if (root?.matches?.('.xns-preview-content img')) images.push(root);
+    images.push(...qsa(root, selector));
+    images.forEach((image) => {
       if (image.dataset.xnsImageBound === 'true') return;
       image.dataset.xnsImageBound = 'true';
       image.setAttribute('tabindex', '0');
@@ -2233,12 +2244,27 @@ function createContentFeatures({
     code.dataset.xnsAnsiRendered = 'true';
   }
 
+  function queryPreviewContent(root, selector) {
+    if (!root) return [];
+    if (root.matches?.('.xns-preview-content')) {
+      const relativeSelector = selector
+        .split(',')
+        .map((part) => part.trim().replace(/^\.xns-preview-content\s+/, ''))
+        .join(', ');
+      return qsa(root, relativeSelector);
+    }
+    const matches = [];
+    if (root.matches?.(selector)) matches.push(root);
+    matches.push(...qsa(root, selector));
+    return matches;
+  }
+
   function installPreviewAnsiBlocks(root) {
-    qsa(root, '.xns-preview-content pre').forEach(renderAnsiCodeBlock);
+    queryPreviewContent(root, '.xns-preview-content pre').forEach(renderAnsiCodeBlock);
   }
 
   function installPreviewMagicTabs(root) {
-    qsa(root, '.xns-preview-content .nsk-magic-tabs').forEach((tabs) => {
+    queryPreviewContent(root, '.xns-preview-content .nsk-magic-tabs').forEach((tabs) => {
       if (tabs.dataset.xnsMagicTabsBound === 'true') return;
       const titles = qsa(tabs, ':scope > .nsk-magic-tab-title');
       const bodies = qsa(tabs, ':scope > .nsk-magic-tab-body');
@@ -2281,9 +2307,7 @@ function createContentFeatures({
 
   function installPreviewMarkdownTabs(root) {
     const selector = '.xns-preview-content .post-content, .xns-preview-content article.post-content';
-    const contents = [];
-    if (root?.matches?.(selector)) contents.push(root);
-    contents.push(...qsa(root, selector));
+    const contents = queryPreviewContent(root, selector);
     contents.forEach((content) => {
       if (content.dataset.xnsTabsBound === 'true') return;
       const children = Array.from(content.children);
@@ -2379,7 +2403,7 @@ function createContentFeatures({
   }
 
   function installPreviewCodeBlocks(root) {
-    qsa(root, '.xns-preview-content pre').forEach((pre) => {
+    queryPreviewContent(root, '.xns-preview-content pre').forEach((pre) => {
       if (pre.dataset.xnsCodeBound === 'true') return;
       const code = qs(pre, ':scope > code') || qs(pre, 'code');
       if (!code) return;
@@ -2886,6 +2910,7 @@ function createPostPageController({
       this.loadingNode = null;
       this.loading = false;
       this.hasRemotePages = false;
+      this.remoteFeatureObserver = null;
       this.generation = 0;
       this.composer = null;
       this.requestController = null;
@@ -3043,6 +3068,33 @@ function createPostPageController({
       this.records = Array.from(unique.values());
     }
 
+    scheduleRemoteFeatures() {
+      this.remoteFeatureObserver?.disconnect();
+      this.remoteFeatureObserver = null;
+      if (!this.list) return;
+      const remoteItems = qsa(this.list, '.content-item[data-xns-remote]');
+      if (!remoteItems.length) return;
+      if (typeof windowObj.IntersectionObserver !== 'function') {
+        installPreviewFeatures(this.list);
+        return;
+      }
+      const pending = new Set(remoteItems);
+      const observer = new windowObj.IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting || !pending.has(entry.target)) return;
+          pending.delete(entry.target);
+          observer.unobserve(entry.target);
+          installPreviewFeatures(entry.target);
+        });
+        if (!pending.size) {
+          observer.disconnect();
+          if (this.remoteFeatureObserver === observer) this.remoteFeatureObserver = null;
+        }
+      }, { rootMargin: '0px' });
+      remoteItems.forEach((item) => observer.observe(item));
+      this.remoteFeatureObserver = observer;
+    }
+
     collectRemoteRecords(root, page) {
       const state = getDocState(root);
       return getCommentItems(root)
@@ -3092,7 +3144,7 @@ function createPostPageController({
       });
       // 内容特性会各自查询图片、代码块、标签页和投票链接。以评论列表为根一次扫描，
       // 避免父楼层包含子楼层时反复遍历同一棵 DOM；当前页原生节点不带此标记，不会被改写。
-      if (remoteRecords.length) installPreviewFeatures(this.list);
+      if (remoteRecords.length) this.scheduleRemoteFeatures();
       const loadedPages = this.loadedPages;
       const loading = this.loading || options.progressive;
       let status = this.failedPages.length
@@ -3107,6 +3159,8 @@ function createPostPageController({
 
     restoreOriginal() {
       if (!this.list) return;
+      this.remoteFeatureObserver?.disconnect();
+      this.remoteFeatureObserver = null;
       qsa(this.list, '.xns-reply-list, .xns-remote-note').forEach((node) => node.remove());
       this.originalChildren.forEach(stripRenderArtifacts);
       while (this.list.firstChild) this.list.removeChild(this.list.firstChild);

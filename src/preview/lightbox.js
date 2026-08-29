@@ -121,7 +121,11 @@ function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createE
   }
 
   function installPreviewImageFallback(root) {
-    qsa(root, '.xns-preview-content img').forEach((image) => {
+    const selector = root?.matches?.('.xns-preview-content') ? 'img' : '.xns-preview-content img';
+    const images = [];
+    if (root?.matches?.('.xns-preview-content img')) images.push(root);
+    images.push(...qsa(root, selector));
+    images.forEach((image) => {
       if (image.dataset.xnsImageBound === 'true') return;
       image.dataset.xnsImageBound = 'true';
       image.setAttribute('tabindex', '0');

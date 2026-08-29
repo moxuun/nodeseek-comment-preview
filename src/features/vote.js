@@ -134,7 +134,14 @@ function createVoteFeature({
   }
 
   function installPreviewVotePanels(root) {
-    qsa(root, '.xns-preview-content a[data-href^="nsapp://vote"], .xns-preview-content a[href^="nsapp://vote"]').forEach((link) => {
+    const selector = '.xns-preview-content a[data-href^="nsapp://vote"], .xns-preview-content a[href^="nsapp://vote"]';
+    const relativeSelector = root?.matches?.('.xns-preview-content')
+      ? 'a[data-href^="nsapp://vote"], a[href^="nsapp://vote"]'
+      : selector;
+    const links = [];
+    if (root?.matches?.(selector)) links.push(root);
+    links.push(...qsa(root, relativeSelector));
+    links.forEach((link) => {
       if (link.dataset.xnsVoteBound === 'true') return;
       const voteId = getVoteIdFromLink(link);
       if (voteId === null) return;

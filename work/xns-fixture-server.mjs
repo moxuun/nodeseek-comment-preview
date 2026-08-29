@@ -102,6 +102,19 @@ function indexedCommentsList() {
   return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Fixture indexed comments list</title></head><body><main><ul class="post-list"><li class="post-list-item"><div class="post-title"><a href="/post-128-1">统计索引测试帖</a></div></li></ul></main><script src="/outputs/nodeseek-comment-preview.user.js"></script></body></html>';
 }
 
+function richLongPage(postId, page) {
+  const pageCount = 50;
+  const commentsPerPage = 10;
+  const linkAt = (target) => `<a class="pager-pos${target === page ? ' pager-cur' : ''}" href="/post-${postId}-${target}">${target}</a>`;
+  const pager = [1, 2, pageCount].map(linkAt).join('');
+  const items = Array.from({ length: commentsPerPage }, (_, index) => {
+    const floor = (page - 1) * commentsPerPage + index + 1;
+    const code = index % 5 === 0 ? `<pre><code>console.log('comment-${floor}');</code></pre>` : '';
+    return `<li id="${floor}" data-comment-id="${postId}${floor}" class="content-item"><div class="nsk-content-meta-info"><a href="/space/${floor}">U${floor}</a></div><article class="post-content"><p>第 ${floor} 条富内容评论。</p><img src="/test.png" alt="图片 ${floor}">${code}</article></li>`;
+  }).join('');
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Fixture rich long post ${postId} page ${page}</title></head><body><div class="nsk-post"><div class="content-item" id="0"><h1 class="post-title">富内容长帖 Fixture</h1><article class="post-content"><p>用于验证大量远端评论的按视口增强。</p></article></div></div><div class="comment-container"><div class="nsk-pager post-top-pager">${pager}</div><ul class="comments">${items}</ul><div class="nsk-pager post-bottom-pager">${pager}</div></div><script src="/outputs/nodeseek-comment-preview.user.js"></script></body></html>`;
+}
+
 function delayedPostList(postId) {
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Fixture delayed post list</title></head><body><main><ul class="post-list"><li class="post-list-item"><div class="post-title"><a href="/post-${postId}-1">延迟分页测试帖</a></div></li></ul></main><script src="/outputs/nodeseek-comment-preview.user.js"></script></body></html>`;
 }
@@ -197,6 +210,18 @@ const server = http.createServer((req, res) => {
   if (pathname === '/post-128-1') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(indexedCommentsPage());
+    return;
+  }
+  const richLongMatch = /^\/post-460-(\d+)$/.exec(pathname);
+  if (richLongMatch) {
+    const page = Number(richLongMatch[1]);
+    if (page < 1 || page > 50) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('not found');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(richLongPage(460, page));
     return;
   }
   if (pathname === '/test/retry-state') {
