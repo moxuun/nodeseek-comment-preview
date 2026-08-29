@@ -211,6 +211,10 @@ async function measure(browser, base, script, scenario) {
     if (scenario.after === 'original') {
       await page.click('.xns-post-toolbar [data-mode="original"]');
       await page.waitForFunction(() => !document.querySelector('.xns-post-toolbar [data-mode="original"]')?.getAttribute('aria-pressed') || document.querySelector('.xns-post-toolbar [data-mode="original"]')?.getAttribute('aria-pressed') === 'true');
+    } else if (scenario.after === 'thread-rerender') {
+      await page.click('.xns-post-toolbar [data-mode="thread"]');
+      await page.waitForFunction(() => document.querySelector('.xns-post-toolbar [data-mode="thread"]')?.getAttribute('aria-pressed') === 'true');
+      await waitForPostComplete(page, scenario.expected);
     }
   }
   const result = {
@@ -256,6 +260,7 @@ const scenarios = [
   { name: '120 条评论帖子页', kind: 'post', postPath: '/post-128-1', expected: '120 条评论' },
   { name: '50 页帖子页', kind: 'post', postPath: '/post-456-1', expected: '50 条评论' },
   { name: '50 页帖子页切换原版', kind: 'post', after: 'original', postPath: '/post-456-1', expected: '50 条评论' },
+  { name: '50 页帖子页楼中楼重绘', kind: 'post', after: 'thread-rerender', postPath: '/post-456-1', expected: '50 条评论' },
   { name: '500 条富内容帖子页', kind: 'post', featureQueryCounter: true, featureNodeCounter: true, detachedMenuCounter: true, menuQueryCounter: true, postPath: '/post-460-1', expected: '500 条评论' },
   { name: '500 条富内容预览', kind: 'preview', featureQueryCounter: true, featureNodeCounter: true, listPath: '/list-460', postPath: '/post-460-1', expected: '500 条回复' },
 ];

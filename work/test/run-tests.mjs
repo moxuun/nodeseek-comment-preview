@@ -739,6 +739,17 @@ scenario('预览菜单键盘操作使用全局事件代理', async (ctx) => {
   await page.close();
 });
 
+scenario('楼中楼重绘复用远端评论节点', async (ctx) => {
+  const page = await openPostPage(ctx);
+  await page.evaluate(() => {
+    const remote = document.querySelector('.comment-container .content-item[data-xns-remote][data-xns-floor="4"]');
+    remote?.setAttribute('data-xns-reuse-marker', 'true');
+  });
+  await page.click('.xns-post-toolbar [data-mode="thread"]');
+  await waitFor(page, () => Boolean(document.querySelector('.comment-container .content-item[data-xns-reuse-marker="true"]')), 5_000, '复用远端评论节点');
+  await page.close();
+});
+
 scenario('同一页面重复打开帖子命中短期缓存，手动刷新强制重抓', async (ctx) => {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/list`, { waitUntil: 'networkidle0' });

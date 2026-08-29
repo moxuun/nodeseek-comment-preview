@@ -260,7 +260,7 @@ function createPostPageController({
 
     render(options = {}) {
       if (!this.list || appState.mode !== 'thread') return;
-      this.restoreOriginal();
+      this.restoreOriginal({ releaseRemote: false });
       const recordNodes = new Set(this.records.map((record) => record.node).filter(Boolean));
       const fragment = documentObj.createDocumentFragment();
       Array.from(this.list.childNodes).forEach((node) => {
@@ -288,7 +288,7 @@ function createPostPageController({
       this.updateToolbar();
     }
 
-    restoreOriginal() {
+    restoreOriginal(options = {}) {
       if (!this.list) return;
       this.remoteFeatureObserver?.disconnect();
       this.remoteFeatureObserver = null;
@@ -296,7 +296,7 @@ function createPostPageController({
       this.originalChildren.forEach(stripRenderArtifacts);
       while (this.list.firstChild) this.list.removeChild(this.list.firstChild);
       this.originalChildren.forEach((node) => this.list.appendChild(node));
-      this.records.forEach(releaseCommentNode);
+      if (options.releaseRemote !== false) this.records.forEach(releaseCommentNode);
       this.statusNode?.remove();
       this.statusNode = null;
       this.updateToolbar();
