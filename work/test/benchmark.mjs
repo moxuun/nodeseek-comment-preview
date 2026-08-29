@@ -168,6 +168,17 @@ async function measure(browser, base, script, scenario) {
       window.__xnsDetachedMenuBenchStats = stats;
     });
   }
+  if (scenario.menuQueryCounter) {
+    await page.evaluateOnNewDocument(() => {
+      const stats = { count: 0 };
+      const original = Element.prototype.querySelectorAll;
+      Element.prototype.querySelectorAll = function patchedMenuQuerySelectorAll(selector) {
+        if (String(selector) === ':scope > .menu-item') stats.count += 1;
+        return original.call(this, selector);
+      };
+      window.__xnsMenuQueryBenchStats = stats;
+    });
+  }
   let started = performance.now();
   let first;
   let complete;
@@ -222,6 +233,9 @@ async function measure(browser, base, script, scenario) {
   if (scenario.detachedMenuCounter) {
     result.detachedMenuItems = await page.evaluate(() => window.__xnsDetachedMenuBenchStats?.count ?? 0);
   }
+  if (scenario.menuQueryCounter) {
+    result.menuQueries = await page.evaluate(() => window.__xnsMenuQueryBenchStats?.count ?? 0);
+  }
   await page.close();
   return result;
 }
@@ -234,7 +248,7 @@ const scenarios = [
   { name: '120 条评论帖子页', kind: 'post', postPath: '/post-128-1', expected: '120 条评论' },
   { name: '50 页帖子页', kind: 'post', postPath: '/post-456-1', expected: '50 条评论' },
   { name: '50 页帖子页切换原版', kind: 'post', after: 'original', postPath: '/post-456-1', expected: '50 条评论' },
-  { name: '500 条富内容帖子页', kind: 'post', featureQueryCounter: true, detachedMenuCounter: true, postPath: '/post-460-1', expected: '500 条评论' },
+  { name: '500 条富内容帖子页', kind: 'post', featureQueryCounter: true, detachedMenuCounter: true, menuQueryCounter: true, postPath: '/post-460-1', expected: '500 条评论' },
 ];
 
 const chromePath = findChrome();
@@ -265,7 +279,8 @@ try {
       const values = rows[label];
       const featureText = values[0]?.featureQueries === undefined ? '' : ` | 增强查询 ${JSON.stringify(summary(values.map((item) => item.featureQueries)))}`;
       const menuText = values[0]?.detachedMenuItems === undefined ? '' : ` | 脱离文档菜单项 ${JSON.stringify(summary(values.map((item) => item.detachedMenuItems)))}`;
-      console.log(`${label.padEnd(8)} 首屏 ${JSON.stringify(summary(values.map((item) => item.first)))} | 完成 ${JSON.stringify(summary(values.map((item) => item.complete)))} | 总计 ${JSON.stringify(summary(values.map((item) => item.total)))} | JS堆 ${JSON.stringify(summary(values.map((item) => item.jsHeapUsedMB)))}MB | DOM ${JSON.stringify(summary(values.map((item) => item.domNodes)))} | Document ${JSON.stringify(summary(values.map((item) => item.documents)))}${featureText}${menuText} | 请求 ${values.map((item) => `${item.postGets}页/${item.voteGets}投票`).join(', ')}`);
+      const menuQueryText = values[0]?.menuQueries === undefined ? '' : ` | 菜单查询 ${JSON.stringify(summary(values.map((item) => item.menuQueries)))}`;
+      console.log(`${label.padEnd(8)} 首屏 ${JSON.stringify(summary(values.map((item) => item.first)))} | 完成 ${JSON.stringify(summary(values.map((item) => item.complete)))} | 总计 ${JSON.stringify(summary(values.map((item) => item.total)))} | JS堆 ${JSON.stringify(summary(values.map((item) => item.jsHeapUsedMB)))}MB | DOM ${JSON.stringify(summary(values.map((item) => item.domNodes)))} | Document ${JSON.stringify(summary(values.map((item) => item.documents)))}${featureText}${menuText}${menuQueryText} | 请求 ${values.map((item) => `${item.postGets}页/${item.voteGets}投票`).join(', ')}`);
     }
     const before = summary(rows.baseline.map((item) => item.complete)).median;
     const after = summary(rows.current.map((item) => item.complete)).median;

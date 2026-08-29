@@ -1077,6 +1077,7 @@ function createCommentActions({
     ['quote', '引用', '❝', false],
     ['reply', '回复', '↩', false],
   ];
+  const MENU_ITEMS_SELECTOR = ':scope > .menu-item';
 
   function getDirectCommentMenu(comment) {
     return Array.from(comment?.children || []).find((child) => child.matches?.('.comment-menu, .comment-actions')) || null;
@@ -1131,16 +1132,28 @@ function createCommentActions({
     if (!menu) {
       menu = createPreviewMenu(includeFavorite);
       comment.appendChild(menu);
-    } else {
-      menu.classList.add('comment-menu', 'xns-preview-menu');
-      if (!includeFavorite) qsa(menu, ':scope > .menu-item').filter((item) => getMenuActionKey(item) === 'favorite').forEach((item) => item.remove());
-      const existingActions = new Set(qsa(menu, ':scope > .menu-item').map(getMenuActionKey).filter(Boolean));
-      PREVIEW_ACTIONS
-        .filter(([key]) => includeFavorite || key !== 'favorite')
-        .filter(([key]) => !existingActions.has(key))
-        .forEach((action) => menu.appendChild(createPreviewMenuItem(action)));
     }
-    qsa(menu, ':scope > .menu-item').forEach((item) => {
+    menu.classList.add('comment-menu', 'xns-preview-menu');
+    let menuItems = qsa(menu, MENU_ITEMS_SELECTOR);
+    if (!includeFavorite) {
+      menuItems = menuItems.filter((item) => {
+        if (getMenuActionKey(item) === 'favorite') {
+          item.remove();
+          return false;
+        }
+        return true;
+      });
+    }
+    const existingActions = new Set(menuItems.map(getMenuActionKey).filter(Boolean));
+    PREVIEW_ACTIONS
+      .filter(([key]) => includeFavorite || key !== 'favorite')
+      .filter(([key]) => !existingActions.has(key))
+      .forEach((action) => {
+        const item = createPreviewMenuItem(action);
+        menu.appendChild(item);
+        menuItems.push(item);
+      });
+    menuItems.forEach((item) => {
       const action = getMenuActionKey(item);
       if (action) {
         item.dataset.xnsAction = action;
@@ -1151,7 +1164,7 @@ function createCommentActions({
     });
     const counts = options.counts || null;
     if (counts) {
-      qsa(menu, ':scope > .menu-item').forEach((item) => {
+      menuItems.forEach((item) => {
         const action = getMenuActionKey(item);
         const value = counts[action];
         const countNode = qs(item, ':scope > .xns-action-count') || getMenuCountElement(item);
