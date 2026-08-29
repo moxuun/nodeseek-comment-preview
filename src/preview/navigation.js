@@ -1,7 +1,14 @@
 // 楼层导航：只拦截当前帖子的楼层链接，并负责滚动与高亮。
 function createFloorNavigation({ windowObj, documentObj, selectors, enabled, parseSameOriginUrl, getPostInfo, safePositiveInt }) {
   function scrollToFloor(floor) {
-    const target = documentObj.querySelector(`[data-xns-floor="${CSS.escape(String(floor))}"]`);
+    let target = documentObj.querySelector(`[data-xns-floor="${CSS.escape(String(floor))}"]`);
+    if (!target) {
+      const virtualLists = Array.from(documentObj.querySelectorAll('.xns-virtual-list'));
+      for (const list of virtualLists) {
+        target = list.__xnsVirtualizer?.scrollToFloor(floor) || null;
+        if (target) break;
+      }
+    }
     if (!target) return false;
     target.scrollIntoView({ behavior: 'smooth', block: 'center' });
     target.classList.remove('xns-floor-highlight');

@@ -17,11 +17,12 @@ function createPreviewRenderer({
   safeCount,
   sanitizeImportedNode,
   materializeCommentNode,
-  releaseCommentHtml,
   getDirectCommentMenu,
   ensurePreviewMenu,
   stripRenderArtifacts,
   buildReplyTree,
+  flattenReplyTree,
+  createCommentVirtualizer,
   addRemoteNote,
 }) {
   function ensurePreviewEditOption(node, record) {
@@ -63,6 +64,8 @@ function createPreviewRenderer({
       node.setAttribute('data-xns-remote', 'true');
       node.setAttribute('data-xns-source-page', String(record.page));
     }
+    node.setAttribute('data-xns-depth', String(depth));
+    node.style.setProperty('--xns-indent', `${Math.min(8, Math.max(0, depth)) * 18}px`);
     node.classList.add(depth === 0 ? 'xns-comment-root' : 'xns-comment-child');
     if (depth > 0 && record.parent) node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
     ensurePreviewMenu(node, { includeFavorite: false, counts: record.counts || undefined });
@@ -113,18 +116,42 @@ function createPreviewRenderer({
     const thread = qs(section, ':scope > .xns-preview-thread');
     if (!heading || !thread) return;
     heading.textContent = `楼中楼预览 · ${records.length} 条回复`;
-    clearElement(thread);
     qs(section, ':scope > .xns-preview-empty')?.remove();
     qsa(section, ':scope > .xns-page-loading, :scope > .xns-page-failed').forEach((node) => node.remove());
     if (records.length) {
-      const fragment = document.createDocumentFragment();
-      buildReplyTree(records).forEach((record) => appendNestedRecord(record, fragment, 0));
-      records.forEach((record) => {
+      const onNodeMounted = (node, entry) => {
+        const record = entry.record;
         if (record.page !== info.page) addRemoteNote(record, info.postId);
-        releaseCommentHtml(record);
+        options.onNodeMounted?.(node, record);
+      };
+      const onNodeUnmounted = (node, entry) => {
+        if (!entry.record.current) entry.record.node = null;
+        options.onNodeUnmounted?.(node, entry.record);
+      };
+      const renderItem = (entry) => prepareCommentRecord(entry.record, entry.depth);
+      const virtualizer = section.__xnsVirtualizer || createCommentVirtualizer({
+        windowObj,
+        documentObj: document,
+        createElement,
+        estimatedHeight: 135,
+        overscanScreens: 2,
+      }).mount(thread, {
+        getViewport: () => thread.closest('.xns-modal-body') || windowObj,
+        renderItem,
+        onMount: onNodeMounted,
+        onUnmount: onNodeUnmounted,
       });
-      thread.replaceChildren(fragment);
+      section.__xnsVirtualizer = virtualizer;
+      virtualizer.setEntries(flattenReplyTree(records), {
+        getViewport: () => thread.closest('.xns-modal-body') || windowObj,
+        renderItem,
+        onMount: onNodeMounted,
+        onUnmount: onNodeUnmounted,
+      });
     } else {
+      section.__xnsVirtualizer?.destroy();
+      delete section.__xnsVirtualizer;
+      clearElement(thread);
       section.appendChild(createElement('p', 'xns-status xns-preview-empty', '没有读取到评论。'));
     }
     if (options.loading) section.appendChild(createElement('p', 'xns-status xns-page-loading', '正在加载其他分页…'));
@@ -162,11 +189,12 @@ const xnsPreviewRenderer = createPreviewRenderer({
   safeCount,
   sanitizeImportedNode,
   materializeCommentNode,
-  releaseCommentHtml,
   getDirectCommentMenu,
   ensurePreviewMenu,
   stripRenderArtifacts,
   buildReplyTree,
+  flattenReplyTree,
+  createCommentVirtualizer,
   addRemoteNote,
 });
 

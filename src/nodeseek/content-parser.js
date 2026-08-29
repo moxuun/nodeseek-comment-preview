@@ -120,8 +120,8 @@ function getCommentRecord(item, postId, page, index, current, options = {}) {
     author: getAuthorName(item),
     reply: extractReplyMetadata(item, postId),
     counts: commentId !== null && options.state ? getSsrCommentCounts(options.state, commentId) : null,
-    // 跨页评论在原版布局下不会展示；首次进入楼中楼前只保留经过清洗的 HTML，
-    // 物化成节点后由渲染器释放这份重复字符串；切回楼中楼时若两者都已释放则重读分页。
+    // 跨页评论在原版布局下不会展示；虚拟楼层流只保留经过清洗的 HTML，
+    // 需要进入活动窗口时再物化成节点。
     node: current ? node : null,
     html: current ? null : node.outerHTML,
     parent: null, children: [],

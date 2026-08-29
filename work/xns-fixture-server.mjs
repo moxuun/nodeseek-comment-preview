@@ -102,8 +102,7 @@ function indexedCommentsList() {
   return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Fixture indexed comments list</title></head><body><main><ul class="post-list"><li class="post-list-item"><div class="post-title"><a href="/post-128-1">统计索引测试帖</a></div></li></ul></main><script src="/outputs/nodeseek-comment-preview.user.js"></script></body></html>';
 }
 
-function richLongPage(postId, page) {
-  const pageCount = 50;
+function richLongPage(postId, page, pageCount = 50) {
   const commentsPerPage = 10;
   const linkAt = (target) => `<a class="pager-pos${target === page ? ' pager-cur' : ''}" href="/post-${postId}-${target}">${target}</a>`;
   const pager = [1, 2, pageCount].map(linkAt).join('');
@@ -213,16 +212,18 @@ const server = http.createServer((req, res) => {
     res.end(indexedCommentsPage());
     return;
   }
-  const richLongMatch = /^\/post-460-(\d+)$/.exec(pathname);
+  const richLongMatch = /^\/post-(460|461|463|465)-(\d+)$/.exec(pathname);
   if (richLongMatch) {
-    const page = Number(richLongMatch[1]);
-    if (page < 1 || page > 50) {
+    const postId = Number(richLongMatch[1]);
+    const page = Number(richLongMatch[2]);
+    const pageCount = new Map([[460, 50], [461, 10], [463, 30], [465, 50]]).get(postId) || 50;
+    if (page < 1 || page > pageCount) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('not found');
       return;
     }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-    res.end(richLongPage(460, page));
+    res.end(richLongPage(postId, page, pageCount));
     return;
   }
   if (pathname === '/test/retry-state') {
@@ -244,6 +245,13 @@ const server = http.createServer((req, res) => {
   if (pathname === '/list-460') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(delayedPostList(460));
+    return;
+  }
+  const benchmarkListMatch = /^\/list-(461|463|465)$/.exec(pathname);
+  if (benchmarkListMatch) {
+    const postId = Number(benchmarkListMatch[1]);
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(delayedPostList(postId));
     return;
   }
   // 长帖分页截断回归：456 帖共 52 页，每页 1 楼；分页器链接到最后一页，

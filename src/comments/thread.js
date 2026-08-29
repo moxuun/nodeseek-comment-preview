@@ -26,3 +26,17 @@ function createCommentThreadModel() {
 
 const xnsCommentThreadModel = createCommentThreadModel();
 const buildReplyTree = (records) => xnsCommentThreadModel.build(records);
+
+function flattenReplyTreeModel(records) {
+  const flat = [];
+  const roots = buildReplyTree(records);
+  const stack = roots.slice().reverse().map((record) => ({ record, depth: 0 }));
+  while (stack.length) {
+    const entry = stack.pop();
+    flat.push(entry);
+    entry.record.children.slice().reverse().forEach((child) => stack.push({ record: child, depth: entry.depth + 1 }));
+  }
+  return flat;
+}
+
+const flattenReplyTree = (records) => flattenReplyTreeModel(records);

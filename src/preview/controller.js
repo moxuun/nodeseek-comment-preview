@@ -45,7 +45,10 @@ function createPreviewController({
     section.appendChild(createElement('h3', '', '楼中楼预览'));
     const thread = createElement('ul', 'xns-preview-thread');
     section.appendChild(thread);
-    renderPreviewRecords(section, info, currentRecords, { loading: hasRemotePages });
+    renderPreviewRecords(section, info, currentRecords, {
+      loading: hasRemotePages,
+      onNodeMounted: (node) => installPreviewFeatures(node),
+    });
     wrapper.appendChild(section);
     const hydrate = loadPreviewRecords(info, parsed, {
       noStore: options.noStore === true,
@@ -53,44 +56,15 @@ function createPreviewController({
       initialRecords: currentRecords,
       signal: options.signal,
     }).then((preview) => {
-      if (section.isConnected || options.renderDetached === true) renderPreviewRecords(section, info, preview.records, preview);
+      if (section.isConnected || options.renderDetached === true) {
+        renderPreviewRecords(section, info, preview.records, {
+          ...preview,
+          onNodeMounted: (node) => installPreviewFeatures(node),
+        });
+      }
       return preview;
     });
     return { title, content: wrapper, hydrate };
-  }
-
-  function schedulePreviewFeatures(modal) {
-    modal.featureCleanup?.();
-    modal.featureCleanup = null;
-    const body = modal.body;
-    const localRoots = [
-      qs(body, '.xns-preview-post'),
-      ...qsa(body, '.xns-preview-thread .content-item:not([data-xns-remote])'),
-    ].filter(Boolean);
-    localRoots.forEach((root) => installPreviewFeatures(root));
-    const remoteItems = qsa(body, '.xns-preview-thread .content-item[data-xns-remote]');
-    if (!remoteItems.length) return;
-    if (typeof windowObj.IntersectionObserver !== 'function') {
-      installPreviewFeatures(body);
-      return;
-    }
-    const pending = new Set(remoteItems);
-    let observer = null;
-    const cleanup = () => {
-      observer?.disconnect();
-      if (modal.featureCleanup === cleanup) modal.featureCleanup = null;
-    };
-    observer = new windowObj.IntersectionObserver((entries) => {
-      entries.forEach((entry) => {
-        if (!entry.isIntersecting || !pending.has(entry.target)) return;
-        pending.delete(entry.target);
-        observer.unobserve(entry.target);
-        installPreviewFeatures(entry.target);
-      });
-      if (!pending.size) cleanup();
-    }, { root: body, rootMargin: '0px' });
-    remoteItems.forEach((item) => observer.observe(item));
-    modal.featureCleanup = cleanup;
   }
 
   function getPreviewScrollOwners(body) {
@@ -301,11 +275,11 @@ function createPreviewController({
       clearElement(modal.body);
       modal.body.appendChild(preview.content);
       if (modal.composer && !modal.composer.isConnected) modal.body.appendChild(modal.composer);
-      schedulePreviewFeatures(modal);
+      const previewPost = qs(modal.body, '.xns-preview-post');
+      if (previewPost) installPreviewFeatures(previewPost);
       if (!preserveContent && preview.hydrate) {
         await preview.hydrate;
         if (state.modal !== modal || modal.loadGeneration !== generation) return false;
-        schedulePreviewFeatures(modal);
       }
       if (preserveContent) stabilizePreviewScroll(modal, scrollSnapshot, generation);
     } catch (error) {

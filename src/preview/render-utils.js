@@ -5,9 +5,11 @@ function createPreviewRenderUtils({ qs, qsa, createElement }) {
     qsa(item, '.xns-reply-list, .xns-remote-floor-link').forEach((node) => node.remove());
     item.classList.remove('xns-comment-root', 'xns-comment-child', 'xns-floor-highlight');
     item.removeAttribute('data-xns-floor');
+    item.removeAttribute('data-xns-depth');
     item.removeAttribute('data-xns-parent-floor');
     item.removeAttribute('data-xns-remote');
     item.removeAttribute('data-xns-source-page');
+    item.style.removeProperty('--xns-indent');
   }
 
   function addRemoteNote(record, postId) {

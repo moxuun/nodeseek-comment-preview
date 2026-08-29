@@ -80,6 +80,8 @@ function installStyle() {
       .xns-preview-comments { margin-top:10px; padding-top:8px; border-top:1px solid rgba(100,116,139,.2); }
       .xns-preview-comments > h3 { margin:0 0 7px; font-size:15px; line-height:1.3; }
       .xns-preview-thread { margin:0; padding:0; list-style:none; }
+      .xns-virtual-list > .xns-virtual-spacer { display:block !important; height:0; margin:0 !important; padding:0 !important; border:0 !important; list-style:none !important; pointer-events:none; }
+      .xns-virtual-list > .content-item[data-xns-depth] { margin-left:var(--xns-indent,0px) !important; }
       .xns-preview-thread > .content-item { margin:4px 0; padding:6px 8px; border:1px solid rgba(100,116,139,.2); border-radius:6px; background:#f8fafc; content-visibility:auto; contain-intrinsic-size:150px; }
       .xns-preview-thread .xns-comment-child { margin-top:3px !important; padding-left:8px !important; }
       .xns-preview-thread .nsk-content-meta-info { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; margin:0 0 2px; color:#64748b; font-size:12px; line-height:1.25; }

@@ -298,6 +298,12 @@ const scenarios = [
   { name: '50 页帖子页楼中楼重绘', kind: 'post', after: 'thread-rerender', postPath: '/post-456-1', expected: '50 条评论' },
   { name: '500 条富内容帖子页', kind: 'post', featureQueryCounter: true, featureNodeCounter: true, detachedMenuCounter: true, menuQueryCounter: true, postPath: '/post-460-1', expected: '500 条评论' },
   { name: '500 条富内容预览', kind: 'preview', featureQueryCounter: true, featureNodeCounter: true, listPath: '/list-460', postPath: '/post-460-1', expected: '500 条回复' },
+  { name: '10 页富内容帖子页虚拟窗口', kind: 'post', featureNodeCounter: true, postPath: '/post-461-1', expected: '100 条评论' },
+  { name: '30 页富内容帖子页虚拟窗口', kind: 'post', featureNodeCounter: true, postPath: '/post-463-1', expected: '300 条评论' },
+  { name: '50 页富内容帖子页虚拟窗口', kind: 'post', featureNodeCounter: true, postPath: '/post-465-1', expected: '500 条评论' },
+  { name: '10 页富内容预览虚拟窗口', kind: 'preview', featureNodeCounter: true, listPath: '/list-461', postPath: '/post-461-1', expected: '100 条回复' },
+  { name: '30 页富内容预览虚拟窗口', kind: 'preview', featureNodeCounter: true, listPath: '/list-463', postPath: '/post-463-1', expected: '300 条回复' },
+  { name: '50 页富内容预览虚拟窗口', kind: 'preview', featureNodeCounter: true, listPath: '/list-465', postPath: '/post-465-1', expected: '500 条回复' },
 ];
 const selectedScenarios = scenarioFilter ? scenarios.filter((scenario) => scenario.name.includes(scenarioFilter)) : scenarios;
 if (!selectedScenarios.length) throw new Error(`没有匹配的 benchmark 场景：${scenarioFilter}`);
