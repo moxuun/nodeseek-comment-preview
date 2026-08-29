@@ -134,7 +134,21 @@ function materializeCommentNode(record) {
   const template = documentObj.createElement('template');
   template.innerHTML = record.html;
   record.node = template.content.firstElementChild || null;
+  restoreDeferredImageSources(record.node);
   return record.node;
+}
+
+// 远端评论进入活动窗口时必须先恢复图片源地址，再交给图片灯箱/内容增强绑定事件。
+// 否则节点虽然已经物化，浏览器仍会把 data-xns-deferred-src 当作没有 src，显示破图占位。
+function restoreDeferredImageSources(root) {
+  const images = [];
+  if (root?.localName === 'img') images.push(root);
+  images.push(...qsa(root, 'img[data-xns-deferred-src]'));
+  images.forEach((image) => {
+    const source = image.getAttribute('data-xns-deferred-src');
+    if (source && !image.getAttribute('src')) image.setAttribute('src', source);
+    image.removeAttribute('data-xns-deferred-src');
+  });
 }
 
 function releaseCommentNode(record) {

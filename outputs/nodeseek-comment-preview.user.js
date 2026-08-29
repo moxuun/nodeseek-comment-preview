@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.21
+// @version      0.5.22
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -513,7 +513,21 @@ function materializeCommentNode(record) {
   const template = documentObj.createElement('template');
   template.innerHTML = record.html;
   record.node = template.content.firstElementChild || null;
+  restoreDeferredImageSources(record.node);
   return record.node;
+}
+
+// 远端评论进入活动窗口时必须先恢复图片源地址，再交给图片灯箱/内容增强绑定事件。
+// 否则节点虽然已经物化，浏览器仍会把 data-xns-deferred-src 当作没有 src，显示破图占位。
+function restoreDeferredImageSources(root) {
+  const images = [];
+  if (root?.localName === 'img') images.push(root);
+  images.push(...qsa(root, 'img[data-xns-deferred-src]'));
+  images.forEach((image) => {
+    const source = image.getAttribute('data-xns-deferred-src');
+    if (source && !image.getAttribute('src')) image.setAttribute('src', source);
+    image.removeAttribute('data-xns-deferred-src');
+  });
 }
 
 function releaseCommentNode(record) {

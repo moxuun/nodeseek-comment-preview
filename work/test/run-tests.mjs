@@ -518,7 +518,7 @@ scenario('帖子页远端内容增强功能保留', async (ctx) => {
   await page.close();
 });
 
-scenario('远端评论图片进入视口后才恢复源地址', async (ctx) => {
+scenario('远端评论图片进入视口后才恢复源地址（0.5.22 回归）', async (ctx) => {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/post-460-1`, { waitUntil: 'domcontentloaded' });
   await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '500 条评论', 30_000, '富内容长帖加载完成');
@@ -533,8 +533,8 @@ scenario('远端评论图片进入视口后才恢复源地址', async (ctx) => {
     };
   });
   assert(before.total > 0, `远端评论应包含图片，实际 ${JSON.stringify(before)}`);
-  assert(before.withSrc === before.total && before.activeItems < before.virtualCount,
-    `活动窗口内图片应可用，同时不应物化全部评论：${JSON.stringify(before)}`);
+  assert(before.withSrc === before.total && before.deferred === 0 && before.activeItems < before.virtualCount,
+    `评论物化后图片应恢复 src，同时不应物化全部评论：${JSON.stringify(before)}`);
   assert(await materializeFloor(page, 500, '.comment-container > ul.comments'), '应能从虚拟列表物化底部评论 #500');
   await page.evaluate(() => document.querySelector('.comment-container [data-xns-remote][data-xns-floor="500"]')?.scrollIntoView({ block: 'center' }));
   await waitFor(page, () => {
@@ -553,14 +553,17 @@ scenario('富内容远端评论滚动后仍能增强根节点', async (ctx) => {
     remoteCopyButtons: document.querySelectorAll('.comment-container [data-xns-remote] .xns-code-copy-btn').length,
   }));
   assert(before.remoteCodeBlocks > 0, `富内容长帖应包含远端代码块，实际 ${JSON.stringify(before)}`);
-  await page.evaluate(() => document.querySelector('.comment-container [data-xns-remote] pre')?.scrollIntoView({ block: 'center' }));
-  await waitFor(page, () => Boolean(document.querySelector('.comment-container [data-xns-remote] pre .xns-code-copy-btn')), 5_000, '滚动后增强远端根评论');
+  assert(await materializeFloor(page, 496, '.comment-container > ul.comments'), '应能从虚拟列表物化含代码块的远端评论 #496');
+  await page.evaluate(() => document.querySelector('.comment-container [data-xns-remote][data-xns-floor="496"]')?.scrollIntoView({ block: 'center' }));
+  await waitFor(page, () => Boolean(document.querySelector('.comment-container [data-xns-remote][data-xns-floor="496"] pre .xns-code-copy-btn')), 5_000, '滚动后增强远端根评论');
   const after = await page.evaluate(() => ({
     remoteCodeBlocks: document.querySelectorAll('.comment-container [data-xns-remote] pre').length,
     remoteCopyButtons: document.querySelectorAll('.comment-container [data-xns-remote] .xns-code-copy-btn').length,
     remoteImagesBound: document.querySelectorAll('.comment-container [data-xns-remote] img[data-xns-image-bound="true"]').length,
+    targetCopyButton: Boolean(document.querySelector('.comment-container [data-xns-remote][data-xns-floor="496"] pre .xns-code-copy-btn')),
   }));
-  assert(after.remoteCopyButtons > before.remoteCopyButtons, `滚动后应增强远端根评论代码块：${JSON.stringify({ before, after })}`);
+  assert(after.remoteCopyButtons >= before.remoteCopyButtons && after.targetCopyButton,
+    `滚动后应增强远端根评论代码块：${JSON.stringify({ before, after })}`);
   assert(after.remoteImagesBound > 0, `滚动后应增强远端根评论图片：${JSON.stringify(after)}`);
   await page.close();
 });
