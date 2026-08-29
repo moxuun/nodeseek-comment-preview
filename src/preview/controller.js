@@ -63,7 +63,11 @@ function createPreviewController({
     modal.featureCleanup?.();
     modal.featureCleanup = null;
     const body = modal.body;
-    installPreviewFeatures(body, { skipRemote: true });
+    const localRoots = [
+      qs(body, '.xns-preview-post'),
+      ...qsa(body, '.xns-preview-thread .content-item:not([data-xns-remote])'),
+    ].filter(Boolean);
+    localRoots.forEach((root) => installPreviewFeatures(root));
     const remoteItems = qsa(body, '.xns-preview-thread .content-item[data-xns-remote]');
     if (!remoteItems.length) return;
     if (typeof windowObj.IntersectionObserver !== 'function') {

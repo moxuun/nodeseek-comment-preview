@@ -538,6 +538,7 @@ scenario('预览弹窗远端内容滚动后才增强', async (ctx) => {
     remoteCopyButtons: document.querySelectorAll('.xns-modal [data-xns-remote] .xns-code-copy-btn').length,
   }));
   assert(before.remoteCodeBlocks > 0, `富内容预览应包含远端代码块，实际 ${JSON.stringify(before)}`);
+  assert(before.remoteCopyButtons < before.remoteCodeBlocks, `预览首屏不应增强全部远端代码块：${JSON.stringify(before)}`);
   await page.evaluate(() => {
     const blocks = document.querySelectorAll('.xns-modal [data-xns-remote] pre');
     blocks[blocks.length - 1]?.scrollIntoView({ block: 'center' });
