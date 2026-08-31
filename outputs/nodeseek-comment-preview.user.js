@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.26
+// @version      0.5.27
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -3073,9 +3073,49 @@ function createPreviewController({
     windowObj.setTimeout(() => setLabel?.('复制原帖链接'), 1_800);
   }
 
+  function getPreviewHeaderMeta(parsed) {
+    const textOf = (node) => node?.textContent?.trim().replace(/\s+/g, ' ').slice(0, 120) || '';
+    const post = qs(parsed, '.nsk-post') || parsed;
+    const nodeName = textOf(qs(post, '[data-node-name], .node-name, .node-title, .category-name'))
+      || textOf(qsa(post, 'a[href*="/node/"], a[href*="/category/"]').find((link) => textOf(link)));
+    const author = textOf(qs(post, '.nsk-content-meta-info a.author-name, .nsk-content-meta-info a[href*="/space/"], a.author-name'));
+    const time = textOf(qs(post, '.nsk-content-meta-info time, .nsk-content-meta-info [datetime], time[datetime]'));
+    return { node: nodeName, author, time, replyCount: null };
+  }
+
+  function updatePreviewHeaderMeta(modal, meta) {
+    if (!modal?.headerMeta) return;
+    const values = {
+      node: meta?.node || '',
+      author: meta?.author || '',
+      time: meta?.time || '',
+      replies: Number.isFinite(meta?.replyCount) ? `${meta.replyCount} 条回复` : '',
+    };
+    Object.entries(values).forEach(([key, value]) => {
+      const item = modal.headerMeta[key];
+      if (!item) return;
+      item.value.textContent = value;
+      item.item.hidden = !value;
+    });
+  }
+
+  function createPreviewHeaderMeta() {
+    const root = createElement('div', 'xns-modal-meta');
+    const items = {};
+    [['node', '节点'], ['author', '作者'], ['time', '时间'], ['replies', '回复']].forEach(([key, label]) => {
+      const item = createElement('span', 'xns-modal-meta-item');
+      item.hidden = true;
+      item.append(createElement('span', 'xns-modal-meta-label', label), createElement('span', 'xns-modal-meta-value'));
+      root.appendChild(item);
+      items[key] = { item, value: item.lastElementChild };
+    });
+    return { root, items };
+  }
+
   function buildPreviewContent(url, parsed, options = {}) {
     const wrapper = createElement('div', 'xns-preview-content');
     const title = qs(parsed, selectors.postTitle)?.textContent?.trim() || '';
+    const headerMeta = getPreviewHeaderMeta(parsed);
     const info = getPostInfo(url.href);
     const importedPost = info ? buildPreviewPostNode(parsed, info) : null;
     if (importedPost) wrapper.appendChild(importedPost);
@@ -3085,8 +3125,9 @@ function createPreviewController({
       if (importedContent) wrapper.appendChild(importedContent);
       else wrapper.appendChild(createElement('p', 'xns-status', '没有找到帖子正文。'));
     }
-    if (!info) return { title, content: wrapper, hydrate: null };
+    if (!info) return { title, headerMeta, content: wrapper, hydrate: null };
     const currentRecords = collectPageRecords(info, parsed, info.page);
+    headerMeta.replyCount = currentRecords.length;
     const knownPages = getPageNumbers(parsed, info.postId);
     const hasRemotePages = Array.from(knownPages).some((page) => page !== info.page);
     const section = createElement('section', 'xns-preview-comments');
@@ -3143,7 +3184,7 @@ function createPreviewController({
       }
       return preview;
     });
-    return { title, content: wrapper, hydrate };
+    return { title, headerMeta, content: wrapper, hydrate };
   }
 
   function getPreviewScrollOwners(body) {
@@ -3366,19 +3407,25 @@ function createPreviewController({
         signal: requestController?.signal,
         statusNode: toolbarStatus,
       });
-      if (preserveContent && preview.hydrate) await preview.hydrate;
+      let hydratedPreview = null;
+      if (preserveContent && preview.hydrate) hydratedPreview = await preview.hydrate;
       if (state.modal !== modal || modal.loadGeneration !== generation) return false;
       const scrollSnapshot = preserveContent ? capturePreviewScroll(modal.body) : null;
       modal.title.textContent = preview.title || 'NodeSeek 帖子预览';
+      updatePreviewHeaderMeta(modal, preview.headerMeta);
       clearElement(modal.body);
       modal.body.appendChild(preview.content);
       if (modal.composer && !modal.composer.isConnected) modal.body.appendChild(modal.composer);
       const previewPost = qs(modal.body, '.xns-preview-post');
       if (previewPost) installPreviewFeatures(previewPost);
       if (!preserveContent && preview.hydrate) {
-        await preview.hydrate;
+        hydratedPreview = await preview.hydrate;
         if (state.modal !== modal || modal.loadGeneration !== generation) return false;
       }
+      updatePreviewHeaderMeta(modal, {
+        ...preview.headerMeta,
+        replyCount: hydratedPreview?.records?.length ?? preview.headerMeta?.replyCount,
+      });
       if (preserveContent) stabilizePreviewScroll(modal, scrollSnapshot, generation);
     } catch (error) {
       if (state.modal === modal && modal.loadGeneration === generation) {
@@ -3413,7 +3460,8 @@ function createPreviewController({
     const heading = createElement('div', 'xns-modal-heading');
     heading.appendChild(createElement('span', 'xns-modal-eyebrow', 'NodeSeek 主题预览'));
     const title = createElement('h2', 'xns-modal-title', '正在加载帖子…');
-    heading.appendChild(title);
+    const headerMeta = createPreviewHeaderMeta();
+    heading.append(title, headerMeta.root);
     const actions = createElement('div', 'xns-modal-actions');
     const replyPost = createElement('button', 'xns-modal-reply', '回复帖子');
     replyPost.type = 'button';
@@ -3456,7 +3504,7 @@ function createPreviewController({
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, moreMenu, helpPanel, loading: false, loadGeneration: 0, requestController: null, toolbarStatus };
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, moreMenu, helpPanel, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, toolbarStatus };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }
@@ -4021,6 +4069,11 @@ function installStyle() {
       .xns-modal-heading { flex:1; min-width:0; }
       .xns-modal-eyebrow { display:block; margin-bottom:2px; color:#64748b; font:11px/1.2 system-ui,sans-serif; letter-spacing:.02em; }
       .xns-modal-title { min-width:0; overflow:hidden; margin:0; font-size:17px; line-height:1.3; text-overflow:ellipsis; white-space:nowrap; }
+      .xns-modal-meta { display:flex; align-items:center; flex-wrap:wrap; gap:2px 10px; margin-top:3px; color:#64748b; font:11px/1.25 system-ui,sans-serif; }
+      .xns-modal-meta-item { display:inline-flex; align-items:center; gap:3px; min-width:0; }
+      .xns-modal-meta-item[hidden] { display:none; }
+      .xns-modal-meta-label { color:#94a3b8; }
+      .xns-modal-meta-value { max-width:22em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       .xns-modal-actions { display:flex; align-items:center; gap:6px; flex:0 0 auto; }
       .xns-modal-more { position:relative; }
       .xns-modal-actions .xns-modal-tool { margin-left:0; }
@@ -4150,6 +4203,8 @@ function installStyle() {
       .xns-lightbox-close:hover, .xns-lightbox-open:hover, .xns-lightbox-close:focus-visible, .xns-lightbox-open:focus-visible { background:rgba(15,23,42,.9); outline:none; }
       .dark-layout .xns-modal { color:#e5e7eb; background:#18202b; }
       .dark-layout .xns-modal-header a, .dark-layout .xns-modal-header .xns-modal-reply, .dark-layout .xns-modal-close, .dark-layout .xns-modal-tool, .dark-layout .xns-preview-post, .dark-layout .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
+      .dark-layout .xns-modal-meta { color:#9ca3af; }
+      .dark-layout .xns-modal-meta-label { color:#6b7280; }
       .dark-layout .xns-modal-more-menu { color:#e5e7eb; background:#111827; border-color:rgba(148,163,184,.35); }
       .dark-layout .xns-modal-more-item { color:#cbd5e1; }
       .dark-layout .xns-modal-more-item:hover, .dark-layout .xns-modal-more-item:focus-visible { color:#93c5fd; background:rgba(59,130,246,.18); }

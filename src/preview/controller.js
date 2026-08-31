@@ -68,9 +68,49 @@ function createPreviewController({
     windowObj.setTimeout(() => setLabel?.('复制原帖链接'), 1_800);
   }
 
+  function getPreviewHeaderMeta(parsed) {
+    const textOf = (node) => node?.textContent?.trim().replace(/\s+/g, ' ').slice(0, 120) || '';
+    const post = qs(parsed, '.nsk-post') || parsed;
+    const nodeName = textOf(qs(post, '[data-node-name], .node-name, .node-title, .category-name'))
+      || textOf(qsa(post, 'a[href*="/node/"], a[href*="/category/"]').find((link) => textOf(link)));
+    const author = textOf(qs(post, '.nsk-content-meta-info a.author-name, .nsk-content-meta-info a[href*="/space/"], a.author-name'));
+    const time = textOf(qs(post, '.nsk-content-meta-info time, .nsk-content-meta-info [datetime], time[datetime]'));
+    return { node: nodeName, author, time, replyCount: null };
+  }
+
+  function updatePreviewHeaderMeta(modal, meta) {
+    if (!modal?.headerMeta) return;
+    const values = {
+      node: meta?.node || '',
+      author: meta?.author || '',
+      time: meta?.time || '',
+      replies: Number.isFinite(meta?.replyCount) ? `${meta.replyCount} 条回复` : '',
+    };
+    Object.entries(values).forEach(([key, value]) => {
+      const item = modal.headerMeta[key];
+      if (!item) return;
+      item.value.textContent = value;
+      item.item.hidden = !value;
+    });
+  }
+
+  function createPreviewHeaderMeta() {
+    const root = createElement('div', 'xns-modal-meta');
+    const items = {};
+    [['node', '节点'], ['author', '作者'], ['time', '时间'], ['replies', '回复']].forEach(([key, label]) => {
+      const item = createElement('span', 'xns-modal-meta-item');
+      item.hidden = true;
+      item.append(createElement('span', 'xns-modal-meta-label', label), createElement('span', 'xns-modal-meta-value'));
+      root.appendChild(item);
+      items[key] = { item, value: item.lastElementChild };
+    });
+    return { root, items };
+  }
+
   function buildPreviewContent(url, parsed, options = {}) {
     const wrapper = createElement('div', 'xns-preview-content');
     const title = qs(parsed, selectors.postTitle)?.textContent?.trim() || '';
+    const headerMeta = getPreviewHeaderMeta(parsed);
     const info = getPostInfo(url.href);
     const importedPost = info ? buildPreviewPostNode(parsed, info) : null;
     if (importedPost) wrapper.appendChild(importedPost);
@@ -80,8 +120,9 @@ function createPreviewController({
       if (importedContent) wrapper.appendChild(importedContent);
       else wrapper.appendChild(createElement('p', 'xns-status', '没有找到帖子正文。'));
     }
-    if (!info) return { title, content: wrapper, hydrate: null };
+    if (!info) return { title, headerMeta, content: wrapper, hydrate: null };
     const currentRecords = collectPageRecords(info, parsed, info.page);
+    headerMeta.replyCount = currentRecords.length;
     const knownPages = getPageNumbers(parsed, info.postId);
     const hasRemotePages = Array.from(knownPages).some((page) => page !== info.page);
     const section = createElement('section', 'xns-preview-comments');
@@ -138,7 +179,7 @@ function createPreviewController({
       }
       return preview;
     });
-    return { title, content: wrapper, hydrate };
+    return { title, headerMeta, content: wrapper, hydrate };
   }
 
   function getPreviewScrollOwners(body) {
@@ -361,19 +402,25 @@ function createPreviewController({
         signal: requestController?.signal,
         statusNode: toolbarStatus,
       });
-      if (preserveContent && preview.hydrate) await preview.hydrate;
+      let hydratedPreview = null;
+      if (preserveContent && preview.hydrate) hydratedPreview = await preview.hydrate;
       if (state.modal !== modal || modal.loadGeneration !== generation) return false;
       const scrollSnapshot = preserveContent ? capturePreviewScroll(modal.body) : null;
       modal.title.textContent = preview.title || 'NodeSeek 帖子预览';
+      updatePreviewHeaderMeta(modal, preview.headerMeta);
       clearElement(modal.body);
       modal.body.appendChild(preview.content);
       if (modal.composer && !modal.composer.isConnected) modal.body.appendChild(modal.composer);
       const previewPost = qs(modal.body, '.xns-preview-post');
       if (previewPost) installPreviewFeatures(previewPost);
       if (!preserveContent && preview.hydrate) {
-        await preview.hydrate;
+        hydratedPreview = await preview.hydrate;
         if (state.modal !== modal || modal.loadGeneration !== generation) return false;
       }
+      updatePreviewHeaderMeta(modal, {
+        ...preview.headerMeta,
+        replyCount: hydratedPreview?.records?.length ?? preview.headerMeta?.replyCount,
+      });
       if (preserveContent) stabilizePreviewScroll(modal, scrollSnapshot, generation);
     } catch (error) {
       if (state.modal === modal && modal.loadGeneration === generation) {
@@ -408,7 +455,8 @@ function createPreviewController({
     const heading = createElement('div', 'xns-modal-heading');
     heading.appendChild(createElement('span', 'xns-modal-eyebrow', 'NodeSeek 主题预览'));
     const title = createElement('h2', 'xns-modal-title', '正在加载帖子…');
-    heading.appendChild(title);
+    const headerMeta = createPreviewHeaderMeta();
+    heading.append(title, headerMeta.root);
     const actions = createElement('div', 'xns-modal-actions');
     const replyPost = createElement('button', 'xns-modal-reply', '回复帖子');
     replyPost.type = 'button';
@@ -451,7 +499,7 @@ function createPreviewController({
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, moreMenu, helpPanel, loading: false, loadGeneration: 0, requestController: null, toolbarStatus };
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, moreMenu, helpPanel, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, toolbarStatus };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }
