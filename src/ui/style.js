@@ -75,6 +75,7 @@ function installStyle() {
       .xns-preview-status:not(.xns-modal-toolbar-status) { display:flex; flex-wrap:wrap; gap:4px 8px; margin:7px 0; padding:6px 9px; border:1px solid rgba(100,116,139,.16); border-radius:6px; color:#64748b; background:#f8fafc; font:12px/1.4 system-ui,sans-serif; }
       .xns-preview-status[hidden] { display:none !important; }
       .xns-modal-tool { display:inline-flex; align-items:center; gap:5px; margin-left:auto; padding:4px 8px; border:1px solid rgba(100,116,139,.25); border-radius:6px; color:#475569; background:#fff; cursor:pointer; font:12px/1.2 system-ui,sans-serif; }
+      .xns-modal-help-toggle { margin-left:0; min-width:26px; justify-content:center; padding-right:6px; padding-left:6px; font-weight:700; }
       .xns-modal-tool:hover, .xns-modal-tool:focus-visible { border-color:#3b82f6; color:#2563eb; outline:none; }
       .xns-modal-tool svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
       .xns-modal-help { padding:8px 16px; border-bottom:1px solid rgba(59,130,246,.18); color:#475569; background:#eff6ff; font:12px/1.45 system-ui,sans-serif; }

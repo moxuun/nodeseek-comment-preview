@@ -468,17 +468,26 @@ function createPreviewController({
     original.rel = 'noopener noreferrer';
     original.title = '在新标签打开原帖';
     const helpPanel = createPreviewHelpPanel();
+    const toggleHelp = () => {
+      const modal = state.modal;
+      if (!modal) return;
+      const open = helpPanel.hidden;
+      helpPanel.hidden = !open;
+      helpButton.setAttribute('aria-expanded', String(open));
+      if (open) helpPanel.scrollIntoView?.({ block: 'nearest' });
+    };
     const moreMenu = createMoreMenu({
-      onHelp: () => {
-        const modal = state.modal;
-        if (!modal) return;
-        helpPanel.hidden = !helpPanel.hidden;
-        if (!helpPanel.hidden) helpPanel.scrollIntoView?.({ block: 'nearest' });
-      },
+      onHelp: toggleHelp,
       onCopyLink: ({ setLabel }) => {
         void copyPreviewLink(url, setLabel).catch(() => setLabel('复制失败'));
       },
     });
+    const helpButton = createElement('button', 'xns-modal-tool xns-modal-help-toggle', '?');
+    helpButton.type = 'button';
+    helpButton.title = '帮助与快捷键（?）';
+    helpButton.setAttribute('aria-label', '帮助与快捷键（?）');
+    helpButton.setAttribute('aria-expanded', 'false');
+    helpButton.addEventListener('click', toggleHelp);
     const close = createCloseButton(closeModal);
     actions.append(replyPost, original, moreMenu.element, close);
     header.append(heading, actions);
@@ -490,6 +499,7 @@ function createPreviewController({
       createElement('span', 'xns-modal-toolbar-label', '阅读'),
       createElement('span', 'xns-modal-mode', '楼中楼'),
       toolbarStatus,
+      helpButton,
       createRefreshButton(() => { void refreshPreviewModal(); }),
     );
     const body = createElement('div', 'xns-modal-body');
@@ -499,7 +509,7 @@ function createPreviewController({
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, moreMenu, helpPanel, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, toolbarStatus };
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, moreMenu, helpPanel, toggleHelp, helpButton, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, toolbarStatus };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }

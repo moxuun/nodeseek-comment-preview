@@ -21,8 +21,14 @@ function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPr
       menuItem.click();
       return;
     }
+    const inEditor = event.target.closest?.('textarea, input, [contenteditable="true"]');
+    if (event.key === '?' && state.modal && !inEditor) {
+      event.preventDefault();
+      state.modal.toggleHelp?.();
+      return;
+    }
     if (event.key !== 'Escape') return;
-    if (event.target.closest?.('textarea, input, [contenteditable="true"]')) return;
+    if (inEditor) return;
     if (state.lightbox) {
       event.preventDefault();
       closeImageLightbox();
