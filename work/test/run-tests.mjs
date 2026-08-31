@@ -98,7 +98,15 @@ async function waitFor(page, fn, timeout = 12_000, label = '') {
   for (;;) {
     const value = await page.evaluate(fn);
     if (value) return value;
-    if (Date.now() - started > timeout) throw new Error(`等待超时：${label || fn.toString().slice(0, 80)}`);
+    if (Date.now() - started > timeout) {
+      const diagnostic = await page.evaluate(() => ({
+        readyState: document.readyState,
+        status: document.querySelector('.xns-toolbar-status')?.textContent || null,
+        title: document.querySelector('.xns-toolbar-status')?.title || null,
+        virtualCount: Number(document.querySelector('.comment-container > ul.comments, .xns-preview-thread')?.dataset.xnsVirtualCount || 0),
+      })).catch(() => null);
+      throw new Error(`等待超时：${label || fn.toString().slice(0, 80)}；当前状态 ${JSON.stringify(diagnostic)}`);
+    }
     await sleep(100);
   }
 }
@@ -212,7 +220,7 @@ async function waitPost(page, predicate, timeout = 12_000) {
 async function openPostPage(ctx) {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/post-123-1`, { waitUntil: 'networkidle0' });
-  await waitFor(page, () => /^9 条评论$/.test(document.querySelector('.xns-toolbar-status')?.textContent || ''), 15_000, '帖子页楼中楼构建');
+  await waitFor(page, () => /^9 条回复$/.test(document.querySelector('.xns-toolbar-status')?.textContent || ''), 15_000, '帖子页楼中楼构建');
   return page;
 }
 
@@ -328,7 +336,7 @@ scenario('长帖分页截断明示（0.5.13 回归）', async (ctx) => {
   await waitFor(page, () => {
     const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
     const virtualCount = Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0);
-    return /只读取了前/.test(status) && virtualCount === 50;
+    return /仅读取前 50 页/.test(status) && virtualCount === 50;
   }, 30_000, '截断状态提示');
   const state = await page.evaluate(() => ({
     toolbar: document.querySelector('.xns-toolbar-status')?.textContent,
@@ -336,7 +344,7 @@ scenario('长帖分页截断明示（0.5.13 回归）', async (ctx) => {
     virtualCount: Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0),
     activeItems: document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length,
   }));
-  assert(/帖子共 52 页，只读取了前 50 页/.test(state.status), `状态栏应明示截断，实际 ${state.status}`);
+  assert(/帖子共 52 页，仅读取前 50 页/.test(state.status), `状态栏应明示截断，实际 ${state.status}`);
   assert(state.virtualCount === 50, `截断后数据模型应有前 50 楼，实际 ${state.virtualCount}`);
   assert(state.activeItems < state.virtualCount, `截断长帖不应把 50 楼全部物化，实际 ${state.activeItems}/${state.virtualCount}`);
   assert(dataOf(page).pageErrors.length === 0, `页面出现未捕获异常：${dataOf(page).pageErrors.join('; ')}`);
@@ -350,7 +358,7 @@ scenario('长帖内容增强按可视远端评论执行', async (ctx) => {
   await waitFor(page, () => {
     const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
     const virtualCount = Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0);
-    return /只读取了前/.test(status) && virtualCount === 50;
+    return /仅读取前 50 页/.test(status) && virtualCount === 50;
   }, 30_000, '长帖内容增强扫描完成');
   const stats = await page.evaluate(() => window.__xnsFeatureQueryStats);
   assert(stats.count < 6 * 49, `首屏不应一次处理全部 49 个远端评论，实际执行 ${stats.count} 次：${JSON.stringify(stats.selectors)}`);
@@ -364,7 +372,7 @@ scenario('长帖分页发现优先扫描分页链接', async (ctx) => {
   await waitFor(page, () => {
     const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
     const virtualCount = Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0);
-    return /只读取了前/.test(status) && virtualCount === 50;
+    return /仅读取前 50 页/.test(status) && virtualCount === 50;
   }, 30_000, '分页发现完成');
   const stats = await page.evaluate(() => window.__xnsPaginationQueryStats);
   assert(stats.broad === 0, `标准分页页面不应执行全量 a[href] 扫描，实际 ${stats.broad} 次`);
@@ -375,13 +383,13 @@ scenario('长帖分页发现优先扫描分页链接', async (ctx) => {
 scenario('无标准分页标记时仍回退发现分页', async (ctx) => {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/post-126-1`, { waitUntil: 'networkidle0' });
-  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '2 条评论', 5_000, '分页回退加载完成');
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '2 条回复', 5_000, '分页回退加载完成');
   const state = await page.evaluate(() => ({
     items: document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length,
     status: document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '',
   }));
   assert(state.items === 2, `分页回退应读取两页评论，实际 ${state.items}`);
-  assert(/共读取 2 页/.test(state.status), `分页回退状态应为 2 页，实际 ${state.status}`);
+  assert(/已读取 2\/2 页/.test(state.status), `分页回退状态应为 2 页，实际 ${state.status}`);
   await page.close();
 });
 
@@ -392,7 +400,7 @@ scenario('长帖安全克隆只做一次全树查询', async (ctx) => {
   await waitFor(page, () => {
     const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
     const virtualCount = Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0);
-    return /只读取了前/.test(status) && virtualCount === 50;
+    return /仅读取前 50 页/.test(status) && virtualCount === 50;
   }, 30_000, '安全克隆完成');
   const stats = await page.evaluate(() => window.__xnsSanitizeQueryStats);
   assert(stats.all >= 49, `长帖远端评论应执行全树节点查询，实际 ${stats.all} 次`);
@@ -548,7 +556,7 @@ scenario('帖子页远端内容增强功能保留', async (ctx) => {
 scenario('远端评论图片进入视口后才恢复源地址（0.5.22 回归）', async (ctx) => {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/post-460-1`, { waitUntil: 'domcontentloaded' });
-  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '500 条评论', 30_000, '富内容长帖加载完成');
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '500 条回复', 30_000, '富内容长帖加载完成');
   const before = await page.evaluate(() => {
     const images = [...document.querySelectorAll('.comment-container [data-xns-remote] img')];
     return {
@@ -574,7 +582,7 @@ scenario('远端评论图片进入视口后才恢复源地址（0.5.22 回归）
 scenario('富内容远端评论滚动后仍能增强根节点', async (ctx) => {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/post-460-1`, { waitUntil: 'networkidle0' });
-  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '500 条评论', 30_000, '富内容长帖加载完成');
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '500 条回复', 30_000, '富内容长帖加载完成');
   const before = await page.evaluate(() => ({
     remoteCodeBlocks: document.querySelectorAll('.comment-container [data-xns-remote] pre').length,
     remoteCopyButtons: document.querySelectorAll('.comment-container [data-xns-remote] .xns-code-copy-btn').length,
@@ -693,7 +701,7 @@ scenario('预览分页完成一页就立即显示（0.5.24 回归）', async (ct
     loading: document.querySelector('.xns-modal .xns-page-loading')?.textContent || '',
     virtualCount: Number(document.querySelector('.xns-modal .xns-preview-thread')?.dataset.xnsVirtualCount || 0),
   }));
-  assert(partial.virtualCount === 4 && /正在加载其他分页/.test(partial.loading),
+  assert(partial.virtualCount === 4 && /正在读取其他分页/.test(partial.loading),
     `第 2 页返回时应先显示 4 条并继续后台加载，实际 ${JSON.stringify(partial)}`);
   await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 8 条回复', 6_000, '预览剩余分页完成');
   await page.close();
@@ -725,15 +733,15 @@ scenario('帖子页当前页优先渲染，远端分页后台加载', async (ctx
     const toolbar = document.querySelector('.xns-toolbar-status')?.textContent || '';
     const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
     const items = document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length;
-    return toolbar === '2 条评论' && /正在读取其他分页/.test(status) && items === 2;
+    return toolbar === '2 条回复' && /正在读取其他分页/.test(status) && items === 2;
   }, 1_000, '当前页优先渲染');
-  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '4 条评论', 5_000, '远端分页完成');
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '4 条回复', 5_000, '远端分页完成');
   const state = await page.evaluate(() => ({
     items: document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length,
     status: document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '',
   }));
   assert(state.items === 4, `后台分页完成后应有 4 个楼层，实际 ${state.items}`);
-  assert(/共读取 2 页/.test(state.status), `后台分页完成后状态应为 2 页，实际 ${state.status}`);
+  assert(/已读取 2\/2 页/.test(state.status), `后台分页完成后状态应为 2 页，实际 ${state.status}`);
   assert(dataOf(page).pageErrors.length === 0, `页面出现未捕获异常：${dataOf(page).pageErrors.join('; ')}`);
   await page.close();
 });
@@ -741,7 +749,7 @@ scenario('分页 429 按 Retry-After 重试后继续加载', async (ctx) => {
   const page = await ctx.newPage();
   dataOf(page).expectedResponses.push({ status: 429, url: '/post-125-2' });
   await page.goto(`${ctx.base}/post-125-1`, { waitUntil: 'domcontentloaded' });
-  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '4 条评论', 5_000, '429 重试后的分页完成');
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '4 条回复', 5_000, '429 重试后的分页完成');
   const retryState = await page.evaluate(() => fetch('/test/retry-state', { cache: 'no-store' }).then((response) => response.json()));
   assert(retryState.post125Page2 === 2, `第 2 页应首次 429 后重试一次，实际请求 ${retryState.post125Page2} 次`);
   assert(dataOf(page).pageErrors.length === 0, `页面出现未捕获异常：${dataOf(page).pageErrors.join('; ')}`);
@@ -771,7 +779,7 @@ scenario('帖子页楼中楼构建与跨页来源链接', async (ctx) => {
     // 当前页原始节点自带官方楼号，楼中楼里应原样显示（7 层当前页 + 2 层跨页改造 = 9 个楼号链接）。
     floorLinks: document.querySelectorAll('.comment-container > ul.comments .floor-link-wrapper > .floor-link').length,
   }));
-  assert(state.toolbar === '9 条评论', `工具栏应显示 9 条评论，实际 ${state.toolbar}`);
+  assert(state.toolbar === '9 条回复', `工具栏应显示 9 条回复，实际 ${state.toolbar}`);
   assert(state.virtualCount === 9, `数据模型应有 9 个楼层，实际 ${state.virtualCount}`);
   assert(state.activeItems > 0 && state.activeItems <= state.virtualCount, `已物化楼层数量应在数据模型范围内，实际 ${state.activeItems}/${state.virtualCount}`);
   assert(state.depths.some((value) => value.endsWith(':1')), `应保留楼中楼 depth 信息，实际 ${JSON.stringify(state.depths)}`);
@@ -825,7 +833,7 @@ scenario('原版/楼中楼切换', async (ctx) => {
   await page.evaluate(() => {
     [...document.querySelectorAll('.xns-post-toolbar [data-mode]')].find((button) => button.dataset.mode === 'thread').click();
   });
-  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '9 条评论', 15_000, '释放远端快照后重新构建楼中楼');
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '9 条回复', 15_000, '释放远端快照后重新构建楼中楼');
   const thread = await page.evaluate(() => ({
     roots: document.querySelectorAll('.comment-container > ul.comments > .xns-comment-root').length,
     items: document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length,
@@ -852,7 +860,7 @@ scenario('点击楼层链接跳转并高亮', async (ctx) => {
 scenario('虚拟楼层流滚动回收并恢复远端楼层', async (ctx) => {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/post-460-1`, { waitUntil: 'domcontentloaded' });
-  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '500 条评论', 30_000, '虚拟楼层流加载完成');
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '500 条回复', 30_000, '虚拟楼层流加载完成');
   const top = await page.evaluate(() => {
     const list = document.querySelector('.comment-container > ul.comments');
     return {
@@ -895,7 +903,7 @@ scenario('帖子页回复后重排保留全部楼层（0.5.8 回归）', async (
     composer.querySelector('button').click();
   });
   await waitPost(page, (post) => post.url.endsWith('/api/content/new-comment'));
-  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '9 条评论', 15_000, '回复后重排');
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '9 条回复', 15_000, '回复后重排');
   const state = await page.evaluate(() => ({
     items: document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length,
     roots: document.querySelectorAll('.comment-container > ul.comments > .xns-comment-root').length,
@@ -1227,7 +1235,7 @@ scenario('帖子页回复后新楼层出现在楼中楼（0.5.14 回归）', asy
   // 验证 B1：当前页在分页抓取里永不重抓，回复后若不重抓当前页，刚发的回复看不到。
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/post-789-1`, { waitUntil: 'networkidle0' });
-  await waitFor(page, () => /条评论/.test(document.querySelector('.xns-toolbar-status')?.textContent || ''), 15_000, '帖子页楼中楼构建');
+  await waitFor(page, () => /条回复/.test(document.querySelector('.xns-toolbar-status')?.textContent || ''), 15_000, '帖子页楼中楼构建');
   await page.evaluate(() => {
     const root = document.querySelector('.comment-container > ul.comments > .xns-comment-root');
     [...root.querySelector(':scope > .comment-menu').children].find((item) => item.dataset.xnsAction === 'reply').click();
@@ -1238,7 +1246,7 @@ scenario('帖子页回复后新楼层出现在楼中楼（0.5.14 回归）', asy
   const replyPost = await waitPost(page, (post) => post.url.endsWith('/api/content/new-comment'));
   assert(JSON.parse(replyPost.body).postId === 789, `回复应携带 postId 789，实际 ${replyPost.body}`);
   assert(/^[A-Za-z0-9]{16}$/.test(replyPost.headers['csrf-token'] || ''), `回复请求应带 16 位 csrf-token，实际 ${JSON.stringify(replyPost.headers)}`);
-  await waitFor(page, () => (document.querySelector('.xns-toolbar-status')?.textContent || '').includes('3 条评论'), 15_000, '回复后楼中楼含 3 条');
+  await waitFor(page, () => (document.querySelector('.xns-toolbar-status')?.textContent || '').includes('3 条回复'), 15_000, '回复后楼中楼含 3 条');
   const state = await page.evaluate(() => ({
     floors: [...document.querySelectorAll('.comment-container > ul.comments [data-xns-floor]')].map((node) => node.getAttribute('data-xns-floor')),
     hasNewReply: document.querySelector('.comment-container')?.textContent?.includes('帖子页新回复') || false,
@@ -1340,7 +1348,7 @@ scenario('暗色模式跟随网站 dark-layout（0.5.12 回归）', async (ctx) 
   const postPage = await ctx.newPage();
   await postPage.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]);
   await postPage.goto(`${ctx.base}/post-123-1`, { waitUntil: 'networkidle0' });
-  await waitFor(postPage, () => /条评论/.test(document.querySelector('.xns-toolbar-status')?.textContent || ''), 15_000, '帖子页楼中楼构建');
+  await waitFor(postPage, () => /条回复/.test(document.querySelector('.xns-toolbar-status')?.textContent || ''), 15_000, '帖子页楼中楼构建');
   const lightToolbar = await postPage.evaluate(() => getComputedStyle(document.querySelector('.xns-post-toolbar')).backgroundColor);
   assert(lightToolbar.includes('248, 250, 252'), `网站亮色时工具栏应保持亮色，实际 ${lightToolbar}`);
   // 网站切到暗色（body.dark-layout）：预览组件跟随变暗。
