@@ -3525,6 +3525,14 @@ function createPostPageController({
         toolbar.appendChild(button);
       });
       toolbar.appendChild(createElement('span', 'xns-toolbar-status'));
+      const refresh = createElement('button', 'xns-post-refresh', '刷新');
+      refresh.type = 'button';
+      refresh.title = '重新读取当前页和评论分页';
+      refresh.setAttribute('aria-label', '重新读取当前页和评论分页');
+      refresh.addEventListener('click', () => {
+        if (!this.loading) void this.reloadPages({ refreshCurrentPage: true });
+      });
+      toolbar.appendChild(refresh);
       this.list.closest(selectors.commentContainer)?.insertAdjacentElement('beforebegin', toolbar);
       this.toolbar = toolbar;
       this.updateToolbar();
@@ -3535,6 +3543,11 @@ function createPostPageController({
       qsa(this.toolbar, '[data-mode]').forEach((button) => {
         button.setAttribute('aria-pressed', String(button.dataset.mode === appState.mode));
       });
+      const refresh = qs(this.toolbar, '.xns-post-refresh');
+      if (refresh) {
+        refresh.disabled = this.loading;
+        refresh.setAttribute('aria-busy', String(this.loading));
+      }
       const status = qs(this.toolbar, '.xns-toolbar-status');
       if (!status) return;
       const text = this.toolbarStatusText || (this.records.length ? `${this.records.length} 条评论` : '读取中…');
@@ -3562,7 +3575,8 @@ function createPostPageController({
         await this.loadPages(generation, options, requestController?.signal);
         if (generation !== this.generation) return;
         this.loading = false;
-        this.render();
+        if (appState.mode === 'thread') this.render();
+        else this.showStatus('原版评论已刷新。');
       } catch (error) {
         if (generation !== this.generation) return;
         this.restoreOriginal();
