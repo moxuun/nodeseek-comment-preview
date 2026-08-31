@@ -28,7 +28,6 @@ const XNS_PREVIEW_SHELL_STYLES = `
       .xns-modal-header a:hover, .xns-modal-header a:focus-visible, .xns-modal-header .xns-modal-reply:hover, .xns-modal-header .xns-modal-reply:focus-visible, .xns-modal-close:hover, .xns-modal-close:focus-visible { border-color:var(--xns-accent-strong); color:var(--xns-accent); outline:none; }
       .xns-modal-close { font-size:18px; line-height:1; }
       .xns-modal-toolbar { display:flex; align-items:center; gap:8px; min-height:38px; padding:5px 16px; border-bottom:1px solid rgba(100,116,139,.16); color:var(--xns-muted); background:var(--xns-surface-muted); font:12px/1.2 system-ui,sans-serif; }
-      .xns-modal-toolbar-label { color:var(--xns-subtle); }
       .xns-modal-mode { padding:4px 8px; border:1px solid rgba(59,130,246,.28); border-radius:5px; color:var(--xns-accent-strong); background:var(--xns-accent-soft); }
       .xns-modal-toolbar-status { display:inline-flex; flex:1 1 auto; align-items:center; min-width:0; gap:6px; overflow:hidden; color:var(--xns-muted); white-space:nowrap; text-overflow:ellipsis; }
       .xns-modal-toolbar-status > span { min-width:0; overflow:hidden; text-overflow:ellipsis; }
@@ -47,7 +46,7 @@ const XNS_PREVIEW_SHELL_STYLES = `
       .dark-layout .xns-modal-meta { color:var(--xns-muted); }
       .dark-layout .xns-modal-meta-label { color:var(--xns-subtle); }
       .dark-layout .xns-modal-toolbar { color:var(--xns-muted); background:var(--xns-surface); }
-      .dark-layout .xns-modal-eyebrow, .dark-layout .xns-modal-toolbar-label { color:var(--xns-muted); }
+      .dark-layout .xns-modal-eyebrow { color:var(--xns-muted); }
       .dark-layout .xns-modal-mode { color:var(--xns-accent); border-color:var(--xns-border); background:var(--xns-accent-soft); }
       .dark-layout .xns-scroll-btn { border-color:var(--xns-border); color:var(--xns-muted); background:var(--xns-surface); }
       .dark-layout .xns-scroll-btn:hover, .dark-layout .xns-scroll-btn:focus-visible { border-color:var(--xns-accent-strong); color:var(--xns-accent); background:var(--xns-surface-muted); }

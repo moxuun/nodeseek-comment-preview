@@ -122,7 +122,6 @@ function createPostPageController({
       if (this.toolbar || !this.list) return;
       const toolbar = createElement('nav', 'xns-post-toolbar');
       toolbar.setAttribute('aria-label', '评论布局');
-      toolbar.appendChild(createElement('span', 'xns-post-toolbar-label', '评论'));
       const modeSwitch = createElement('span', 'xns-post-mode-switch');
       modeSwitch.setAttribute('role', 'group');
       modeSwitch.setAttribute('aria-label', '评论布局');

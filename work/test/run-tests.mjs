@@ -553,6 +553,29 @@ scenario('预览顶部分享复制规范帖子链接', async (ctx) => {
   await page.close();
 });
 
+scenario('工具栏隐藏冗余上下文标签', async (ctx) => {
+  const postPage = await openPostPage(ctx);
+  const postToolbar = await postPage.evaluate(() => ({
+    visibleLabel: document.querySelector('.xns-post-toolbar-label')?.textContent || '',
+    modes: [...document.querySelectorAll('.xns-post-toolbar [data-mode]')].map((node) => node.textContent?.trim()),
+    status: document.querySelector('.xns-toolbar-status')?.textContent || '',
+  }));
+  assert(!postToolbar.visibleLabel, `帖子页不应显示“评论”标签，实际 ${postToolbar.visibleLabel}`);
+  assert(JSON.stringify(postToolbar.modes) === JSON.stringify(['楼中楼', '原版']),
+    `帖子页模式按钮应保留，实际 ${JSON.stringify(postToolbar.modes)}`);
+  await postPage.close();
+
+  const previewPage = await openPreviewModal(ctx);
+  const previewToolbar = await previewPage.evaluate(() => ({
+    visibleLabel: document.querySelector('.xns-modal-toolbar-label')?.textContent || '',
+    mode: document.querySelector('.xns-modal-mode')?.textContent?.trim() || '',
+    refresh: Boolean(document.querySelector('.xns-modal-toolbar .xns-refresh-post')),
+  }));
+  assert(!previewToolbar.visibleLabel, `预览页不应显示“阅读”标签，实际 ${previewToolbar.visibleLabel}`);
+  assert(previewToolbar.mode === '楼中楼' && previewToolbar.refresh, '预览模式和刷新功能应保留');
+  await previewPage.close();
+});
+
 scenario('短期缓存命中 HTML 但不保留 Document，刷新时重新抓取', async (ctx) => {
   const page = await ctx.newPage();
   await installParserCounter(page);

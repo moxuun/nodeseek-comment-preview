@@ -587,7 +587,6 @@ function createPreviewController({
     toolbar.setAttribute('aria-label', '预览工具');
     const toolbarStatus = createElement('span', 'xns-modal-toolbar-status xns-preview-status', '准备读取…');
     toolbar.append(
-      createElement('span', 'xns-modal-toolbar-label', '阅读'),
       createElement('span', 'xns-modal-mode', '楼中楼'),
       toolbarStatus,
       createRefreshButton(() => { void refreshPreviewModal(); }),
