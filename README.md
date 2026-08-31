@@ -36,7 +36,9 @@
 
 项目的模块划分、数据流和安全边界见下图。README 使用白色调静态预览；点击图片可打开交互式架构图。
 
-[![NodeSeek 楼中楼预览脚本架构图](nodeseek-architecture.visual-check.2048x1320.light.png)](nodeseek-architecture.html)
+[![NodeSeek 楼中楼预览脚本架构图](nodeseek-architecture.visual-check.2048x1320.light.png)](https://htmlpreview.github.io/?https://github.com/moxuun/nodeseek-comment-preview/blob/master/nodeseek-architecture.html)
+
+架构图源文件：[nodeseek-architecture.html](nodeseek-architecture.html)。
 
 架构图源规格见 [nodeseek-architecture.architecture.json](nodeseek-architecture.architecture.json)。
 
