@@ -27,10 +27,10 @@ node work/build.mjs
 
 架构图展示模块划分、数据流和安全边界。点击白色调静态预览可打开交互式版本：
 
-[![NodeSeek 楼中楼预览脚本架构图](../nodeseek-architecture.visual-check.2048x1320.light.png)](https://htmlpreview.github.io/?https://github.com/moxuun/nodeseek-comment-preview/blob/master/nodeseek-architecture.html)
+[![NodeSeek 楼中楼预览脚本架构图](../docs/architecture/nodeseek-architecture.visual-check.2048x1320.light.png)](https://htmlpreview.github.io/?https://github.com/moxuun/nodeseek-comment-preview/blob/master/docs/architecture/nodeseek-architecture.html)
 
-- [架构图源文件](../nodeseek-architecture.html)
-- [架构图源规格](../nodeseek-architecture.architecture.json)
+- [架构图源文件](../docs/architecture/nodeseek-architecture.html)
+- [架构图源规格](../docs/architecture/nodeseek-architecture.architecture.json)
 
 ## 测试与真实环境检查
 

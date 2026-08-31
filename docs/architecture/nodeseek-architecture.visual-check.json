@@ -5,7 +5,7 @@
   "status": "pass",
   "visualReview": "pending",
   "artifact": {
-    "path": "C:\\Users\\EMANON\\Desktop\\nodeseek-comment-preview\\nodeseek-architecture.html",
+    "path": "docs/architecture/nodeseek-architecture.html",
     "sha256": "6b399fdff847c2cc22485fcd3d96cf84c72b8ea473a76f0c5dd3555dd093e3bb",
     "bytes": 722772
   },
