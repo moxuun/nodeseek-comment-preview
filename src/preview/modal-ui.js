@@ -36,6 +36,58 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     return button;
   }
 
+  function createMoreMenu({ onHelp, onCopyLink }) {
+    const wrapper = createElement('div', 'xns-modal-more');
+    const toggle = createElement('button', 'xns-modal-tool xns-modal-more-toggle', '更多');
+    toggle.type = 'button';
+    toggle.title = '更多预览操作';
+    toggle.setAttribute('aria-label', '更多预览操作');
+    toggle.setAttribute('aria-haspopup', 'menu');
+    toggle.setAttribute('aria-expanded', 'false');
+    const menu = createElement('div', 'xns-modal-more-menu');
+    menu.setAttribute('role', 'menu');
+    menu.hidden = true;
+    const help = createElement('button', 'xns-modal-more-item', '帮助与快捷键');
+    help.type = 'button';
+    help.setAttribute('role', 'menuitem');
+    const copy = createElement('button', 'xns-modal-more-item', '复制原帖链接');
+    copy.type = 'button';
+    copy.setAttribute('role', 'menuitem');
+    menu.append(help, copy);
+    wrapper.append(toggle, menu);
+
+    let open = false;
+    const setOpen = (next) => {
+      open = Boolean(next);
+      menu.hidden = !open;
+      toggle.setAttribute('aria-expanded', String(open));
+    };
+    const close = () => setOpen(false);
+    const onDocumentClick = (event) => {
+      if (!wrapper.contains(event.target)) close();
+    };
+    toggle.addEventListener('click', (event) => {
+      event.stopPropagation();
+      setOpen(!open);
+    });
+    help.addEventListener('click', () => {
+      close();
+      onHelp?.();
+    });
+    copy.addEventListener('click', () => {
+      close();
+      onCopyLink?.({ setLabel: (label) => { copy.textContent = label; } });
+    });
+    documentObj.addEventListener('click', onDocumentClick, true);
+
+    return Object.freeze({
+      element: wrapper,
+      close,
+      setCopyLabel: (label) => { copy.textContent = label; },
+      destroy: () => documentObj.removeEventListener('click', onDocumentClick, true),
+    });
+  }
+
   function installPreviewScrollButtons(dialog, body) {
     const group = createElement('div', 'xns-preview-scroll-btns');
     group.setAttribute('role', 'toolbar');
@@ -87,6 +139,7 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     closeImageLightbox();
     state.modal?.requestController?.abort();
     state.modal?.featureCleanup?.();
+    state.modal?.moreMenu?.destroy?.();
     state.modal?.refreshScrollCleanup?.();
     state.modal?.scrollCleanup?.();
     state.modal?.overlay?.remove();
@@ -103,7 +156,7 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     return button;
   }
 
-  return Object.freeze({ removeBodyLock, installPreviewScrollButtons, closeModal, createCloseButton, createRefreshButton });
+  return Object.freeze({ removeBodyLock, installPreviewScrollButtons, closeModal, createCloseButton, createRefreshButton, createMoreMenu });
 }
 
 const xnsPreviewModalUi = createPreviewModalUi({
@@ -118,3 +171,4 @@ const installPreviewScrollButtons = (...args) => xnsPreviewModalUi.installPrevie
 const closeModal = (...args) => xnsPreviewModalUi.closeModal(...args);
 const createCloseButton = (...args) => xnsPreviewModalUi.createCloseButton(...args);
 const createRefreshButton = (...args) => xnsPreviewModalUi.createRefreshButton(...args);
+const createMoreMenu = (...args) => xnsPreviewModalUi.createMoreMenu(...args);

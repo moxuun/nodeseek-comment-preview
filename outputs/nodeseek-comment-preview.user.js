@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.25
+// @version      0.5.26
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -2523,6 +2523,58 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     return button;
   }
 
+  function createMoreMenu({ onHelp, onCopyLink }) {
+    const wrapper = createElement('div', 'xns-modal-more');
+    const toggle = createElement('button', 'xns-modal-tool xns-modal-more-toggle', '更多');
+    toggle.type = 'button';
+    toggle.title = '更多预览操作';
+    toggle.setAttribute('aria-label', '更多预览操作');
+    toggle.setAttribute('aria-haspopup', 'menu');
+    toggle.setAttribute('aria-expanded', 'false');
+    const menu = createElement('div', 'xns-modal-more-menu');
+    menu.setAttribute('role', 'menu');
+    menu.hidden = true;
+    const help = createElement('button', 'xns-modal-more-item', '帮助与快捷键');
+    help.type = 'button';
+    help.setAttribute('role', 'menuitem');
+    const copy = createElement('button', 'xns-modal-more-item', '复制原帖链接');
+    copy.type = 'button';
+    copy.setAttribute('role', 'menuitem');
+    menu.append(help, copy);
+    wrapper.append(toggle, menu);
+
+    let open = false;
+    const setOpen = (next) => {
+      open = Boolean(next);
+      menu.hidden = !open;
+      toggle.setAttribute('aria-expanded', String(open));
+    };
+    const close = () => setOpen(false);
+    const onDocumentClick = (event) => {
+      if (!wrapper.contains(event.target)) close();
+    };
+    toggle.addEventListener('click', (event) => {
+      event.stopPropagation();
+      setOpen(!open);
+    });
+    help.addEventListener('click', () => {
+      close();
+      onHelp?.();
+    });
+    copy.addEventListener('click', () => {
+      close();
+      onCopyLink?.({ setLabel: (label) => { copy.textContent = label; } });
+    });
+    documentObj.addEventListener('click', onDocumentClick, true);
+
+    return Object.freeze({
+      element: wrapper,
+      close,
+      setCopyLabel: (label) => { copy.textContent = label; },
+      destroy: () => documentObj.removeEventListener('click', onDocumentClick, true),
+    });
+  }
+
   function installPreviewScrollButtons(dialog, body) {
     const group = createElement('div', 'xns-preview-scroll-btns');
     group.setAttribute('role', 'toolbar');
@@ -2574,6 +2626,7 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     closeImageLightbox();
     state.modal?.requestController?.abort();
     state.modal?.featureCleanup?.();
+    state.modal?.moreMenu?.destroy?.();
     state.modal?.refreshScrollCleanup?.();
     state.modal?.scrollCleanup?.();
     state.modal?.overlay?.remove();
@@ -2590,7 +2643,7 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     return button;
   }
 
-  return Object.freeze({ removeBodyLock, installPreviewScrollButtons, closeModal, createCloseButton, createRefreshButton });
+  return Object.freeze({ removeBodyLock, installPreviewScrollButtons, closeModal, createCloseButton, createRefreshButton, createMoreMenu });
 }
 
 const xnsPreviewModalUi = createPreviewModalUi({
@@ -2605,6 +2658,7 @@ const installPreviewScrollButtons = (...args) => xnsPreviewModalUi.installPrevie
 const closeModal = (...args) => xnsPreviewModalUi.closeModal(...args);
 const createCloseButton = (...args) => xnsPreviewModalUi.createCloseButton(...args);
 const createRefreshButton = (...args) => xnsPreviewModalUi.createRefreshButton(...args);
+const createMoreMenu = (...args) => xnsPreviewModalUi.createMoreMenu(...args);
 
 
 // 预览内容增强：ANSI、官方魔法标签页、Markdown 标签页、图片和代码复制。
@@ -2975,8 +3029,50 @@ function createPreviewController({
   closeModal,
   createCloseButton,
   createRefreshButton,
+  createMoreMenu,
   openPreviewComposer,
 }) {
+  function createPreviewHelpPanel() {
+    const panel = createElement('aside', 'xns-modal-help');
+    panel.hidden = true;
+    panel.setAttribute('aria-label', '预览帮助');
+    panel.appendChild(createElement('strong', '', '预览提示'));
+    const list = createElement('ul', 'xns-modal-help-list');
+    [
+      ['Esc', '关闭预览；打开图片时先关闭图片查看器。'],
+      ['右侧 ↑ ↓', '快速回到顶部或底部，滚动位置会在刷新后尽量保留。'],
+      ['楼层号', '打开原帖对应页，并定位到该楼层。'],
+      ['回复 / 编辑', '使用 NodeSeek 原生接口；失败时会保留当前内容并显示原因。'],
+    ].forEach(([key, description]) => {
+      const item = createElement('li', 'xns-modal-help-item');
+      item.append(createElement('kbd', '', key), createElement('span', '', description));
+      list.appendChild(item);
+    });
+    panel.appendChild(list);
+    return panel;
+  }
+
+  async function copyPreviewLink(url, setLabel) {
+    const text = url?.href || '';
+    if (!text) throw new Error('原帖链接不可用');
+    if (windowObj.navigator?.clipboard?.writeText) {
+      await windowObj.navigator.clipboard.writeText(text);
+    } else {
+      const input = documentObj.createElement('textarea');
+      input.value = text;
+      input.setAttribute('readonly', '');
+      input.style.position = 'fixed';
+      input.style.opacity = '0';
+      documentObj.body.appendChild(input);
+      input.select();
+      const copied = documentObj.execCommand?.('copy');
+      input.remove();
+      if (!copied) throw new Error('浏览器拒绝复制');
+    }
+    setLabel?.('已复制');
+    windowObj.setTimeout(() => setLabel?.('复制原帖链接'), 1_800);
+  }
+
   function buildPreviewContent(url, parsed, options = {}) {
     const wrapper = createElement('div', 'xns-preview-content');
     const title = qs(parsed, selectors.postTitle)?.textContent?.trim() || '';
@@ -3328,8 +3424,20 @@ function createPreviewController({
     original.target = '_blank';
     original.rel = 'noopener noreferrer';
     original.title = '在新标签打开原帖';
+    const helpPanel = createPreviewHelpPanel();
+    const moreMenu = createMoreMenu({
+      onHelp: () => {
+        const modal = state.modal;
+        if (!modal) return;
+        helpPanel.hidden = !helpPanel.hidden;
+        if (!helpPanel.hidden) helpPanel.scrollIntoView?.({ block: 'nearest' });
+      },
+      onCopyLink: ({ setLabel }) => {
+        void copyPreviewLink(url, setLabel).catch(() => setLabel('复制失败'));
+      },
+    });
     const close = createCloseButton(closeModal);
-    actions.append(replyPost, original, close);
+    actions.append(replyPost, original, moreMenu.element, close);
     header.append(heading, actions);
     const toolbar = createElement('div', 'xns-modal-toolbar');
     toolbar.setAttribute('role', 'toolbar');
@@ -3343,12 +3451,12 @@ function createPreviewController({
     );
     const body = createElement('div', 'xns-modal-body');
     body.appendChild(createElement('p', 'xns-loading', '正在读取帖子内容…'));
-    dialog.append(header, toolbar, body);
+    dialog.append(header, toolbar, helpPanel, body);
     const scrollCleanup = installPreviewScrollButtons(dialog, body);
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, loading: false, loadGeneration: 0, requestController: null, toolbarStatus };
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, moreMenu, helpPanel, loading: false, loadGeneration: 0, requestController: null, toolbarStatus };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }
@@ -3381,6 +3489,7 @@ const xnsPreviewController = createPreviewController({
   closeModal,
   createCloseButton,
   createRefreshButton,
+  createMoreMenu,
   openPreviewComposer: (...args) => openPreviewComposer(...args),
 });
 const buildPreviewContent = (...args) => xnsPreviewController.buildPreviewContent(...args);
@@ -3913,6 +4022,12 @@ function installStyle() {
       .xns-modal-eyebrow { display:block; margin-bottom:2px; color:#64748b; font:11px/1.2 system-ui,sans-serif; letter-spacing:.02em; }
       .xns-modal-title { min-width:0; overflow:hidden; margin:0; font-size:17px; line-height:1.3; text-overflow:ellipsis; white-space:nowrap; }
       .xns-modal-actions { display:flex; align-items:center; gap:6px; flex:0 0 auto; }
+      .xns-modal-more { position:relative; }
+      .xns-modal-actions .xns-modal-tool { margin-left:0; }
+      .xns-modal-more-menu { position:absolute; top:calc(100% + 6px); right:0; z-index:5; display:flex; min-width:150px; flex-direction:column; gap:2px; padding:4px; border:1px solid rgba(100,116,139,.25); border-radius:7px; background:#fff; box-shadow:0 8px 24px rgba(15,23,42,.18); }
+      .xns-modal-more-menu[hidden] { display:none; }
+      .xns-modal-more-item { padding:7px 9px; border:0; border-radius:5px; color:#475569; background:transparent; cursor:pointer; text-align:left; white-space:nowrap; font:12px/1.3 system-ui,sans-serif; }
+      .xns-modal-more-item:hover, .xns-modal-more-item:focus-visible { color:#2563eb; background:#eff6ff; outline:none; }
       .xns-modal-header a, .xns-modal-header .xns-modal-reply, .xns-modal-close { padding:5px 8px; border:1px solid rgba(100,116,139,.25); border-radius:6px; color:inherit; background:#f8fafc; cursor:pointer; text-decoration:none; font:12px/1.2 system-ui,sans-serif; }
       .xns-modal-header a:hover, .xns-modal-header a:focus-visible, .xns-modal-header .xns-modal-reply:hover, .xns-modal-header .xns-modal-reply:focus-visible, .xns-modal-close:hover, .xns-modal-close:focus-visible { border-color:#3b82f6; color:#2563eb; outline:none; }
       .xns-modal-close { font-size:18px; line-height:1; }
@@ -3930,6 +4045,11 @@ function installStyle() {
       .xns-modal-tool { display:inline-flex; align-items:center; gap:5px; margin-left:auto; padding:4px 8px; border:1px solid rgba(100,116,139,.25); border-radius:6px; color:#475569; background:#fff; cursor:pointer; font:12px/1.2 system-ui,sans-serif; }
       .xns-modal-tool:hover, .xns-modal-tool:focus-visible { border-color:#3b82f6; color:#2563eb; outline:none; }
       .xns-modal-tool svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+      .xns-modal-help { padding:8px 16px; border-bottom:1px solid rgba(59,130,246,.18); color:#475569; background:#eff6ff; font:12px/1.45 system-ui,sans-serif; }
+      .xns-modal-help[hidden] { display:none; }
+      .xns-modal-help-list { display:flex; flex-wrap:wrap; gap:5px 16px; margin:5px 0 0; padding:0; list-style:none; }
+      .xns-modal-help-item { display:inline-flex; align-items:center; gap:5px; }
+      .xns-modal-help kbd { padding:1px 5px; border:1px solid rgba(100,116,139,.28); border-bottom-width:2px; border-radius:4px; color:#334155; background:#fff; font:11px/1.3 ui-monospace,SFMono-Regular,Consolas,monospace; }
       .xns-modal-body { overflow:auto; padding:clamp(10px,2vw,18px); }
       .xns-modal-body img { max-width:100%; height:auto; }
       .xns-preview-content { font-size:14px; line-height:1.45; }
@@ -4030,6 +4150,11 @@ function installStyle() {
       .xns-lightbox-close:hover, .xns-lightbox-open:hover, .xns-lightbox-close:focus-visible, .xns-lightbox-open:focus-visible { background:rgba(15,23,42,.9); outline:none; }
       .dark-layout .xns-modal { color:#e5e7eb; background:#18202b; }
       .dark-layout .xns-modal-header a, .dark-layout .xns-modal-header .xns-modal-reply, .dark-layout .xns-modal-close, .dark-layout .xns-modal-tool, .dark-layout .xns-preview-post, .dark-layout .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
+      .dark-layout .xns-modal-more-menu { color:#e5e7eb; background:#111827; border-color:rgba(148,163,184,.35); }
+      .dark-layout .xns-modal-more-item { color:#cbd5e1; }
+      .dark-layout .xns-modal-more-item:hover, .dark-layout .xns-modal-more-item:focus-visible { color:#93c5fd; background:rgba(59,130,246,.18); }
+      .dark-layout .xns-modal-help { color:#cbd5e1; background:rgba(59,130,246,.14); border-bottom-color:rgba(96,165,250,.25); }
+      .dark-layout .xns-modal-help kbd { color:#e5e7eb; background:#18202b; border-color:rgba(148,163,184,.35); }
       .dark-layout .xns-modal-toolbar { color:#9ca3af; background:#111827; }
       .dark-layout .xns-modal-eyebrow, .dark-layout .xns-modal-toolbar-label { color:#9ca3af; }
       .dark-layout .xns-modal-mode { color:#93c5fd; border-color:rgba(96,165,250,.45); background:rgba(59,130,246,.18); }

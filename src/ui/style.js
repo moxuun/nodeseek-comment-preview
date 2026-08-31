@@ -49,6 +49,12 @@ function installStyle() {
       .xns-modal-eyebrow { display:block; margin-bottom:2px; color:#64748b; font:11px/1.2 system-ui,sans-serif; letter-spacing:.02em; }
       .xns-modal-title { min-width:0; overflow:hidden; margin:0; font-size:17px; line-height:1.3; text-overflow:ellipsis; white-space:nowrap; }
       .xns-modal-actions { display:flex; align-items:center; gap:6px; flex:0 0 auto; }
+      .xns-modal-more { position:relative; }
+      .xns-modal-actions .xns-modal-tool { margin-left:0; }
+      .xns-modal-more-menu { position:absolute; top:calc(100% + 6px); right:0; z-index:5; display:flex; min-width:150px; flex-direction:column; gap:2px; padding:4px; border:1px solid rgba(100,116,139,.25); border-radius:7px; background:#fff; box-shadow:0 8px 24px rgba(15,23,42,.18); }
+      .xns-modal-more-menu[hidden] { display:none; }
+      .xns-modal-more-item { padding:7px 9px; border:0; border-radius:5px; color:#475569; background:transparent; cursor:pointer; text-align:left; white-space:nowrap; font:12px/1.3 system-ui,sans-serif; }
+      .xns-modal-more-item:hover, .xns-modal-more-item:focus-visible { color:#2563eb; background:#eff6ff; outline:none; }
       .xns-modal-header a, .xns-modal-header .xns-modal-reply, .xns-modal-close { padding:5px 8px; border:1px solid rgba(100,116,139,.25); border-radius:6px; color:inherit; background:#f8fafc; cursor:pointer; text-decoration:none; font:12px/1.2 system-ui,sans-serif; }
       .xns-modal-header a:hover, .xns-modal-header a:focus-visible, .xns-modal-header .xns-modal-reply:hover, .xns-modal-header .xns-modal-reply:focus-visible, .xns-modal-close:hover, .xns-modal-close:focus-visible { border-color:#3b82f6; color:#2563eb; outline:none; }
       .xns-modal-close { font-size:18px; line-height:1; }
@@ -66,6 +72,11 @@ function installStyle() {
       .xns-modal-tool { display:inline-flex; align-items:center; gap:5px; margin-left:auto; padding:4px 8px; border:1px solid rgba(100,116,139,.25); border-radius:6px; color:#475569; background:#fff; cursor:pointer; font:12px/1.2 system-ui,sans-serif; }
       .xns-modal-tool:hover, .xns-modal-tool:focus-visible { border-color:#3b82f6; color:#2563eb; outline:none; }
       .xns-modal-tool svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+      .xns-modal-help { padding:8px 16px; border-bottom:1px solid rgba(59,130,246,.18); color:#475569; background:#eff6ff; font:12px/1.45 system-ui,sans-serif; }
+      .xns-modal-help[hidden] { display:none; }
+      .xns-modal-help-list { display:flex; flex-wrap:wrap; gap:5px 16px; margin:5px 0 0; padding:0; list-style:none; }
+      .xns-modal-help-item { display:inline-flex; align-items:center; gap:5px; }
+      .xns-modal-help kbd { padding:1px 5px; border:1px solid rgba(100,116,139,.28); border-bottom-width:2px; border-radius:4px; color:#334155; background:#fff; font:11px/1.3 ui-monospace,SFMono-Regular,Consolas,monospace; }
       .xns-modal-body { overflow:auto; padding:clamp(10px,2vw,18px); }
       .xns-modal-body img { max-width:100%; height:auto; }
       .xns-preview-content { font-size:14px; line-height:1.45; }
@@ -166,6 +177,11 @@ function installStyle() {
       .xns-lightbox-close:hover, .xns-lightbox-open:hover, .xns-lightbox-close:focus-visible, .xns-lightbox-open:focus-visible { background:rgba(15,23,42,.9); outline:none; }
       .dark-layout .xns-modal { color:#e5e7eb; background:#18202b; }
       .dark-layout .xns-modal-header a, .dark-layout .xns-modal-header .xns-modal-reply, .dark-layout .xns-modal-close, .dark-layout .xns-modal-tool, .dark-layout .xns-preview-post, .dark-layout .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
+      .dark-layout .xns-modal-more-menu { color:#e5e7eb; background:#111827; border-color:rgba(148,163,184,.35); }
+      .dark-layout .xns-modal-more-item { color:#cbd5e1; }
+      .dark-layout .xns-modal-more-item:hover, .dark-layout .xns-modal-more-item:focus-visible { color:#93c5fd; background:rgba(59,130,246,.18); }
+      .dark-layout .xns-modal-help { color:#cbd5e1; background:rgba(59,130,246,.14); border-bottom-color:rgba(96,165,250,.25); }
+      .dark-layout .xns-modal-help kbd { color:#e5e7eb; background:#18202b; border-color:rgba(148,163,184,.35); }
       .dark-layout .xns-modal-toolbar { color:#9ca3af; background:#111827; }
       .dark-layout .xns-modal-eyebrow, .dark-layout .xns-modal-toolbar-label { color:#9ca3af; }
       .dark-layout .xns-modal-mode { color:#93c5fd; border-color:rgba(96,165,250,.45); background:rgba(59,130,246,.18); }

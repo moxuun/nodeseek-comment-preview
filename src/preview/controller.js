@@ -24,8 +24,50 @@ function createPreviewController({
   closeModal,
   createCloseButton,
   createRefreshButton,
+  createMoreMenu,
   openPreviewComposer,
 }) {
+  function createPreviewHelpPanel() {
+    const panel = createElement('aside', 'xns-modal-help');
+    panel.hidden = true;
+    panel.setAttribute('aria-label', '预览帮助');
+    panel.appendChild(createElement('strong', '', '预览提示'));
+    const list = createElement('ul', 'xns-modal-help-list');
+    [
+      ['Esc', '关闭预览；打开图片时先关闭图片查看器。'],
+      ['右侧 ↑ ↓', '快速回到顶部或底部，滚动位置会在刷新后尽量保留。'],
+      ['楼层号', '打开原帖对应页，并定位到该楼层。'],
+      ['回复 / 编辑', '使用 NodeSeek 原生接口；失败时会保留当前内容并显示原因。'],
+    ].forEach(([key, description]) => {
+      const item = createElement('li', 'xns-modal-help-item');
+      item.append(createElement('kbd', '', key), createElement('span', '', description));
+      list.appendChild(item);
+    });
+    panel.appendChild(list);
+    return panel;
+  }
+
+  async function copyPreviewLink(url, setLabel) {
+    const text = url?.href || '';
+    if (!text) throw new Error('原帖链接不可用');
+    if (windowObj.navigator?.clipboard?.writeText) {
+      await windowObj.navigator.clipboard.writeText(text);
+    } else {
+      const input = documentObj.createElement('textarea');
+      input.value = text;
+      input.setAttribute('readonly', '');
+      input.style.position = 'fixed';
+      input.style.opacity = '0';
+      documentObj.body.appendChild(input);
+      input.select();
+      const copied = documentObj.execCommand?.('copy');
+      input.remove();
+      if (!copied) throw new Error('浏览器拒绝复制');
+    }
+    setLabel?.('已复制');
+    windowObj.setTimeout(() => setLabel?.('复制原帖链接'), 1_800);
+  }
+
   function buildPreviewContent(url, parsed, options = {}) {
     const wrapper = createElement('div', 'xns-preview-content');
     const title = qs(parsed, selectors.postTitle)?.textContent?.trim() || '';
@@ -377,8 +419,20 @@ function createPreviewController({
     original.target = '_blank';
     original.rel = 'noopener noreferrer';
     original.title = '在新标签打开原帖';
+    const helpPanel = createPreviewHelpPanel();
+    const moreMenu = createMoreMenu({
+      onHelp: () => {
+        const modal = state.modal;
+        if (!modal) return;
+        helpPanel.hidden = !helpPanel.hidden;
+        if (!helpPanel.hidden) helpPanel.scrollIntoView?.({ block: 'nearest' });
+      },
+      onCopyLink: ({ setLabel }) => {
+        void copyPreviewLink(url, setLabel).catch(() => setLabel('复制失败'));
+      },
+    });
     const close = createCloseButton(closeModal);
-    actions.append(replyPost, original, close);
+    actions.append(replyPost, original, moreMenu.element, close);
     header.append(heading, actions);
     const toolbar = createElement('div', 'xns-modal-toolbar');
     toolbar.setAttribute('role', 'toolbar');
@@ -392,12 +446,12 @@ function createPreviewController({
     );
     const body = createElement('div', 'xns-modal-body');
     body.appendChild(createElement('p', 'xns-loading', '正在读取帖子内容…'));
-    dialog.append(header, toolbar, body);
+    dialog.append(header, toolbar, helpPanel, body);
     const scrollCleanup = installPreviewScrollButtons(dialog, body);
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, loading: false, loadGeneration: 0, requestController: null, toolbarStatus };
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, moreMenu, helpPanel, loading: false, loadGeneration: 0, requestController: null, toolbarStatus };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }
@@ -430,6 +484,7 @@ const xnsPreviewController = createPreviewController({
   closeModal,
   createCloseButton,
   createRefreshButton,
+  createMoreMenu,
   openPreviewComposer: (...args) => openPreviewComposer(...args),
 });
 const buildPreviewContent = (...args) => xnsPreviewController.buildPreviewContent(...args);
