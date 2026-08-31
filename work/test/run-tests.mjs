@@ -475,7 +475,7 @@ scenario('多评论 SSR 统计使用索引避免重复查找', async (ctx) => {
   await installLargeArrayFindCounter(page);
   await page.goto(`${ctx.base}/list-128`, { waitUntil: 'networkidle0' });
   await page.click('a[href="/post-128-1"]');
-  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 120 条回复', 15_000, '120 条评论预览完成');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '120 条回复', 15_000, '120 条评论预览完成');
   const state = await page.evaluate(() => {
     const comment = document.querySelector('.xns-modal .xns-preview-thread .content-item[data-xns-floor="1"]');
     const like = [...(comment?.querySelector(':scope > .comment-menu')?.children || [])]
@@ -492,7 +492,7 @@ scenario('预览首屏第一页评论不重复克隆', async (ctx) => {
   await installSanitizeQueryCounter(page);
   await page.goto(`${ctx.base}/list`, { waitUntil: 'networkidle0' });
   await page.click('a[href="/post-123-1"]');
-  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 9 条回复', 15_000, '预览首屏完成');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '9 条回复', 15_000, '预览首屏完成');
   const stats = await page.evaluate(() => window.__xnsSanitizeQueryStats);
   // 帖子根 1 次 + 第一页 7 条评论 + 第二页 2 条评论；第一页不能被后台加载重复克隆。
   assert(stats.all === 10, `预览应只克隆 10 个节点，实际 ${stats.all} 次`);
@@ -641,13 +641,13 @@ scenario('短期缓存命中 HTML 但不保留 Document，刷新时重新抓取'
   await page.goto(`${ctx.base}/list`, { waitUntil: 'networkidle0' });
   const link = page.locator('a[href="/post-123-1"]');
   await link.click();
-  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 9 条回复', 15_000, '首次解析完成');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '9 条回复', 15_000, '首次解析完成');
   const firstCount = await page.evaluate(() => window.__xnsParserStats.count);
   assert(firstCount === 2, `首次预览应解析两个帖子页面，实际 ${firstCount} 次`);
   await page.locator('.xns-modal-close').click();
   await waitFor(page, () => !document.querySelector('.xns-modal'), 5_000, '关闭预览');
   await link.click();
-  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 9 条回复', 5_000, '缓存解析完成');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '9 条回复', 5_000, '缓存解析完成');
   const cachedCount = await page.evaluate(() => window.__xnsParserStats.count);
   assert(cachedCount >= firstCount + 2, `HTML 缓存命中后仍应释放旧 Document 并重新解析两个页面，实际 ${firstCount} -> ${cachedCount}`);
   await page.locator('.xns-refresh-post').click();
@@ -661,7 +661,7 @@ scenario('投票信息接近视口时才读取', async (ctx) => {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/list-128`, { waitUntil: 'networkidle0' });
   await page.click('a[href="/post-128-1"]');
-  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 120 条回复', 15_000, '长帖预览完成');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '120 条回复', 15_000, '长帖预览完成');
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert(dataOf(page).voteInfoGets.length === 0, `底部不可见投票不应在首屏请求，实际 ${dataOf(page).voteInfoGets.length} 次`);
   assert(await materializeFloor(page, 120, '.xns-modal .xns-preview-thread'), '应能从虚拟列表物化底部评论 #120');
@@ -679,7 +679,7 @@ scenario('关闭预览会取消未完成的远端分页请求', async (ctx) => {
   const remoteRequest = page.waitForRequest((request) => request.url().endsWith('/post-124-2'), { timeout: 5_000 });
   await page.click('a[href="/post-124-1"]');
   await remoteRequest;
-  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 2 条回复', 5_000, '当前页预览完成');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '2 条回复', 5_000, '当前页预览完成');
   await page.click('.xns-modal-close');
   await waitFor(page, () => !document.querySelector('.xns-modal'), 5_000, '预览关闭');
   await new Promise((resolve) => setTimeout(resolve, 100));
@@ -756,7 +756,7 @@ scenario('预览弹窗远端内容滚动后才增强', async (ctx) => {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/list-460`, { waitUntil: 'networkidle0' });
   await page.click('a[href="/post-460-1"]');
-  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 500 条回复', 30_000, '富内容预览加载完成');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '500 条回复', 30_000, '富内容预览加载完成');
   const before = await page.evaluate(() => ({
     remoteCodeBlocks: document.querySelectorAll('.xns-modal [data-xns-remote] pre').length,
     remoteCopyButtons: document.querySelectorAll('.xns-modal [data-xns-remote] .xns-code-copy-btn').length,
@@ -843,7 +843,7 @@ scenario('预览分页完成一页就立即显示（0.5.24 回归）', async (ct
   await waitFor(page, () => {
     const heading = document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent || '';
     const status = document.querySelector('.xns-modal .xns-page-loading')?.textContent || '';
-    return heading === '楼中楼预览 · 4 条回复' && /已读取 2\/4 页/.test(status);
+    return heading === '4 条回复' && /已读取 2\/4 页/.test(status);
   }, 1_200, '预览第 2 页渐进显示');
   const partial = await page.evaluate(() => ({
     heading: document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent || '',
@@ -852,7 +852,7 @@ scenario('预览分页完成一页就立即显示（0.5.24 回归）', async (ct
   }));
   assert(partial.virtualCount === 4 && /正在读取其他分页/.test(partial.loading),
     `第 2 页返回时应先显示 4 条并继续后台加载，实际 ${JSON.stringify(partial)}`);
-  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 8 条回复', 6_000, '预览剩余分页完成');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '8 条回复', 6_000, '预览剩余分页完成');
   await page.close();
 });
 
@@ -868,7 +868,7 @@ scenario('预览分页失败保留内容并在工具栏提示', async (ctx) => {
     virtualCount: Number(document.querySelector('.xns-modal .xns-preview-thread')?.dataset.xnsVirtualCount || 0),
     bodyStatuses: document.querySelectorAll('.xns-modal .xns-preview-comments > .xns-preview-status').length,
   }));
-  assert(state.heading === '楼中楼预览 · 2 条回复', `分页失败时已读内容应保留，实际 ${state.heading}`);
+  assert(state.heading === '2 条回复', `分页失败时已读内容应保留，实际 ${state.heading}`);
   assert(state.virtualCount === 2, `分页失败时虚拟数据应保留 2 条，实际 ${state.virtualCount}`);
   assert(/1 页读取失败/.test(state.status), `工具栏应提示失败页数，实际 ${state.status}`);
   assert(state.bodyStatuses === 0, `分页状态不应重复插入评论列表底部，实际 ${state.bodyStatuses} 个`);
@@ -1198,13 +1198,13 @@ scenario('同一页面重复打开帖子命中短期缓存，手动刷新强制�
     return ['/post-123-1', '/post-123-2'].includes(pathname);
   }).length;
   await link.click();
-  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 9 条回复', 15_000, '首次预览完成');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '9 条回复', 15_000, '首次预览完成');
   const firstReads = postReads();
   assert(firstReads === 2, `首次预览应读取 2 个帖子页面，实际 ${firstReads}`);
   await page.locator('.xns-modal-close').click();
   await waitFor(page, () => !document.querySelector('.xns-modal'), 5_000, '关闭首次预览');
   await link.click();
-  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 9 条回复', 5_000, '缓存预览完成');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '9 条回复', 5_000, '缓存预览完成');
   const cachedReads = postReads();
   assert(cachedReads === firstReads, `第二次预览应命中缓存，不应新增请求，实际 ${firstReads} -> ${cachedReads}`);
   await page.locator('.xns-refresh-post').click();

@@ -116,7 +116,7 @@ function createPreviewController({
     const knownPages = getPageNumbers(parsed, info.postId);
     const hasRemotePages = Array.from(knownPages).some((page) => page !== info.page);
     const section = createElement('section', 'xns-preview-comments');
-    section.appendChild(createElement('h3', '', '楼中楼预览'));
+    section.appendChild(createElement('h3'));
     const thread = createElement('ul', 'xns-preview-thread');
     section.appendChild(thread);
       renderPreviewRecords(section, info, currentRecords, {
