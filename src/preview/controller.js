@@ -430,6 +430,7 @@ function createPreviewController({
       const currentLimit = Math.min(maxPage, Math.max(1, Number(modal.pageLimit) || maxPage));
       const currentTotal = Math.max(1, Number(modal.totalPages) || currentLimit);
       modal.loadedPages = Math.max(0, Math.min(currentLimit, currentTotal) - modal.failedPages.length);
+      modal.challengePages = [...(progress.challengePages || [])];
       renderPreviewRecords(section, info, progress.records, {
         ...progress,
         loadedPages: modal.loadedPages,
@@ -451,6 +452,7 @@ function createPreviewController({
         onlyPages: retryPages,
         initialLoadedPages: loadedPages,
         initialFailedPages: retryPages,
+        initialChallengePages: (modal.challengePages || []).filter((page) => retryPages.includes(Number(page))),
         signal: requestController?.signal,
         onRecordsLoaded: (progress) => renderProgress(progress, true),
       });
@@ -458,6 +460,7 @@ function createPreviewController({
       modal.previewRecords = preview.records;
       modal.loadedPages = preview.loadedPages;
       modal.failedPages = preview.failedPages;
+      modal.challengePages = preview.challengePages || [];
       modal.truncated = preview.truncated;
       modal.totalPages = preview.totalPages;
       modal.pageLimit = preview.pageLimit;
@@ -546,6 +549,7 @@ function createPreviewController({
         modal.previewRecords = hydratedPreview.records;
         modal.loadedPages = hydratedPreview.loadedPages;
         modal.failedPages = hydratedPreview.failedPages;
+        modal.challengePages = hydratedPreview.challengePages || [];
         modal.truncated = hydratedPreview.truncated;
         modal.totalPages = hydratedPreview.totalPages;
         modal.pageLimit = hydratedPreview.pageLimit;
@@ -642,7 +646,7 @@ function createPreviewController({
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, moreMenu, helpPanel, toggleHelp, helpButton, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, toolbarStatus, previewSeed: null, previewRecords: [], loadedPages: 0, failedPages: [], truncated: false, totalPages: null, pageLimit: maxPage };
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, moreMenu, helpPanel, toggleHelp, helpButton, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, toolbarStatus, previewSeed: null, previewRecords: [], loadedPages: 0, failedPages: [], challengePages: [], truncated: false, totalPages: null, pageLimit: maxPage };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }

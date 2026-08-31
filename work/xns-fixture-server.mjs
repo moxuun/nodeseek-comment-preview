@@ -31,6 +31,7 @@ const voteState = { votedIds: new Set() };
 // 验证 B1——回复后新回复必须出现在楼中楼里，而不是因“当前页永不重抓”而丢失。
 const replyState = { addedFloors: [] };
 const retryState = { post125Page2: 0 };
+const challengeState = { post130Page2: 0 };
 
 function votePayload() {
   const items = [
@@ -224,6 +225,30 @@ const server = http.createServer((req, res) => {
     res.end(progressivePage(125, page));
     return;
   }
+  const challengeMatch = /^\/post-130-(\d+)$/.exec(pathname);
+  if (challengeMatch) {
+    const page = Number(challengeMatch[1]);
+    if (![1, 2].includes(page)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('not found');
+      return;
+    }
+    if (page === 2) {
+      challengeState.post130Page2 += 1;
+      if (challengeState.post130Page2 === 1) {
+        res.writeHead(429, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'cf-mitigated': 'challenge',
+          'Cache-Control': 'no-store',
+        });
+        res.end('<!doctype html><title>Just a moment...</title>Cloudflare challenge');
+        return;
+      }
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(progressivePage(130, page));
+    return;
+  }
   const failedPreviewMatch = /^\/post-129-(\d+)$/.exec(pathname);
   if (failedPreviewMatch) {
     const page = Number(failedPreviewMatch[1]);
@@ -275,6 +300,11 @@ const server = http.createServer((req, res) => {
   if (pathname === '/test/retry-state') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(retryState));
+    return;
+  }
+  if (pathname === '/test/challenge-state') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(challengeState));
     return;
   }
   if (pathname === '/list') return sendFile(res, fixturePath('list'), 'text/html; charset=utf-8');

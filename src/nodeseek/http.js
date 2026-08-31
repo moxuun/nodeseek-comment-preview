@@ -77,6 +77,17 @@ function createHttpClient({
     return fallback;
   }
 
+  function isCloudflareChallenge(response) {
+    return response.headers?.get?.('cf-mitigated')?.trim().toLowerCase() === 'challenge';
+  }
+
+  function createHttpError(message, code, status) {
+    const error = new Error(message);
+    error.code = code;
+    if (Number.isFinite(status)) error.status = status;
+    return error;
+  }
+
   function abortError() {
     const error = new Error('请求已取消');
     error.name = 'AbortError';
@@ -126,6 +137,9 @@ function createHttpClient({
           referrerPolicy: 'same-origin', headers: { Accept: 'text/html,application/xhtml+xml' }, signal: controller.signal,
         });
         if (typeof options.onResponse === 'function') options.onResponse(response.status);
+        if (isCloudflareChallenge(response)) {
+          throw createHttpError('NodeSeek 的 Cloudflare 验证拦截了此分页，请完成验证后再点重试', 'CLOUDFLARE_CHALLENGE', response.status);
+        }
         if (response.status === 429 || response.status >= 500) {
           if (attempt < 3) {
             await wait(getRetryDelay(response, 600 * attempt), options.signal);
@@ -144,6 +158,7 @@ function createHttpClient({
         if (allowCache) writeCachedHtml(responseUrl, html);
         return { html, url: responseUrl };
       } catch (error) {
+        if (error?.code === 'CLOUDFLARE_CHALLENGE') throw error;
         if (attempt < 3 && error?.name !== 'AbortError') {
           await new Promise((resolve) => windowObj.setTimeout(resolve, 600 * attempt));
           continue;

@@ -147,6 +147,10 @@ function createPreviewRenderer({
         statusNode.appendChild(retry);
       }
     }
+    if (status.challenge) {
+      statusNode.classList.add('is-failed');
+      statusNode.appendChild(createElement('span', 'xns-page-challenge', status.challenge));
+    }
     if (status.truncated) {
       statusNode.classList.add('is-truncated');
       statusNode.appendChild(createElement('span', 'xns-page-truncated', status.truncated));

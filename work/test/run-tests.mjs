@@ -813,6 +813,29 @@ scenario('分页 429 按 Retry-After 重试后继续加载', async (ctx) => {
   await page.close();
 });
 
+scenario('Cloudflare challenge 不自动重复请求且可手动重试', async (ctx) => {
+  const page = await ctx.newPage();
+  dataOf(page).expectedResponses.push({ status: 429, url: '/post-130-2' });
+  await page.goto(`${ctx.base}/post-130-1`, { waitUntil: 'domcontentloaded' });
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent?.includes('需验证'), 5_000, 'Cloudflare 验证提示');
+  const firstReads = dataOf(page).gets
+    .map(({ url }) => new URL(url).pathname)
+    .filter((pathname) => pathname === '/post-130-2');
+  assert(firstReads.length === 1, `Cloudflare challenge 不应自动重试，实际请求 ${firstReads.length} 次`);
+  const statusBeforeRetry = await page.$eval('.xns-toolbar-status', (node) => node.textContent || '');
+  assert(statusBeforeRetry.includes('需验证'), `工具栏应说明需要完成验证，实际文案：${statusBeforeRetry}`);
+
+  await page.click('.xns-post-refresh');
+  await waitFor(page, () => document.querySelector('.xns-post-refresh')?.getAttribute('aria-busy') !== 'true'
+    && document.querySelector('.xns-toolbar-status')?.textContent === '4 条回复', 8_000, 'Cloudflare 验证后手动重试');
+  const secondReads = dataOf(page).gets
+    .map(({ url }) => new URL(url).pathname)
+    .filter((pathname) => pathname === '/post-130-2');
+  assert(secondReads.length === 2, `手动重试应再次读取 challenge 页，实际请求 ${secondReads.length} 次`);
+  assert(!(await page.$eval('.xns-toolbar-status', (node) => node.textContent || '')).includes('需验证'), '成功重试后不应保留验证提示');
+  await page.close();
+});
+
 scenario('分页请求从首个请求开始遵守基础间隔', async (ctx) => {
   const page = await ctx.newPage();
   await installPageRequestTimingCounter(page, 460);

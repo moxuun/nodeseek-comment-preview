@@ -38,6 +38,7 @@ function createPostPageController({
       this.records = [];
       this.loadedPages = 0;
       this.failedPages = [];
+      this.challengePages = [];
       this.truncated = false;
       this.totalPages = null;
       this.toolbar = null;
@@ -107,7 +108,10 @@ function createPostPageController({
       refresh.setAttribute('aria-label', '重新读取当前页和评论分页');
       refresh.addEventListener('click', () => {
         if (this.loading) return;
-        if (this.failedPages.length) void this.reloadPages({ onlyPages: [...this.failedPages] });
+        if (this.failedPages.length) void this.reloadPages({
+          onlyPages: [...this.failedPages],
+          initialChallengePages: [...this.challengePages],
+        });
         else void this.reloadPages({ refreshCurrentPage: true });
       });
       toolbar.appendChild(refresh);
@@ -198,6 +202,7 @@ function createPostPageController({
       this.records = records;
       this.loadedPages = 1;
       this.failedPages = [];
+      this.challengePages = [];
       const discovered = getPageNumbers(documentObj, this.info.postId);
       this.totalPages = discovered.size ? Math.max(...discovered, this.info.page) : this.info.page;
       this.truncated = this.totalPages > getMaxPage();
@@ -231,11 +236,15 @@ function createPostPageController({
       const retryPages = Array.isArray(options.onlyPages) ? options.onlyPages : [];
       const retryOnly = retryPages.length > 0;
       this.failedPages = retryOnly ? [...retryPages] : [];
+      this.challengePages = retryOnly
+        ? (options.initialChallengePages || []).filter((page) => retryPages.includes(Number(page))).map(Number)
+        : [];
       const remoteRecords = [];
       const updateProgress = (progress) => {
         if (!progress || generation !== this.generation) return;
         this.loadedPages = progress.loadedPages;
         this.failedPages = [...progress.failedPages];
+        this.challengePages = [...(progress.challengePages || [])];
         this.truncated = progress.truncated;
         this.totalPages = progress.totalPages;
         const unique = new Map();
@@ -253,11 +262,16 @@ function createPostPageController({
         ? Array.from({ length: Math.min(pageLimit, knownTotalPages) }, (_, index) => index + 1)
           .filter((page) => !retryPages.includes(page))
         : undefined;
-      const { loadedPages, failedPages, truncated, totalPages } = await fetchPostPages(this.info, documentObj, {
+      const { loadedPages, failedPages, challengePages, truncated, totalPages } = await fetchPostPages(this.info, documentObj, {
         noStore: fresh,
         allowCache: !fresh,
         retainDocuments: false,
-        ...(retryOnly ? { onlyPages: retryPages, initialLoadedPages, initialFailedPages: retryPages } : {}),
+        ...(retryOnly ? {
+          onlyPages: retryPages,
+          initialLoadedPages,
+          initialFailedPages: retryPages,
+          initialChallengePages: (options.initialChallengePages || []).filter((page) => retryPages.includes(Number(page))),
+        } : {}),
         signal,
         onPageLoaded: (page, root, progress) => {
           if (page !== this.info.page) {
@@ -271,6 +285,7 @@ function createPostPageController({
       if (generation !== this.generation) return;
       this.loadedPages = loadedPages;
       this.failedPages = failedPages;
+      this.challengePages = challengePages;
       this.truncated = truncated;
       this.totalPages = totalPages;
 
@@ -393,6 +408,7 @@ function createPostPageController({
         loadedPages,
         totalPages: this.totalPages,
         failedPages: this.failedPages,
+        challengePages: this.challengePages,
         truncated: this.truncated,
         loading: loading && this.hasRemotePages,
         commentCount: this.records.length,

@@ -52,6 +52,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
     const onlyPages = Array.isArray(options.onlyPages) ? normalizePages(options.onlyPages) : null;
     const loadedPages = new Set([info.page, ...normalizePages(options.initialLoadedPages)]);
     const failedPages = new Set(normalizePages(options.initialFailedPages));
+    const challengePages = new Set(normalizePages(options.initialChallengePages));
     // 当前打开页即使超过读取上限也要保留，但不能计入“前 N 页”的进度。
     const countedLoadedPages = () => Array.from(loadedPages).filter((page) => page >= 1 && page <= pageLimit).length;
     const pages = new Set([info.page]);
@@ -72,6 +73,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
     const progressState = () => ({
       loadedPages: countedLoadedPages(),
       failedPages: [...failedPages].sort((a, b) => a - b),
+      challengePages: [...challengePages].sort((a, b) => a - b),
       truncated,
       totalPages,
       pageLimit,
@@ -96,6 +98,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
           const parsed = parseHtml(response.html, response.url);
           loadedPages.add(page);
           failedPages.delete(page);
+          challengePages.delete(page);
           if (pageDocs) pageDocs.set(page, parsed);
           options.onPageLoaded?.(page, parsed, progressState());
           if (!onlyPages) {
@@ -106,8 +109,10 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
               }
             });
           }
-        } catch {
+        } catch (error) {
           failedPages.add(page);
+          if (error?.code === 'CLOUDFLARE_CHALLENGE') challengePages.add(page);
+          else challengePages.delete(page);
           options.onPageFailed?.(page, progressState());
         }
       }
@@ -115,7 +120,15 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
 
     const workerCount = Math.min(concurrency, Math.max(1, pending.length));
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
-    return { pageDocs, loadedPages: countedLoadedPages(), failedPages: [...failedPages].sort((a, b) => a - b), truncated, totalPages, pageLimit };
+    return {
+      pageDocs,
+      loadedPages: countedLoadedPages(),
+      failedPages: [...failedPages].sort((a, b) => a - b),
+      challengePages: [...challengePages].sort((a, b) => a - b),
+      truncated,
+      totalPages,
+      pageLimit,
+    };
   }
 
   async function loadPreviewRecords(info, firstDocument, options = {}) {
@@ -126,7 +139,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
       if (!previous || record.current) unique.set(record.floor, record);
     });
     if (initialRecords) mergeRecords(initialRecords);
-    const { loadedPages, failedPages, truncated, totalPages, pageLimit } = await fetchPostPages(info, firstDocument, {
+    const { loadedPages, failedPages, challengePages, truncated, totalPages, pageLimit } = await fetchPostPages(info, firstDocument, {
       ...options,
       retainDocuments: false,
       onPageLoaded: (page, root, progress) => {
@@ -153,6 +166,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
       records: Array.from(unique.values()),
       loadedPages,
       failedPages,
+      challengePages,
       truncated,
       totalPages,
       pageLimit,

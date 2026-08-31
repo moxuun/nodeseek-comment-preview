@@ -12,18 +12,22 @@ function createPageStatusFormatter({ maxPage, getMaxPage }) {
       ? (pageProgress ? `正在读取其他分页 · ${pageProgress}` : '正在读取其他分页…')
       : pageProgress;
     const failed = failedCount ? `${failedCount} 页读取失败` : '';
+    const challengeCount = Array.isArray(options.challengePages) ? options.challengePages.length : 0;
+    const challenge = challengeCount ? `${challengeCount} 页被 Cloudflare 验证拦截，请完成验证后重试` : '';
     const truncated = options.truncated
       ? `帖子共 ${totalPages || pageLimit} 页，仅读取前 ${pageLimit} 页，后面的内容没有显示`
       : '';
-    const detail = [stage, failed, truncated].filter(Boolean).join(' · ');
+    const detail = [stage, failed, challenge, truncated].filter(Boolean).join(' · ');
     const commentCount = Number.isFinite(options.commentCount) ? `${options.commentCount} 条回复` : '';
-    const compact = [commentCount, failedCount ? `${failedCount} 页失败` : ''].filter(Boolean).join(' · ') || detail;
+    const compact = [commentCount, failedCount ? `${failedCount} 页失败` : '', challengeCount ? `${challengeCount} 页需验证` : ''].filter(Boolean).join(' · ') || detail;
     return {
       targetPages,
       loadedPages,
       failedCount,
       stage,
       failed,
+      challenge,
+      challengeCount,
       truncated,
       detail,
       compact,

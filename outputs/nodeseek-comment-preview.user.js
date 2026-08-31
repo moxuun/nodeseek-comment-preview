@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.43
+// @version      0.5.44
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -170,18 +170,22 @@ function createPageStatusFormatter({ maxPage, getMaxPage }) {
       ? (pageProgress ? `正在读取其他分页 · ${pageProgress}` : '正在读取其他分页…')
       : pageProgress;
     const failed = failedCount ? `${failedCount} 页读取失败` : '';
+    const challengeCount = Array.isArray(options.challengePages) ? options.challengePages.length : 0;
+    const challenge = challengeCount ? `${challengeCount} 页被 Cloudflare 验证拦截，请完成验证后重试` : '';
     const truncated = options.truncated
       ? `帖子共 ${totalPages || pageLimit} 页，仅读取前 ${pageLimit} 页，后面的内容没有显示`
       : '';
-    const detail = [stage, failed, truncated].filter(Boolean).join(' · ');
+    const detail = [stage, failed, challenge, truncated].filter(Boolean).join(' · ');
     const commentCount = Number.isFinite(options.commentCount) ? `${options.commentCount} 条回复` : '';
-    const compact = [commentCount, failedCount ? `${failedCount} 页失败` : ''].filter(Boolean).join(' · ') || detail;
+    const compact = [commentCount, failedCount ? `${failedCount} 页失败` : '', challengeCount ? `${challengeCount} 页需验证` : ''].filter(Boolean).join(' · ') || detail;
     return {
       targetPages,
       loadedPages,
       failedCount,
       stage,
       failed,
+      challenge,
+      challengeCount,
       truncated,
       detail,
       compact,
@@ -1117,6 +1121,17 @@ function createHttpClient({
     return fallback;
   }
 
+  function isCloudflareChallenge(response) {
+    return response.headers?.get?.('cf-mitigated')?.trim().toLowerCase() === 'challenge';
+  }
+
+  function createHttpError(message, code, status) {
+    const error = new Error(message);
+    error.code = code;
+    if (Number.isFinite(status)) error.status = status;
+    return error;
+  }
+
   function abortError() {
     const error = new Error('请求已取消');
     error.name = 'AbortError';
@@ -1166,6 +1181,9 @@ function createHttpClient({
           referrerPolicy: 'same-origin', headers: { Accept: 'text/html,application/xhtml+xml' }, signal: controller.signal,
         });
         if (typeof options.onResponse === 'function') options.onResponse(response.status);
+        if (isCloudflareChallenge(response)) {
+          throw createHttpError('NodeSeek 的 Cloudflare 验证拦截了此分页，请完成验证后再点重试', 'CLOUDFLARE_CHALLENGE', response.status);
+        }
         if (response.status === 429 || response.status >= 500) {
           if (attempt < 3) {
             await wait(getRetryDelay(response, 600 * attempt), options.signal);
@@ -1184,6 +1202,7 @@ function createHttpClient({
         if (allowCache) writeCachedHtml(responseUrl, html);
         return { html, url: responseUrl };
       } catch (error) {
+        if (error?.code === 'CLOUDFLARE_CHALLENGE') throw error;
         if (attempt < 3 && error?.name !== 'AbortError') {
           await new Promise((resolve) => windowObj.setTimeout(resolve, 600 * attempt));
           continue;
@@ -1614,6 +1633,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
     const onlyPages = Array.isArray(options.onlyPages) ? normalizePages(options.onlyPages) : null;
     const loadedPages = new Set([info.page, ...normalizePages(options.initialLoadedPages)]);
     const failedPages = new Set(normalizePages(options.initialFailedPages));
+    const challengePages = new Set(normalizePages(options.initialChallengePages));
     // 当前打开页即使超过读取上限也要保留，但不能计入“前 N 页”的进度。
     const countedLoadedPages = () => Array.from(loadedPages).filter((page) => page >= 1 && page <= pageLimit).length;
     const pages = new Set([info.page]);
@@ -1634,6 +1654,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
     const progressState = () => ({
       loadedPages: countedLoadedPages(),
       failedPages: [...failedPages].sort((a, b) => a - b),
+      challengePages: [...challengePages].sort((a, b) => a - b),
       truncated,
       totalPages,
       pageLimit,
@@ -1658,6 +1679,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
           const parsed = parseHtml(response.html, response.url);
           loadedPages.add(page);
           failedPages.delete(page);
+          challengePages.delete(page);
           if (pageDocs) pageDocs.set(page, parsed);
           options.onPageLoaded?.(page, parsed, progressState());
           if (!onlyPages) {
@@ -1668,8 +1690,10 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
               }
             });
           }
-        } catch {
+        } catch (error) {
           failedPages.add(page);
+          if (error?.code === 'CLOUDFLARE_CHALLENGE') challengePages.add(page);
+          else challengePages.delete(page);
           options.onPageFailed?.(page, progressState());
         }
       }
@@ -1677,7 +1701,15 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
 
     const workerCount = Math.min(concurrency, Math.max(1, pending.length));
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
-    return { pageDocs, loadedPages: countedLoadedPages(), failedPages: [...failedPages].sort((a, b) => a - b), truncated, totalPages, pageLimit };
+    return {
+      pageDocs,
+      loadedPages: countedLoadedPages(),
+      failedPages: [...failedPages].sort((a, b) => a - b),
+      challengePages: [...challengePages].sort((a, b) => a - b),
+      truncated,
+      totalPages,
+      pageLimit,
+    };
   }
 
   async function loadPreviewRecords(info, firstDocument, options = {}) {
@@ -1688,7 +1720,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
       if (!previous || record.current) unique.set(record.floor, record);
     });
     if (initialRecords) mergeRecords(initialRecords);
-    const { loadedPages, failedPages, truncated, totalPages, pageLimit } = await fetchPostPages(info, firstDocument, {
+    const { loadedPages, failedPages, challengePages, truncated, totalPages, pageLimit } = await fetchPostPages(info, firstDocument, {
       ...options,
       retainDocuments: false,
       onPageLoaded: (page, root, progress) => {
@@ -1715,6 +1747,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
       records: Array.from(unique.values()),
       loadedPages,
       failedPages,
+      challengePages,
       truncated,
       totalPages,
       pageLimit,
@@ -2414,6 +2447,10 @@ function createPreviewRenderer({
         });
         statusNode.appendChild(retry);
       }
+    }
+    if (status.challenge) {
+      statusNode.classList.add('is-failed');
+      statusNode.appendChild(createElement('span', 'xns-page-challenge', status.challenge));
     }
     if (status.truncated) {
       statusNode.classList.add('is-truncated');
@@ -3877,6 +3914,7 @@ function createPreviewController({
       const currentLimit = Math.min(maxPage, Math.max(1, Number(modal.pageLimit) || maxPage));
       const currentTotal = Math.max(1, Number(modal.totalPages) || currentLimit);
       modal.loadedPages = Math.max(0, Math.min(currentLimit, currentTotal) - modal.failedPages.length);
+      modal.challengePages = [...(progress.challengePages || [])];
       renderPreviewRecords(section, info, progress.records, {
         ...progress,
         loadedPages: modal.loadedPages,
@@ -3898,6 +3936,7 @@ function createPreviewController({
         onlyPages: retryPages,
         initialLoadedPages: loadedPages,
         initialFailedPages: retryPages,
+        initialChallengePages: (modal.challengePages || []).filter((page) => retryPages.includes(Number(page))),
         signal: requestController?.signal,
         onRecordsLoaded: (progress) => renderProgress(progress, true),
       });
@@ -3905,6 +3944,7 @@ function createPreviewController({
       modal.previewRecords = preview.records;
       modal.loadedPages = preview.loadedPages;
       modal.failedPages = preview.failedPages;
+      modal.challengePages = preview.challengePages || [];
       modal.truncated = preview.truncated;
       modal.totalPages = preview.totalPages;
       modal.pageLimit = preview.pageLimit;
@@ -3993,6 +4033,7 @@ function createPreviewController({
         modal.previewRecords = hydratedPreview.records;
         modal.loadedPages = hydratedPreview.loadedPages;
         modal.failedPages = hydratedPreview.failedPages;
+        modal.challengePages = hydratedPreview.challengePages || [];
         modal.truncated = hydratedPreview.truncated;
         modal.totalPages = hydratedPreview.totalPages;
         modal.pageLimit = hydratedPreview.pageLimit;
@@ -4089,7 +4130,7 @@ function createPreviewController({
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, moreMenu, helpPanel, toggleHelp, helpButton, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, toolbarStatus, previewSeed: null, previewRecords: [], loadedPages: 0, failedPages: [], truncated: false, totalPages: null, pageLimit: maxPage };
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, moreMenu, helpPanel, toggleHelp, helpButton, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, toolbarStatus, previewSeed: null, previewRecords: [], loadedPages: 0, failedPages: [], challengePages: [], truncated: false, totalPages: null, pageLimit: maxPage };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }
@@ -4235,6 +4276,7 @@ function createPostPageController({
       this.records = [];
       this.loadedPages = 0;
       this.failedPages = [];
+      this.challengePages = [];
       this.truncated = false;
       this.totalPages = null;
       this.toolbar = null;
@@ -4304,7 +4346,10 @@ function createPostPageController({
       refresh.setAttribute('aria-label', '重新读取当前页和评论分页');
       refresh.addEventListener('click', () => {
         if (this.loading) return;
-        if (this.failedPages.length) void this.reloadPages({ onlyPages: [...this.failedPages] });
+        if (this.failedPages.length) void this.reloadPages({
+          onlyPages: [...this.failedPages],
+          initialChallengePages: [...this.challengePages],
+        });
         else void this.reloadPages({ refreshCurrentPage: true });
       });
       toolbar.appendChild(refresh);
@@ -4395,6 +4440,7 @@ function createPostPageController({
       this.records = records;
       this.loadedPages = 1;
       this.failedPages = [];
+      this.challengePages = [];
       const discovered = getPageNumbers(documentObj, this.info.postId);
       this.totalPages = discovered.size ? Math.max(...discovered, this.info.page) : this.info.page;
       this.truncated = this.totalPages > getMaxPage();
@@ -4428,11 +4474,15 @@ function createPostPageController({
       const retryPages = Array.isArray(options.onlyPages) ? options.onlyPages : [];
       const retryOnly = retryPages.length > 0;
       this.failedPages = retryOnly ? [...retryPages] : [];
+      this.challengePages = retryOnly
+        ? (options.initialChallengePages || []).filter((page) => retryPages.includes(Number(page))).map(Number)
+        : [];
       const remoteRecords = [];
       const updateProgress = (progress) => {
         if (!progress || generation !== this.generation) return;
         this.loadedPages = progress.loadedPages;
         this.failedPages = [...progress.failedPages];
+        this.challengePages = [...(progress.challengePages || [])];
         this.truncated = progress.truncated;
         this.totalPages = progress.totalPages;
         const unique = new Map();
@@ -4450,11 +4500,16 @@ function createPostPageController({
         ? Array.from({ length: Math.min(pageLimit, knownTotalPages) }, (_, index) => index + 1)
           .filter((page) => !retryPages.includes(page))
         : undefined;
-      const { loadedPages, failedPages, truncated, totalPages } = await fetchPostPages(this.info, documentObj, {
+      const { loadedPages, failedPages, challengePages, truncated, totalPages } = await fetchPostPages(this.info, documentObj, {
         noStore: fresh,
         allowCache: !fresh,
         retainDocuments: false,
-        ...(retryOnly ? { onlyPages: retryPages, initialLoadedPages, initialFailedPages: retryPages } : {}),
+        ...(retryOnly ? {
+          onlyPages: retryPages,
+          initialLoadedPages,
+          initialFailedPages: retryPages,
+          initialChallengePages: (options.initialChallengePages || []).filter((page) => retryPages.includes(Number(page))),
+        } : {}),
         signal,
         onPageLoaded: (page, root, progress) => {
           if (page !== this.info.page) {
@@ -4468,6 +4523,7 @@ function createPostPageController({
       if (generation !== this.generation) return;
       this.loadedPages = loadedPages;
       this.failedPages = failedPages;
+      this.challengePages = challengePages;
       this.truncated = truncated;
       this.totalPages = totalPages;
 
@@ -4590,6 +4646,7 @@ function createPostPageController({
         loadedPages,
         totalPages: this.totalPages,
         failedPages: this.failedPages,
+        challengePages: this.challengePages,
         truncated: this.truncated,
         loading: loading && this.hasRemotePages,
         commentCount: this.records.length,
