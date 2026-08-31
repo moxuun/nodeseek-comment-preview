@@ -385,6 +385,98 @@ function createPreviewController({
     }
   }
 
+  function getPreviewFailedPages(modal) {
+    return Array.from(new Set((Array.isArray(modal?.failedPages) ? modal.failedPages : [])
+      .map((page) => Number(page))
+      .filter((page) => Number.isInteger(page) && page >= 1)))
+      .sort((a, b) => a - b);
+  }
+
+  async function retryPreviewPages(modal) {
+    if (!modal || modal.loading) return false;
+    const retryPages = getPreviewFailedPages(modal);
+    const info = getPostInfo(modal.url?.href || '');
+    const section = qs(modal.body, '.xns-preview-comments');
+    if (!retryPages.length || !info || !section || !modal.previewSeed) return false;
+
+    const requestController = windowObj.AbortController ? new windowObj.AbortController() : null;
+    modal.requestController?.abort();
+    modal.requestController = requestController;
+    modal.loading = true;
+    const refresh = qs(modal.dialog, '.xns-refresh-post');
+    const toolbarStatus = qs(modal.dialog, '.xns-modal-toolbar-status');
+    refresh?.classList.add('xns-action-pending');
+    refresh?.setAttribute('aria-busy', 'true');
+    if (toolbarStatus) {
+      toolbarStatus.className = 'xns-modal-toolbar-status xns-preview-status is-loading';
+      toolbarStatus.hidden = false;
+      toolbarStatus.removeAttribute('title');
+      toolbarStatus.textContent = `正在重试 ${retryPages.length} 个失败分页…`;
+    }
+
+    const pageLimit = Math.min(maxPage, Math.max(1, Number(modal.pageLimit) || maxPage));
+    const totalPages = Math.max(1, Number(modal.totalPages) || pageLimit);
+    const targetPages = Math.min(pageLimit, totalPages);
+    const loadedPages = Array.from({ length: targetPages }, (_, index) => index + 1)
+      .filter((page) => !retryPages.includes(page));
+    const retryAgain = () => {
+      if (state.modal === modal && !modal.loading) void retryPreviewPages(modal);
+    };
+    const renderProgress = (progress, loading) => {
+      if (state.modal !== modal || !progress) return;
+      modal.failedPages = [...(progress.failedPages || [])];
+      modal.totalPages = progress.totalPages || modal.totalPages;
+      modal.pageLimit = progress.pageLimit || modal.pageLimit;
+      const currentLimit = Math.min(maxPage, Math.max(1, Number(modal.pageLimit) || maxPage));
+      const currentTotal = Math.max(1, Number(modal.totalPages) || currentLimit);
+      modal.loadedPages = Math.max(0, Math.min(currentLimit, currentTotal) - modal.failedPages.length);
+      renderPreviewRecords(section, info, progress.records, {
+        ...progress,
+        loadedPages: modal.loadedPages,
+        statusNode: toolbarStatus,
+        loading,
+        onRetry: retryAgain,
+        onNodeMounted: (node) => installPreviewFeatures(node),
+      });
+    };
+
+    try {
+      const preview = await loadPreviewRecords(info, modal.previewSeed, {
+        noStore: true,
+        allowCache: false,
+        initialRecords: modal.previewRecords || [],
+        onlyPages: retryPages,
+        initialLoadedPages: loadedPages,
+        initialFailedPages: retryPages,
+        signal: requestController?.signal,
+        onRecordsLoaded: (progress) => renderProgress(progress, true),
+      });
+      if (state.modal !== modal) return false;
+      modal.previewRecords = preview.records;
+      modal.loadedPages = preview.loadedPages;
+      modal.failedPages = preview.failedPages;
+      modal.truncated = preview.truncated;
+      modal.totalPages = preview.totalPages;
+      modal.pageLimit = preview.pageLimit;
+      renderProgress({ ...preview, records: preview.records }, false);
+      updatePreviewHeaderMeta(modal, {
+        node: modal.headerMeta?.node?.value?.textContent || '',
+        author: modal.headerMeta?.author?.value?.textContent || '',
+        time: modal.headerMeta?.time?.value?.textContent || '',
+        replyCount: preview.records.length,
+      });
+      return true;
+    } catch (error) {
+      if (state.modal === modal) showPreviewRefreshError(modal, error);
+      return false;
+    } finally {
+      if (modal.requestController === requestController) modal.requestController = null;
+      modal.loading = false;
+      refresh?.classList.remove('xns-action-pending');
+      refresh?.removeAttribute('aria-busy');
+    }
+  }
+
   async function loadPreviewModal(modal, loadingText, options = {}) {
     if (!modal || modal.loading) return false;
     const preserveContent = Boolean(options.preserveContent);
@@ -416,14 +508,15 @@ function createPreviewController({
     }
     try {
       const response = await fetchHtml(modal.url, { noStore: fresh, allowCache: !fresh, signal: requestController?.signal });
-      const preview = buildPreviewContent(modal.url, parseHtml(response.html, response.url), {
+      const parsed = parseHtml(response.html, response.url);
+      const preview = buildPreviewContent(modal.url, parsed, {
         noStore: fresh,
         allowCache: !fresh,
         renderDetached: preserveContent,
         signal: requestController?.signal,
         statusNode: toolbarStatus,
         onRetry: () => {
-          if (state.modal === modal && !modal.loading) void loadPreviewModal(modal, '正在重试分页…', { preserveContent: true });
+          if (state.modal === modal && !modal.loading) void retryPreviewPages(modal);
         },
       });
       let hydratedPreview = null;
@@ -445,6 +538,15 @@ function createPreviewController({
         ...preview.headerMeta,
         replyCount: hydratedPreview?.records?.length ?? preview.headerMeta?.replyCount,
       });
+      if (hydratedPreview) {
+        modal.previewSeed = parsed;
+        modal.previewRecords = hydratedPreview.records;
+        modal.loadedPages = hydratedPreview.loadedPages;
+        modal.failedPages = hydratedPreview.failedPages;
+        modal.truncated = hydratedPreview.truncated;
+        modal.totalPages = hydratedPreview.totalPages;
+        modal.pageLimit = hydratedPreview.pageLimit;
+      }
       if (preserveContent) stabilizePreviewScroll(modal, scrollSnapshot, generation);
     } catch (error) {
       if (state.modal === modal && modal.loadGeneration === generation) {
@@ -537,7 +639,7 @@ function createPreviewController({
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, moreMenu, helpPanel, toggleHelp, helpButton, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, toolbarStatus };
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, moreMenu, helpPanel, toggleHelp, helpButton, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, toolbarStatus, previewSeed: null, previewRecords: [], loadedPages: 0, failedPages: [], truncated: false, totalPages: null, pageLimit: maxPage };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }
