@@ -36,63 +36,33 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     return button;
   }
 
-  function createMoreMenu({ onHelp, onCopyLink, onSettings }) {
-    const wrapper = createElement('div', 'xns-modal-more');
-    const toggle = createElement('button', 'xns-modal-tool xns-modal-more-toggle', '更多');
-    toggle.type = 'button';
-    toggle.title = '更多预览操作';
-    toggle.setAttribute('aria-label', '更多预览操作');
-    toggle.setAttribute('aria-haspopup', 'menu');
-    toggle.setAttribute('aria-expanded', 'false');
-    const menu = createElement('div', 'xns-modal-more-menu');
-    menu.setAttribute('role', 'menu');
-    menu.hidden = true;
-    const help = createElement('button', 'xns-modal-more-item', '帮助与快捷键');
-    help.type = 'button';
-    help.setAttribute('role', 'menuitem');
-    const copy = createElement('button', 'xns-modal-more-item', '复制原帖链接');
-    copy.type = 'button';
-    copy.setAttribute('role', 'menuitem');
-    const settings = createElement('button', 'xns-modal-more-item', '设置');
-    settings.type = 'button';
-    settings.setAttribute('role', 'menuitem');
-    menu.append(help, copy, settings);
-    wrapper.append(toggle, menu);
+  function createShareButton(onClick) {
+    const button = createElement('button', 'xns-modal-tool xns-modal-share');
+    button.type = 'button';
+    button.title = '复制帖子链接';
+    button.setAttribute('aria-label', '复制帖子链接');
+    const label = createElement('span', 'xns-modal-tool-label', '分享');
+    button.append(createCopyIcon(), label);
+    button.addEventListener('click', () => {
+      onClick?.({ setLabel: (value) => { label.textContent = value; } });
+    });
+    return button;
+  }
 
-    let open = false;
-    const setOpen = (next) => {
-      open = Boolean(next);
-      menu.hidden = !open;
-      toggle.setAttribute('aria-expanded', String(open));
-    };
-    const close = () => setOpen(false);
-    const onDocumentClick = (event) => {
-      if (!wrapper.contains(event.target)) close();
-    };
-    toggle.addEventListener('click', (event) => {
-      event.stopPropagation();
-      setOpen(!open);
-    });
-    help.addEventListener('click', () => {
-      close();
-      onHelp?.();
-    });
-    copy.addEventListener('click', () => {
-      close();
-      onCopyLink?.({ setLabel: (label) => { copy.textContent = label; } });
-    });
-    settings.addEventListener('click', () => {
-      close();
-      onSettings?.();
-    });
-    documentObj.addEventListener('click', onDocumentClick, true);
-
-    return Object.freeze({
-      element: wrapper,
-      close,
-      setCopyLabel: (label) => { copy.textContent = label; },
-      destroy: () => documentObj.removeEventListener('click', onDocumentClick, true),
-    });
+  function createCopyIcon() {
+    const svg = documentObj.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const back = documentObj.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    back.setAttribute('x', '5');
+    back.setAttribute('y', '5');
+    back.setAttribute('width', '11');
+    back.setAttribute('height', '13');
+    back.setAttribute('rx', '2');
+    const front = documentObj.createElementNS('http://www.w3.org/2000/svg', 'path');
+    front.setAttribute('d', 'M9 5V4a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2');
+    svg.append(back, front);
+    return svg;
   }
 
   function installPreviewScrollButtons(dialog, body) {
@@ -146,7 +116,6 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     closeImageLightbox();
     state.modal?.requestController?.abort();
     state.modal?.featureCleanup?.();
-    state.modal?.moreMenu?.destroy?.();
     state.modal?.refreshScrollCleanup?.();
     state.modal?.scrollCleanup?.();
     state.modal?.overlay?.remove();
@@ -163,7 +132,7 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     return button;
   }
 
-  return Object.freeze({ removeBodyLock, installPreviewScrollButtons, closeModal, createCloseButton, createRefreshButton, createMoreMenu });
+  return Object.freeze({ removeBodyLock, installPreviewScrollButtons, closeModal, createCloseButton, createRefreshButton, createShareButton });
 }
 
 const xnsPreviewModalUi = createPreviewModalUi({
@@ -178,4 +147,4 @@ const installPreviewScrollButtons = (...args) => xnsPreviewModalUi.installPrevie
 const closeModal = (...args) => xnsPreviewModalUi.closeModal(...args);
 const createCloseButton = (...args) => xnsPreviewModalUi.createCloseButton(...args);
 const createRefreshButton = (...args) => xnsPreviewModalUi.createRefreshButton(...args);
-const createMoreMenu = (...args) => xnsPreviewModalUi.createMoreMenu(...args);
+const createShareButton = (...args) => xnsPreviewModalUi.createShareButton(...args);

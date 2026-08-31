@@ -526,6 +526,33 @@ scenario('预览弹窗操作入口统一', async (ctx) => {
   await page.close();
 });
 
+scenario('预览顶部分享复制规范帖子链接', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.goto(`${ctx.base}/list`, { waitUntil: 'networkidle0' });
+  await page.evaluate(() => {
+    const link = document.querySelector('a[href="/post-123-1"]');
+    link?.setAttribute('href', '/post-123-2');
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async (value) => { window.__xnsCopiedLink = value; } },
+    });
+  });
+  await page.click('a[href="/post-123-2"]');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3'), 15_000, '分享测试预览弹窗');
+  const share = await page.$('.xns-modal-share');
+  assert(Boolean(share), '预览顶部应显示分享按钮');
+  assert(await page.$eval('.xns-modal-share', (node) => node.getAttribute('aria-label')) === '复制帖子链接', '分享按钮应说明复制帖子链接');
+  assert(!(await page.$('.xns-modal-more')), '预览顶部不应再显示更多菜单');
+  assert(!(await page.$('.xns-modal-help-toggle, .xns-modal-help, .xns-one-time-prompt')), '预览不应再显示帮助入口或一次性提示');
+  await share.click();
+  await waitFor(page, () => typeof window.__xnsCopiedLink === 'string', 3_000, '规范帖子链接复制');
+  const copiedLink = await page.evaluate(() => window.__xnsCopiedLink);
+  assert(copiedLink === `${ctx.base}/post-123-1`, `应复制规范帖子链接，实际 ${copiedLink}`);
+  const label = await page.$eval('.xns-modal-share', (node) => node.textContent || '');
+  assert(label?.includes('已复制'), `复制成功后应反馈已复制，实际 ${label}`);
+  await page.close();
+});
+
 scenario('短期缓存命中 HTML 但不保留 Document，刷新时重新抓取', async (ctx) => {
   const page = await ctx.newPage();
   await installParserCounter(page);

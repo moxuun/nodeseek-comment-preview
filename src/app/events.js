@@ -32,11 +32,6 @@ function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPr
       return;
     }
     const inEditor = event.target.closest?.('textarea, input, [contenteditable="true"]');
-    if (event.key === '?' && state.modal && !state.settingsPanel && !inEditor) {
-      event.preventDefault();
-      state.modal.toggleHelp?.();
-      return;
-    }
     if (event.key !== 'Escape') return;
     if (inEditor) return;
     if (state.settingsPanel) {

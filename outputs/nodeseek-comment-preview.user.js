@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.46
+// @version      0.5.47
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -507,12 +507,7 @@ const XNS_PREVIEW_SHELL_STYLES = `
       .xns-modal-meta-label { color:var(--xns-subtle); }
       .xns-modal-meta-value { max-width:22em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       .xns-modal-actions { display:flex; align-items:center; gap:6px; flex:0 0 auto; }
-      .xns-modal-more { position:relative; }
       .xns-modal-actions .xns-modal-tool { margin-left:0; }
-      .xns-modal-more-menu { position:absolute; top:calc(100% + 6px); right:0; z-index:5; display:flex; min-width:150px; flex-direction:column; gap:2px; padding:4px; border:1px solid var(--xns-border); border-radius:7px; background:var(--xns-surface); box-shadow:0 8px 24px rgba(15,23,42,.18); }
-      .xns-modal-more-menu[hidden] { display:none; }
-      .xns-modal-more-item { padding:7px 9px; border:0; border-radius:5px; color:var(--xns-muted); background:transparent; cursor:pointer; text-align:left; white-space:nowrap; font:12px/1.3 system-ui,sans-serif; }
-      .xns-modal-more-item:hover, .xns-modal-more-item:focus-visible { color:var(--xns-accent); background:var(--xns-accent-soft); outline:none; }
       .xns-modal-header a, .xns-modal-header .xns-modal-reply, .xns-modal-close { padding:5px 8px; border:1px solid var(--xns-border); border-radius:6px; color:inherit; background:var(--xns-surface-muted); cursor:pointer; text-decoration:none; font:12px/1.2 system-ui,sans-serif; }
       .xns-modal-header a:hover, .xns-modal-header a:focus-visible, .xns-modal-header .xns-modal-reply:hover, .xns-modal-header .xns-modal-reply:focus-visible, .xns-modal-close:hover, .xns-modal-close:focus-visible { border-color:var(--xns-accent-strong); color:var(--xns-accent); outline:none; }
       .xns-modal-close { font-size:18px; line-height:1; }
@@ -528,29 +523,13 @@ const XNS_PREVIEW_SHELL_STYLES = `
       .xns-inline-retry { padding:2px 7px; border:1px solid rgba(185,28,28,.35); border-radius:5px; color:var(--xns-danger); background:var(--xns-surface); cursor:pointer; font:11px/1.2 system-ui,sans-serif; }
       .xns-inline-retry:hover, .xns-inline-retry:focus-visible { border-color:var(--xns-danger); outline:none; }
       .xns-modal-tool { display:inline-flex; align-items:center; gap:5px; margin-left:auto; padding:4px 8px; border:1px solid var(--xns-border); border-radius:6px; color:var(--xns-muted); background:var(--xns-surface); cursor:pointer; font:12px/1.2 system-ui,sans-serif; }
-      .xns-modal-help-toggle { margin-left:0; min-width:26px; justify-content:center; padding-right:6px; padding-left:6px; font-weight:700; }
       .xns-modal-tool:hover, .xns-modal-tool:focus-visible { border-color:var(--xns-accent-strong); color:var(--xns-accent); outline:none; }
       .xns-modal-tool svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
-      .xns-modal-help { padding:8px 16px; border-bottom:1px solid rgba(59,130,246,.18); color:var(--xns-text); background:var(--xns-accent-soft); font:12px/1.45 system-ui,sans-serif; }
-      .xns-modal-help[hidden] { display:none; }
-      .xns-modal-help-list { display:flex; flex-wrap:wrap; gap:5px 16px; margin:5px 0 0; padding:0; list-style:none; }
-      .xns-modal-help-item { display:inline-flex; align-items:center; gap:5px; }
-      .xns-modal-help kbd { padding:1px 5px; border:1px solid var(--xns-border); border-bottom-width:2px; border-radius:4px; color:var(--xns-text); background:var(--xns-surface); font:11px/1.3 ui-monospace,SFMono-Regular,Consolas,monospace; }
-      .xns-one-time-prompt { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 16px; border-bottom:1px solid rgba(59,130,246,.18); color:var(--xns-text); background:var(--xns-surface-muted); font:12px/1.35 system-ui,sans-serif; }
-      .xns-one-time-prompt button { flex:0 0 auto; padding:3px 8px; border:1px solid rgba(59,130,246,.3); border-radius:5px; color:var(--xns-accent); background:var(--xns-surface); cursor:pointer; font:inherit; }
-      .xns-one-time-prompt button:hover, .xns-one-time-prompt button:focus-visible { border-color:var(--xns-accent-strong); outline:none; }
       .xns-modal-body { overflow:auto; padding:clamp(10px,2vw,18px); color:var(--xns-text); }
       .xns-modal-body img { max-width:100%; height:auto; }
       .dark-layout .xns-modal { color:var(--xns-text); background:var(--xns-surface-muted); }
       .dark-layout .xns-modal-meta { color:var(--xns-muted); }
       .dark-layout .xns-modal-meta-label { color:var(--xns-subtle); }
-      .dark-layout .xns-modal-more-menu { color:var(--xns-text); background:var(--xns-surface); border-color:var(--xns-border); }
-      .dark-layout .xns-modal-more-item { color:var(--xns-muted); }
-      .dark-layout .xns-modal-more-item:hover, .dark-layout .xns-modal-more-item:focus-visible { color:var(--xns-accent); background:var(--xns-accent-soft); }
-      .dark-layout .xns-modal-help { color:var(--xns-text); background:var(--xns-accent-soft); border-bottom-color:rgba(96,165,250,.25); }
-      .dark-layout .xns-modal-help kbd { color:var(--xns-text); background:var(--xns-surface-muted); border-color:var(--xns-border); }
-      .dark-layout .xns-one-time-prompt { color:var(--xns-text); background:var(--xns-surface); border-bottom-color:rgba(96,165,250,.25); }
-      .dark-layout .xns-one-time-prompt button { color:var(--xns-accent); background:var(--xns-surface-muted); border-color:var(--xns-border); }
       .dark-layout .xns-modal-toolbar { color:var(--xns-muted); background:var(--xns-surface); }
       .dark-layout .xns-modal-eyebrow, .dark-layout .xns-modal-toolbar-label { color:var(--xns-muted); }
       .dark-layout .xns-modal-mode { color:var(--xns-accent); border-color:var(--xns-border); background:var(--xns-accent-soft); }
@@ -2995,63 +2974,33 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     return button;
   }
 
-  function createMoreMenu({ onHelp, onCopyLink, onSettings }) {
-    const wrapper = createElement('div', 'xns-modal-more');
-    const toggle = createElement('button', 'xns-modal-tool xns-modal-more-toggle', '更多');
-    toggle.type = 'button';
-    toggle.title = '更多预览操作';
-    toggle.setAttribute('aria-label', '更多预览操作');
-    toggle.setAttribute('aria-haspopup', 'menu');
-    toggle.setAttribute('aria-expanded', 'false');
-    const menu = createElement('div', 'xns-modal-more-menu');
-    menu.setAttribute('role', 'menu');
-    menu.hidden = true;
-    const help = createElement('button', 'xns-modal-more-item', '帮助与快捷键');
-    help.type = 'button';
-    help.setAttribute('role', 'menuitem');
-    const copy = createElement('button', 'xns-modal-more-item', '复制原帖链接');
-    copy.type = 'button';
-    copy.setAttribute('role', 'menuitem');
-    const settings = createElement('button', 'xns-modal-more-item', '设置');
-    settings.type = 'button';
-    settings.setAttribute('role', 'menuitem');
-    menu.append(help, copy, settings);
-    wrapper.append(toggle, menu);
+  function createShareButton(onClick) {
+    const button = createElement('button', 'xns-modal-tool xns-modal-share');
+    button.type = 'button';
+    button.title = '复制帖子链接';
+    button.setAttribute('aria-label', '复制帖子链接');
+    const label = createElement('span', 'xns-modal-tool-label', '分享');
+    button.append(createCopyIcon(), label);
+    button.addEventListener('click', () => {
+      onClick?.({ setLabel: (value) => { label.textContent = value; } });
+    });
+    return button;
+  }
 
-    let open = false;
-    const setOpen = (next) => {
-      open = Boolean(next);
-      menu.hidden = !open;
-      toggle.setAttribute('aria-expanded', String(open));
-    };
-    const close = () => setOpen(false);
-    const onDocumentClick = (event) => {
-      if (!wrapper.contains(event.target)) close();
-    };
-    toggle.addEventListener('click', (event) => {
-      event.stopPropagation();
-      setOpen(!open);
-    });
-    help.addEventListener('click', () => {
-      close();
-      onHelp?.();
-    });
-    copy.addEventListener('click', () => {
-      close();
-      onCopyLink?.({ setLabel: (label) => { copy.textContent = label; } });
-    });
-    settings.addEventListener('click', () => {
-      close();
-      onSettings?.();
-    });
-    documentObj.addEventListener('click', onDocumentClick, true);
-
-    return Object.freeze({
-      element: wrapper,
-      close,
-      setCopyLabel: (label) => { copy.textContent = label; },
-      destroy: () => documentObj.removeEventListener('click', onDocumentClick, true),
-    });
+  function createCopyIcon() {
+    const svg = documentObj.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const back = documentObj.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    back.setAttribute('x', '5');
+    back.setAttribute('y', '5');
+    back.setAttribute('width', '11');
+    back.setAttribute('height', '13');
+    back.setAttribute('rx', '2');
+    const front = documentObj.createElementNS('http://www.w3.org/2000/svg', 'path');
+    front.setAttribute('d', 'M9 5V4a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2');
+    svg.append(back, front);
+    return svg;
   }
 
   function installPreviewScrollButtons(dialog, body) {
@@ -3105,7 +3054,6 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     closeImageLightbox();
     state.modal?.requestController?.abort();
     state.modal?.featureCleanup?.();
-    state.modal?.moreMenu?.destroy?.();
     state.modal?.refreshScrollCleanup?.();
     state.modal?.scrollCleanup?.();
     state.modal?.overlay?.remove();
@@ -3122,7 +3070,7 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     return button;
   }
 
-  return Object.freeze({ removeBodyLock, installPreviewScrollButtons, closeModal, createCloseButton, createRefreshButton, createMoreMenu });
+  return Object.freeze({ removeBodyLock, installPreviewScrollButtons, closeModal, createCloseButton, createRefreshButton, createShareButton });
 }
 
 const xnsPreviewModalUi = createPreviewModalUi({
@@ -3137,7 +3085,7 @@ const installPreviewScrollButtons = (...args) => xnsPreviewModalUi.installPrevie
 const closeModal = (...args) => xnsPreviewModalUi.closeModal(...args);
 const createCloseButton = (...args) => xnsPreviewModalUi.createCloseButton(...args);
 const createRefreshButton = (...args) => xnsPreviewModalUi.createRefreshButton(...args);
-const createMoreMenu = (...args) => xnsPreviewModalUi.createMoreMenu(...args);
+const createShareButton = (...args) => xnsPreviewModalUi.createShareButton(...args);
 
 
 // 预览内容增强：ANSI、官方魔法标签页、Markdown 标签页、图片和代码复制。
@@ -3508,33 +3456,9 @@ function createPreviewController({
   closeModal,
   createCloseButton,
   createRefreshButton,
-  createMoreMenu,
-  openSettings,
-  getSettings,
-  hasSeenPrompt,
-  markPromptSeen,
+  createShareButton,
   openPreviewComposer,
 }) {
-  function createPreviewHelpPanel() {
-    const panel = createElement('aside', 'xns-modal-help');
-    panel.hidden = true;
-    panel.setAttribute('aria-label', '预览帮助');
-    panel.appendChild(createElement('strong', '', '预览提示'));
-    const list = createElement('ul', 'xns-modal-help-list');
-    [
-      ['Esc', '关闭预览；打开图片时先关闭图片查看器。'],
-      ['右侧 ↑ ↓', '快速回到顶部或底部，滚动位置会在刷新后尽量保留。'],
-      ['楼层号', '打开原帖对应页，并定位到该楼层。'],
-      ['回复 / 编辑', '使用 NodeSeek 原生接口；失败时会保留当前内容并显示原因。'],
-    ].forEach(([key, description]) => {
-      const item = createElement('li', 'xns-modal-help-item');
-      item.append(createElement('kbd', '', key), createElement('span', '', description));
-      list.appendChild(item);
-    });
-    panel.appendChild(list);
-    return panel;
-  }
-
   async function copyPreviewLink(url, setLabel) {
     const text = url?.href || '';
     if (!text) throw new Error('原帖链接不可用');
@@ -3553,7 +3477,17 @@ function createPreviewController({
       if (!copied) throw new Error('浏览器拒绝复制');
     }
     setLabel?.('已复制');
-    windowObj.setTimeout(() => setLabel?.('复制原帖链接'), 1_800);
+    windowObj.setTimeout(() => setLabel?.('分享'), 1_800);
+  }
+
+  function getCanonicalPostUrl(url) {
+    const info = getPostInfo(url?.href || '');
+    if (!info) return url;
+    const canonical = new URL(url.href);
+    canonical.pathname = `/post-${info.postId}-1`;
+    canonical.search = '';
+    canonical.hash = '';
+    return canonical;
   }
 
   function getPreviewHeaderMeta(parsed) {
@@ -3593,20 +3527,6 @@ function createPreviewController({
       items[key] = { item, value: item.lastElementChild };
     });
     return { root, items };
-  }
-
-  function createPreviewPrompt() {
-    const prompt = createElement('div', 'xns-one-time-prompt');
-    prompt.setAttribute('role', 'status');
-    prompt.appendChild(createElement('span', '', '提示：按 ? 打开帮助，也可以在“更多”里复制链接或调整设置。'));
-    const dismiss = createElement('button', '', '知道了');
-    dismiss.type = 'button';
-    dismiss.addEventListener('click', () => {
-      markPromptSeen('preview-help');
-      prompt.remove();
-    });
-    prompt.appendChild(dismiss);
-    return prompt;
   }
 
   function buildPreviewContent(url, parsed, options = {}) {
@@ -4062,6 +3982,7 @@ function createPreviewController({
   function openPreviewModal(url, fallbackLink) {
     closeModal();
     const fetchUrl = url.search || url.hash ? new URL(url.pathname, url.origin) : url;
+    const shareUrl = getCanonicalPostUrl(fetchUrl);
     const overlay = createElement('div', 'xns-overlay');
     overlay.tabIndex = -1;
     overlay.addEventListener('click', (event) => { if (event.target === overlay) closeModal(); });
@@ -4084,30 +4005,14 @@ function createPreviewController({
     original.target = '_blank';
     original.rel = 'noopener noreferrer';
     original.title = '在新标签打开原帖';
-    const helpPanel = createPreviewHelpPanel();
-    const toggleHelp = () => {
-      const modal = state.modal;
-      if (!modal) return;
-      const open = helpPanel.hidden;
-      helpPanel.hidden = !open;
-      helpButton.setAttribute('aria-expanded', String(open));
-      if (open) helpPanel.scrollIntoView?.({ block: 'nearest' });
-    };
-    const moreMenu = createMoreMenu({
-      onHelp: toggleHelp,
-      onCopyLink: ({ setLabel }) => {
-        void copyPreviewLink(url, setLabel).catch(() => setLabel('复制失败'));
-      },
-      onSettings: () => openSettings(),
+    const share = createShareButton(({ setLabel }) => {
+      void copyPreviewLink(shareUrl, setLabel).catch(() => {
+        setLabel('复制失败');
+        windowObj.setTimeout(() => setLabel('分享'), 1_800);
+      });
     });
-    const helpButton = createElement('button', 'xns-modal-tool xns-modal-help-toggle', '?');
-    helpButton.type = 'button';
-    helpButton.title = '帮助与快捷键（?）';
-    helpButton.setAttribute('aria-label', '帮助与快捷键（?）');
-    helpButton.setAttribute('aria-expanded', 'false');
-    helpButton.addEventListener('click', toggleHelp);
     const close = createCloseButton(closeModal);
-    actions.append(replyPost, original, moreMenu.element, close);
+    actions.append(replyPost, original, share, close);
     header.append(heading, actions);
     const toolbar = createElement('div', 'xns-modal-toolbar');
     toolbar.setAttribute('role', 'toolbar');
@@ -4117,20 +4022,17 @@ function createPreviewController({
       createElement('span', 'xns-modal-toolbar-label', '阅读'),
       createElement('span', 'xns-modal-mode', '楼中楼'),
       toolbarStatus,
-      helpButton,
       createRefreshButton(() => { void refreshPreviewModal(); }),
     );
     const body = createElement('div', 'xns-modal-body');
     body.appendChild(createElement('p', 'xns-loading', '正在读取帖子内容…'));
-    const prompt = getSettings().prompts && !hasSeenPrompt('preview-help') ? createPreviewPrompt() : null;
-    dialog.append(header, toolbar, helpPanel);
-    if (prompt) dialog.appendChild(prompt);
+    dialog.append(header, toolbar);
     dialog.appendChild(body);
     const scrollCleanup = installPreviewScrollButtons(dialog, body);
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, moreMenu, helpPanel, toggleHelp, helpButton, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, toolbarStatus, previewSeed: null, previewRecords: [], loadedPages: 0, failedPages: [], challengePages: [], truncated: false, totalPages: null, pageLimit: maxPage };
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, toolbarStatus, previewSeed: null, previewRecords: [], loadedPages: 0, failedPages: [], challengePages: [], truncated: false, totalPages: null, pageLimit: maxPage };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }
@@ -4163,11 +4065,7 @@ const xnsPreviewController = createPreviewController({
   closeModal,
   createCloseButton,
   createRefreshButton,
-  createMoreMenu,
-  openSettings,
-  getSettings,
-  hasSeenPrompt,
-  markPromptSeen,
+  createShareButton,
   openPreviewComposer: (...args) => openPreviewComposer(...args),
 });
 const buildPreviewContent = (...args) => xnsPreviewController.buildPreviewContent(...args);
@@ -4210,11 +4108,6 @@ function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPr
       return;
     }
     const inEditor = event.target.closest?.('textarea, input, [contenteditable="true"]');
-    if (event.key === '?' && state.modal && !state.settingsPanel && !inEditor) {
-      event.preventDefault();
-      state.modal.toggleHelp?.();
-      return;
-    }
     if (event.key !== 'Escape') return;
     if (inEditor) return;
     if (state.settingsPanel) {

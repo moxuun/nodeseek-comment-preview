@@ -24,33 +24,9 @@ function createPreviewController({
   closeModal,
   createCloseButton,
   createRefreshButton,
-  createMoreMenu,
-  openSettings,
-  getSettings,
-  hasSeenPrompt,
-  markPromptSeen,
+  createShareButton,
   openPreviewComposer,
 }) {
-  function createPreviewHelpPanel() {
-    const panel = createElement('aside', 'xns-modal-help');
-    panel.hidden = true;
-    panel.setAttribute('aria-label', '预览帮助');
-    panel.appendChild(createElement('strong', '', '预览提示'));
-    const list = createElement('ul', 'xns-modal-help-list');
-    [
-      ['Esc', '关闭预览；打开图片时先关闭图片查看器。'],
-      ['右侧 ↑ ↓', '快速回到顶部或底部，滚动位置会在刷新后尽量保留。'],
-      ['楼层号', '打开原帖对应页，并定位到该楼层。'],
-      ['回复 / 编辑', '使用 NodeSeek 原生接口；失败时会保留当前内容并显示原因。'],
-    ].forEach(([key, description]) => {
-      const item = createElement('li', 'xns-modal-help-item');
-      item.append(createElement('kbd', '', key), createElement('span', '', description));
-      list.appendChild(item);
-    });
-    panel.appendChild(list);
-    return panel;
-  }
-
   async function copyPreviewLink(url, setLabel) {
     const text = url?.href || '';
     if (!text) throw new Error('原帖链接不可用');
@@ -69,7 +45,17 @@ function createPreviewController({
       if (!copied) throw new Error('浏览器拒绝复制');
     }
     setLabel?.('已复制');
-    windowObj.setTimeout(() => setLabel?.('复制原帖链接'), 1_800);
+    windowObj.setTimeout(() => setLabel?.('分享'), 1_800);
+  }
+
+  function getCanonicalPostUrl(url) {
+    const info = getPostInfo(url?.href || '');
+    if (!info) return url;
+    const canonical = new URL(url.href);
+    canonical.pathname = `/post-${info.postId}-1`;
+    canonical.search = '';
+    canonical.hash = '';
+    return canonical;
   }
 
   function getPreviewHeaderMeta(parsed) {
@@ -109,20 +95,6 @@ function createPreviewController({
       items[key] = { item, value: item.lastElementChild };
     });
     return { root, items };
-  }
-
-  function createPreviewPrompt() {
-    const prompt = createElement('div', 'xns-one-time-prompt');
-    prompt.setAttribute('role', 'status');
-    prompt.appendChild(createElement('span', '', '提示：按 ? 打开帮助，也可以在“更多”里复制链接或调整设置。'));
-    const dismiss = createElement('button', '', '知道了');
-    dismiss.type = 'button';
-    dismiss.addEventListener('click', () => {
-      markPromptSeen('preview-help');
-      prompt.remove();
-    });
-    prompt.appendChild(dismiss);
-    return prompt;
   }
 
   function buildPreviewContent(url, parsed, options = {}) {
@@ -578,6 +550,7 @@ function createPreviewController({
   function openPreviewModal(url, fallbackLink) {
     closeModal();
     const fetchUrl = url.search || url.hash ? new URL(url.pathname, url.origin) : url;
+    const shareUrl = getCanonicalPostUrl(fetchUrl);
     const overlay = createElement('div', 'xns-overlay');
     overlay.tabIndex = -1;
     overlay.addEventListener('click', (event) => { if (event.target === overlay) closeModal(); });
@@ -600,30 +573,14 @@ function createPreviewController({
     original.target = '_blank';
     original.rel = 'noopener noreferrer';
     original.title = '在新标签打开原帖';
-    const helpPanel = createPreviewHelpPanel();
-    const toggleHelp = () => {
-      const modal = state.modal;
-      if (!modal) return;
-      const open = helpPanel.hidden;
-      helpPanel.hidden = !open;
-      helpButton.setAttribute('aria-expanded', String(open));
-      if (open) helpPanel.scrollIntoView?.({ block: 'nearest' });
-    };
-    const moreMenu = createMoreMenu({
-      onHelp: toggleHelp,
-      onCopyLink: ({ setLabel }) => {
-        void copyPreviewLink(url, setLabel).catch(() => setLabel('复制失败'));
-      },
-      onSettings: () => openSettings(),
+    const share = createShareButton(({ setLabel }) => {
+      void copyPreviewLink(shareUrl, setLabel).catch(() => {
+        setLabel('复制失败');
+        windowObj.setTimeout(() => setLabel('分享'), 1_800);
+      });
     });
-    const helpButton = createElement('button', 'xns-modal-tool xns-modal-help-toggle', '?');
-    helpButton.type = 'button';
-    helpButton.title = '帮助与快捷键（?）';
-    helpButton.setAttribute('aria-label', '帮助与快捷键（?）');
-    helpButton.setAttribute('aria-expanded', 'false');
-    helpButton.addEventListener('click', toggleHelp);
     const close = createCloseButton(closeModal);
-    actions.append(replyPost, original, moreMenu.element, close);
+    actions.append(replyPost, original, share, close);
     header.append(heading, actions);
     const toolbar = createElement('div', 'xns-modal-toolbar');
     toolbar.setAttribute('role', 'toolbar');
@@ -633,20 +590,17 @@ function createPreviewController({
       createElement('span', 'xns-modal-toolbar-label', '阅读'),
       createElement('span', 'xns-modal-mode', '楼中楼'),
       toolbarStatus,
-      helpButton,
       createRefreshButton(() => { void refreshPreviewModal(); }),
     );
     const body = createElement('div', 'xns-modal-body');
     body.appendChild(createElement('p', 'xns-loading', '正在读取帖子内容…'));
-    const prompt = getSettings().prompts && !hasSeenPrompt('preview-help') ? createPreviewPrompt() : null;
-    dialog.append(header, toolbar, helpPanel);
-    if (prompt) dialog.appendChild(prompt);
+    dialog.append(header, toolbar);
     dialog.appendChild(body);
     const scrollCleanup = installPreviewScrollButtons(dialog, body);
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, moreMenu, helpPanel, toggleHelp, helpButton, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, toolbarStatus, previewSeed: null, previewRecords: [], loadedPages: 0, failedPages: [], challengePages: [], truncated: false, totalPages: null, pageLimit: maxPage };
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, toolbarStatus, previewSeed: null, previewRecords: [], loadedPages: 0, failedPages: [], challengePages: [], truncated: false, totalPages: null, pageLimit: maxPage };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }
@@ -679,11 +633,7 @@ const xnsPreviewController = createPreviewController({
   closeModal,
   createCloseButton,
   createRefreshButton,
-  createMoreMenu,
-  openSettings,
-  getSettings,
-  hasSeenPrompt,
-  markPromptSeen,
+  createShareButton,
   openPreviewComposer: (...args) => openPreviewComposer(...args),
 });
 const buildPreviewContent = (...args) => xnsPreviewController.buildPreviewContent(...args);
