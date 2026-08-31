@@ -10,6 +10,24 @@
 - 支持回复、引用、编辑、点赞、鸡腿、反对、收藏、图片灯箱、代码复制、标签页、ANSI 和投票面板。
 - 预览保留 NodeSeek 官方页面的头像、等级、正文和评论操作样式，并适配暗色模式。
 
+## 效果预览
+
+### 预览弹窗
+
+![NodeSeek 帖子预览弹窗](docs/preview.jpg)
+
+### 楼中楼评论树
+
+![NodeSeek 楼中楼评论树](docs/tree-privew.jpg)
+
+### 帖子页亮色模式
+
+![NodeSeek 帖子页楼中楼亮色模式](docs/302.jpg)
+
+### 暗色模式
+
+![NodeSeek 帖子页楼中楼暗色模式](docs/dark_mode.jpg)
+
 ## 安装
 
 1. 安装 Tampermonkey 或 Violentmonkey。
