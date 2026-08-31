@@ -31,10 +31,13 @@
 ## 安装
 
 1. 安装 Tampermonkey 或 Violentmonkey。
-2. 打开并安装 [构建产物](outputs/nodeseek-comment-preview.user.js)。
-3. 刷新 NodeSeek 页面。
+2. 推荐从 [Greasy Fork 安装脚本](https://greasyfork.org/zh-CN/scripts/593732)；它会负责版本更新。
+3. 也可以直接安装仓库中的 [构建产物](outputs/nodeseek-comment-preview.user.js)。
+4. 刷新 NodeSeek 页面。
 
 设置从油猴脚本菜单打开，不加载远程模块，也不执行远程代码。
+
+[GitHub 源码与问题反馈](https://github.com/moxuun/nodeseek-comment-preview) · [Greasy Fork 安装](https://greasyfork.org/zh-CN/scripts/593732)
 
 ## 限制
 

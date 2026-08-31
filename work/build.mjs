@@ -13,6 +13,8 @@ const header = `// ==UserScript==
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       moxuun
 // @license      MIT
+// @homepageURL  https://github.com/moxuun/nodeseek-comment-preview
+// @supportURL   https://github.com/moxuun/nodeseek-comment-preview/issues
 // @match        https://www.nodeseek.com/*
 // @run-at       document-start
 // @grant        GM_registerMenuCommand
@@ -85,4 +87,15 @@ if (files.length === 0) throw new Error(`没有找到源码模块：${sourceRoot
 const body = (await Promise.all(files.map((file) => fs.readFile(file, 'utf8')))).join('\n\n');
 const output = `${header}\n\n(() => {\n  'use strict';\n\n${body}\n})();\n`;
 await fs.writeFile(outputPath, output, 'utf8');
+
+const descriptionSourcePath = path.join(here, '..', 'docs', 'greasy-fork-description.md');
+const descriptionOutputPath = path.join(here, '..', 'docs', 'greasy-fork-description.gf.md');
+const descriptionSource = await fs.readFile(descriptionSourcePath, 'utf8');
+const descriptionForGreasyFork = Array.from(descriptionSource, (character) => {
+  const codePoint = character.codePointAt(0);
+  return codePoint > 0x7f ? `&#x${codePoint.toString(16)};` : character;
+}).join('');
+await fs.writeFile(descriptionOutputPath, descriptionForGreasyFork, 'utf8');
+
 console.log(`构建完成：${path.relative(path.join(here, '..'), outputPath)}（${files.length} 个源码模块）`);
+console.log(`Greasy Fork 描述同步文件：${path.relative(path.join(here, '..'), descriptionOutputPath)}`);

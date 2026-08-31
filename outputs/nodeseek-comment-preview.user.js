@@ -5,6 +5,8 @@
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       moxuun
 // @license      MIT
+// @homepageURL  https://github.com/moxuun/nodeseek-comment-preview
+// @supportURL   https://github.com/moxuun/nodeseek-comment-preview/issues
 // @match        https://www.nodeseek.com/*
 // @run-at       document-start
 // @grant        GM_registerMenuCommand
