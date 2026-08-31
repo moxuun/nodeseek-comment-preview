@@ -73,6 +73,8 @@ function installStyle() {
       .xns-preview-status.is-failed { color:#b91c1c; }
       .xns-preview-status.is-truncated { color:#92400e; }
       .xns-preview-status > span + span::before { margin:0 4px 0 1px; color:#94a3b8; content:"·"; }
+      .xns-inline-retry { padding:2px 7px; border:1px solid rgba(185,28,28,.35); border-radius:5px; color:#b91c1c; background:#fff; cursor:pointer; font:11px/1.2 system-ui,sans-serif; }
+      .xns-inline-retry:hover, .xns-inline-retry:focus-visible { border-color:#b91c1c; color:#991b1b; outline:none; }
       .xns-preview-status:not(.xns-modal-toolbar-status) { display:flex; flex-wrap:wrap; gap:4px 8px; margin:7px 0; padding:6px 9px; border:1px solid rgba(100,116,139,.16); border-radius:6px; color:#64748b; background:#f8fafc; font:12px/1.4 system-ui,sans-serif; }
       .xns-preview-status[hidden] { display:none !important; }
       .xns-modal-tool { display:inline-flex; align-items:center; gap:5px; margin-left:auto; padding:4px 8px; border:1px solid rgba(100,116,139,.25); border-radius:6px; color:#475569; background:#fff; cursor:pointer; font:12px/1.2 system-ui,sans-serif; }
@@ -248,6 +250,8 @@ function installStyle() {
       .dark-layout .xns-toolbar-status, .dark-layout .xns-modal-toolbar-status, .dark-layout .xns-preview-status, .dark-layout .xns-loading, .dark-layout .xns-status, .dark-layout .xns-vote-status { color:#9ca3af; }
       .dark-layout .xns-toolbar-status.is-failed { color:#fca5a5; }
       .dark-layout .xns-preview-status.is-failed { color:#fca5a5; }
+      .dark-layout .xns-inline-retry { color:#fca5a5; background:#111827; border-color:rgba(248,113,113,.45); }
+      .dark-layout .xns-inline-retry:hover, .dark-layout .xns-inline-retry:focus-visible { color:#fecaca; border-color:#f87171; }
       .dark-layout .xns-preview-status.is-truncated { color:#fcd34d; }
       .dark-layout .xns-preview-thread .floor-link-wrapper .floor-link, .dark-layout .xns-preview-content .floor-link-wrapper .floor-link { color:#6b7280; }
       @media (max-width:800px) { .xns-preview-scroll-btns { right:6px; } .xns-scroll-btn { width:30px !important; min-width:30px !important; max-width:30px !important; height:30px !important; min-height:30px !important; max-height:30px !important; flex-basis:30px; } }

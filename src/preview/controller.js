@@ -133,6 +133,7 @@ function createPreviewController({
       renderPreviewRecords(section, info, currentRecords, {
         loading: hasRemotePages,
         statusNode: options.statusNode,
+        onRetry: options.onRetry,
         onNodeMounted: (node) => installPreviewFeatures(node),
     });
     wrapper.appendChild(section);
@@ -144,6 +145,7 @@ function createPreviewController({
       renderPreviewRecords(section, info, progress.records, {
         ...progress,
         statusNode: options.statusNode,
+        onRetry: options.onRetry,
         onNodeMounted: (node) => installPreviewFeatures(node),
       });
       return true;
@@ -175,6 +177,7 @@ function createPreviewController({
         renderPreviewRecords(section, info, preview.records, {
           ...preview,
           statusNode: options.statusNode,
+          onRetry: options.onRetry,
           onNodeMounted: (node) => installPreviewFeatures(node),
         });
       }
@@ -402,6 +405,9 @@ function createPreviewController({
         renderDetached: preserveContent,
         signal: requestController?.signal,
         statusNode: toolbarStatus,
+        onRetry: () => {
+          if (state.modal === modal && !modal.loading) void loadPreviewModal(modal, '正在重试分页…', { preserveContent: true });
+        },
       });
       let hydratedPreview = null;
       if (preserveContent && preview.hydrate) hydratedPreview = await preview.hydrate;

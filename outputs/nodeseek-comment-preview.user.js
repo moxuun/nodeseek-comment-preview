@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.30
+// @version      0.5.31
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -2222,6 +2222,18 @@ function createPreviewRenderer({
     if (status.failed) {
       statusNode.classList.add('is-failed');
       statusNode.appendChild(createElement('span', 'xns-page-failed', status.failed));
+      if (typeof options.onRetry === 'function') {
+        const retry = createElement('button', 'xns-inline-retry', '重试');
+        retry.type = 'button';
+        retry.title = '重新读取失败分页';
+        retry.setAttribute('aria-label', '重新读取失败分页');
+        retry.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          options.onRetry();
+        });
+        statusNode.appendChild(retry);
+      }
     }
     if (status.truncated) {
       statusNode.classList.add('is-truncated');
@@ -3388,6 +3400,7 @@ function createPreviewController({
       renderPreviewRecords(section, info, currentRecords, {
         loading: hasRemotePages,
         statusNode: options.statusNode,
+        onRetry: options.onRetry,
         onNodeMounted: (node) => installPreviewFeatures(node),
     });
     wrapper.appendChild(section);
@@ -3399,6 +3412,7 @@ function createPreviewController({
       renderPreviewRecords(section, info, progress.records, {
         ...progress,
         statusNode: options.statusNode,
+        onRetry: options.onRetry,
         onNodeMounted: (node) => installPreviewFeatures(node),
       });
       return true;
@@ -3430,6 +3444,7 @@ function createPreviewController({
         renderPreviewRecords(section, info, preview.records, {
           ...preview,
           statusNode: options.statusNode,
+          onRetry: options.onRetry,
           onNodeMounted: (node) => installPreviewFeatures(node),
         });
       }
@@ -3657,6 +3672,9 @@ function createPreviewController({
         renderDetached: preserveContent,
         signal: requestController?.signal,
         statusNode: toolbarStatus,
+        onRetry: () => {
+          if (state.modal === modal && !modal.loading) void loadPreviewModal(modal, '正在重试分页…', { preserveContent: true });
+        },
       });
       let hydratedPreview = null;
       if (preserveContent && preview.hydrate) hydratedPreview = await preview.hydrate;
@@ -3994,6 +4012,10 @@ function createPostPageController({
       if (refresh) {
         refresh.disabled = this.loading;
         refresh.setAttribute('aria-busy', String(this.loading));
+        const retrying = !this.loading && this.failedPages.length > 0;
+        refresh.textContent = retrying ? '重试' : '刷新';
+        refresh.title = retrying ? '重新读取分页' : '重新读取当前页和评论分页';
+        refresh.setAttribute('aria-label', retrying ? '重新读取分页' : '重新读取当前页和评论分页');
       }
       const status = qs(this.toolbar, '.xns-toolbar-status');
       if (!status) return;
@@ -4383,6 +4405,8 @@ function installStyle() {
       .xns-preview-status.is-failed { color:#b91c1c; }
       .xns-preview-status.is-truncated { color:#92400e; }
       .xns-preview-status > span + span::before { margin:0 4px 0 1px; color:#94a3b8; content:"·"; }
+      .xns-inline-retry { padding:2px 7px; border:1px solid rgba(185,28,28,.35); border-radius:5px; color:#b91c1c; background:#fff; cursor:pointer; font:11px/1.2 system-ui,sans-serif; }
+      .xns-inline-retry:hover, .xns-inline-retry:focus-visible { border-color:#b91c1c; color:#991b1b; outline:none; }
       .xns-preview-status:not(.xns-modal-toolbar-status) { display:flex; flex-wrap:wrap; gap:4px 8px; margin:7px 0; padding:6px 9px; border:1px solid rgba(100,116,139,.16); border-radius:6px; color:#64748b; background:#f8fafc; font:12px/1.4 system-ui,sans-serif; }
       .xns-preview-status[hidden] { display:none !important; }
       .xns-modal-tool { display:inline-flex; align-items:center; gap:5px; margin-left:auto; padding:4px 8px; border:1px solid rgba(100,116,139,.25); border-radius:6px; color:#475569; background:#fff; cursor:pointer; font:12px/1.2 system-ui,sans-serif; }
@@ -4558,6 +4582,8 @@ function installStyle() {
       .dark-layout .xns-toolbar-status, .dark-layout .xns-modal-toolbar-status, .dark-layout .xns-preview-status, .dark-layout .xns-loading, .dark-layout .xns-status, .dark-layout .xns-vote-status { color:#9ca3af; }
       .dark-layout .xns-toolbar-status.is-failed { color:#fca5a5; }
       .dark-layout .xns-preview-status.is-failed { color:#fca5a5; }
+      .dark-layout .xns-inline-retry { color:#fca5a5; background:#111827; border-color:rgba(248,113,113,.45); }
+      .dark-layout .xns-inline-retry:hover, .dark-layout .xns-inline-retry:focus-visible { color:#fecaca; border-color:#f87171; }
       .dark-layout .xns-preview-status.is-truncated { color:#fcd34d; }
       .dark-layout .xns-preview-thread .floor-link-wrapper .floor-link, .dark-layout .xns-preview-content .floor-link-wrapper .floor-link { color:#6b7280; }
       @media (max-width:800px) { .xns-preview-scroll-btns { right:6px; } .xns-scroll-btn { width:30px !important; min-width:30px !important; max-width:30px !important; height:30px !important; min-height:30px !important; max-height:30px !important; flex-basis:30px; } }

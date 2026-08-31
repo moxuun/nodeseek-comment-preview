@@ -134,6 +134,18 @@ function createPreviewRenderer({
     if (status.failed) {
       statusNode.classList.add('is-failed');
       statusNode.appendChild(createElement('span', 'xns-page-failed', status.failed));
+      if (typeof options.onRetry === 'function') {
+        const retry = createElement('button', 'xns-inline-retry', '重试');
+        retry.type = 'button';
+        retry.title = '重新读取失败分页';
+        retry.setAttribute('aria-label', '重新读取失败分页');
+        retry.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          options.onRetry();
+        });
+        statusNode.appendChild(retry);
+      }
     }
     if (status.truncated) {
       statusNode.classList.add('is-truncated');

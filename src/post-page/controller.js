@@ -123,6 +123,10 @@ function createPostPageController({
       if (refresh) {
         refresh.disabled = this.loading;
         refresh.setAttribute('aria-busy', String(this.loading));
+        const retrying = !this.loading && this.failedPages.length > 0;
+        refresh.textContent = retrying ? '重试' : '刷新';
+        refresh.title = retrying ? '重新读取分页' : '重新读取当前页和评论分页';
+        refresh.setAttribute('aria-label', retrying ? '重新读取分页' : '重新读取当前页和评论分页');
       }
       const status = qs(this.toolbar, '.xns-toolbar-status');
       if (!status) return;
