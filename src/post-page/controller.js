@@ -74,7 +74,10 @@ function createPostPageController({
       if (this.toolbar || !this.list) return;
       const toolbar = createElement('nav', 'xns-post-toolbar');
       toolbar.setAttribute('aria-label', '评论布局');
-      toolbar.appendChild(createElement('span', '', '评论布局：'));
+      toolbar.appendChild(createElement('span', 'xns-post-toolbar-label', '评论'));
+      const modeSwitch = createElement('span', 'xns-post-mode-switch');
+      modeSwitch.setAttribute('role', 'group');
+      modeSwitch.setAttribute('aria-label', '评论布局');
       [['thread', '楼中楼', '切换到楼中楼布局'], ['original', '原版', '恢复官方评论布局']].forEach(([mode, text, title]) => {
         const button = createElement('button', '', text);
         button.type = 'button';
@@ -82,8 +85,9 @@ function createPostPageController({
         button.title = title;
         button.setAttribute('aria-label', title);
         button.addEventListener('click', () => this.setMode(mode));
-        toolbar.appendChild(button);
+        modeSwitch.appendChild(button);
       });
+      toolbar.appendChild(modeSwitch);
       toolbar.appendChild(createElement('span', 'xns-toolbar-status'));
       const refresh = createElement('button', 'xns-post-refresh', '刷新');
       refresh.type = 'button';

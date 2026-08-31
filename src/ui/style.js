@@ -14,6 +14,11 @@ function installStyle() {
       .xns-post-toolbar button { padding:5px 10px; border:1px solid rgba(100,116,139,.28); border-radius:6px; color:inherit; background:transparent; cursor:pointer; font:inherit; }
       .xns-post-toolbar button:hover, .xns-post-toolbar button:focus-visible { border-color:#3b82f6; outline:none; }
       .xns-post-toolbar button[aria-pressed="true"] { color:#2563eb; border-color:#3b82f6; background:rgba(59,130,246,.1); }
+      .xns-post-toolbar-label { color:#64748b; font-size:12px; }
+      .xns-post-mode-switch { display:inline-flex; padding:2px; border:1px solid rgba(100,116,139,.25); border-radius:6px; background:rgba(148,163,184,.08); }
+      .xns-post-mode-switch button { padding:4px 8px; border:0; border-radius:4px; background:transparent; }
+      .xns-post-mode-switch button:hover, .xns-post-mode-switch button:focus-visible { border-color:transparent; color:#2563eb; background:#eff6ff; }
+      .xns-post-mode-switch button[aria-pressed="true"] { border-color:transparent; color:#1d4ed8; background:#fff; box-shadow:0 1px 3px rgba(15,23,42,.12); }
       .xns-toolbar-status { display:inline-flex; align-items:center; gap:6px; max-width:min(62vw,720px); min-width:0; margin-left:auto; overflow:hidden; color:#64748b; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
       .xns-toolbar-status.is-loading::before { width:8px; height:8px; flex:0 0 8px; border:2px solid rgba(37,99,235,.22); border-top-color:#2563eb; border-radius:50%; content:""; animation:xns-spin .9s linear infinite; }
       .xns-toolbar-status.is-failed { color:#b91c1c; }
@@ -179,6 +184,11 @@ function installStyle() {
       .dark-layout .xns-post-toolbar { color:#e5e7eb; background:#1e293b; border-color:rgba(148,163,184,.3); }
       .dark-layout .xns-post-toolbar button { color:#e5e7eb; border-color:rgba(148,163,184,.35); }
       .dark-layout .xns-post-toolbar button[aria-pressed="true"] { color:#93c5fd; border-color:#3b82f6; background:rgba(59,130,246,.22); }
+      .dark-layout .xns-post-toolbar-label { color:#9ca3af; }
+      .dark-layout .xns-post-mode-switch { border-color:rgba(148,163,184,.35); background:rgba(15,23,42,.35); }
+      .dark-layout .xns-post-mode-switch button { border-color:transparent; }
+      .dark-layout .xns-post-mode-switch button:hover, .dark-layout .xns-post-mode-switch button:focus-visible { color:#93c5fd; background:rgba(59,130,246,.18); }
+      .dark-layout .xns-post-mode-switch button[aria-pressed="true"] { color:#93c5fd; background:#111827; box-shadow:0 1px 3px rgba(0,0,0,.3); }
       .dark-layout .xns-preview-composer textarea { color:#e5e7eb; }
       .dark-layout .xns-preview-composer button, .dark-layout .xns-preview-composer a { color:#e5e7eb; border-color:rgba(148,163,184,.35); }
       .dark-layout .xns-preview-content .vote-panel form { color:#e5e7eb; background:#111827; border-color:rgba(148,163,184,.25); }
