@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.27
+// @version      0.5.28
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -49,6 +49,44 @@ const state = {
   lightbox: null,
   mode: DEFAULT_MODE,
 };
+
+
+// 分页状态文案与语义统一；预览页和帖子页共享同一套用户可见反馈。
+function createPageStatusFormatter({ maxPage }) {
+  function format(options = {}) {
+    const totalPages = Number(options.totalPages) || 0;
+    const loadedPages = Math.max(0, Number(options.loadedPages) || 0);
+    const failedCount = Array.isArray(options.failedPages) ? options.failedPages.length : 0;
+    const targetPages = Math.min(maxPage, totalPages || loadedPages);
+    const pageProgress = targetPages ? `已读取 ${loadedPages}/${targetPages} 页` : '';
+    const stage = options.loading
+      ? (pageProgress ? `正在读取其他分页 · ${pageProgress}` : '正在读取其他分页…')
+      : pageProgress;
+    const failed = failedCount ? `${failedCount} 页读取失败` : '';
+    const truncated = options.truncated
+      ? `帖子共 ${totalPages || maxPage} 页，仅读取前 ${maxPage} 页，后面的内容没有显示`
+      : '';
+    const detail = [stage, failed, truncated].filter(Boolean).join(' · ');
+    const commentCount = Number.isFinite(options.commentCount) ? `${options.commentCount} 条回复` : '';
+    const compact = [commentCount, failedCount ? `${failedCount} 页失败` : ''].filter(Boolean).join(' · ') || detail;
+    return {
+      targetPages,
+      loadedPages,
+      failedCount,
+      stage,
+      failed,
+      truncated,
+      detail,
+      compact,
+      tone: failedCount ? 'is-failed' : '',
+    };
+  }
+
+  return Object.freeze({ format });
+}
+
+const xnsPageStatusFormatter = createPageStatusFormatter({ maxPage: MAX_PAGE });
+const formatPageStatus = (...args) => xnsPageStatusFormatter.format(...args);
 
 
 // 通用 DOM 与输入安全工具；不包含 NodeSeek 业务规则。
@@ -1868,6 +1906,7 @@ function createPreviewRenderer({
   flattenReplyTree,
   createCommentVirtualizer,
   addRemoteNote,
+  formatPageStatus,
 }) {
   function ensurePreviewEditOption(node, record) {
     if (!node || !record?.isMine) return;
@@ -1960,9 +1999,7 @@ function createPreviewRenderer({
   }
 
   function renderPreviewStatus(section, options = {}) {
-    const targetPages = Math.min(maxPage, Number(options.totalPages) || 0);
-    const loadedPages = Number(options.loadedPages) || 0;
-    const failedPages = Array.isArray(options.failedPages) ? options.failedPages : [];
+    const status = formatPageStatus(options);
     const statusNode = options.statusNode || qs(section, ':scope > .xns-preview-status') || createElement('div', 'xns-preview-status');
     if (!statusNode.parentNode) section.insertBefore(statusNode, qs(section, ':scope > .xns-preview-thread'));
     clearElement(statusNode);
@@ -1970,20 +2007,19 @@ function createPreviewRenderer({
     statusNode.removeAttribute('title');
     statusNode.setAttribute('role', 'status');
     statusNode.setAttribute('aria-live', 'polite');
-    const progress = loadedPages && targetPages ? `已读取 ${loadedPages}/${targetPages} 页` : '';
     if (options.loading) {
       statusNode.classList.add('is-loading');
-      statusNode.appendChild(createElement('span', 'xns-page-loading', progress ? `正在加载其他分页 · ${progress}` : '正在加载其他分页…'));
-    } else if (loadedPages && targetPages) {
-      statusNode.appendChild(createElement('span', 'xns-page-complete', `已读取 ${loadedPages}/${targetPages} 页`));
+      statusNode.appendChild(createElement('span', 'xns-page-loading', status.stage));
+    } else if (status.stage) {
+      statusNode.appendChild(createElement('span', 'xns-page-complete', status.stage));
     }
-    if (failedPages.length) {
+    if (status.failed) {
       statusNode.classList.add('is-failed');
-      statusNode.appendChild(createElement('span', 'xns-page-failed', `${failedPages.length} 页读取失败`));
+      statusNode.appendChild(createElement('span', 'xns-page-failed', status.failed));
     }
-    if (options.truncated) {
+    if (status.truncated) {
       statusNode.classList.add('is-truncated');
-      statusNode.appendChild(createElement('span', 'xns-page-truncated', `帖子共 ${Number(options.totalPages) || maxPage} 页，仅显示前 ${maxPage} 页`));
+      statusNode.appendChild(createElement('span', 'xns-page-truncated', status.truncated));
     }
     statusNode.hidden = !statusNode.childNodes.length;
     return statusNode;
@@ -2068,6 +2104,7 @@ const xnsPreviewRenderer = createPreviewRenderer({
   flattenReplyTree,
   createCommentVirtualizer,
   addRemoteNote,
+  formatPageStatus,
 });
 
 const ensurePreviewEditOption = (...args) => xnsPreviewRenderer.ensurePreviewEditOption(...args);
@@ -3622,6 +3659,7 @@ function createPostPageController({
   prepareCommentRecord,
   addRemoteNote,
   installPreviewFeatures,
+  formatPageStatus,
 }) {
   return class PostPageController {
     constructor(info) {
@@ -3952,16 +3990,16 @@ function createPostPageController({
       });
       const loadedPages = this.loadedPages;
       const loading = this.loading || options.progressive;
-      let status = this.failedPages.length
-        ? `楼中楼已整理：读取 ${loadedPages} 页，${this.failedPages.length} 页失败。`
-        : loading && this.hasRemotePages
-          ? `楼中楼已整理：已读取 ${loadedPages} 页，正在读取其他分页…`
-        : `楼中楼已整理：共读取 ${loadedPages} 页。`;
-      if (this.truncated) status += ` 帖子共 ${this.totalPages} 页，只读取了前 ${maxPage} 页，后面页的楼层没有显示。`;
-      const summary = this.records.length
-        ? `${this.records.length} 条评论${this.failedPages.length ? ` · ${this.failedPages.length} 页失败` : ''}`
-        : status;
-      this.showStatus(status, this.failedPages.length ? 'is-failed' : '', summary);
+      const pagination = formatPageStatus({
+        loadedPages,
+        totalPages: this.totalPages,
+        failedPages: this.failedPages,
+        truncated: this.truncated,
+        loading: loading && this.hasRemotePages,
+        commentCount: this.records.length,
+      });
+      const detail = pagination.detail || '暂无分页信息';
+      this.showStatus(`楼中楼已整理 · ${detail}`, pagination.tone, pagination.compact);
     }
 
     restoreOriginal(options = {}) {
@@ -4016,6 +4054,7 @@ const PostEnhancer = createPostPageController({
   prepareCommentRecord,
   addRemoteNote,
   installPreviewFeatures,
+  formatPageStatus,
 });
 
 

@@ -25,6 +25,7 @@ function createPostPageController({
   prepareCommentRecord,
   addRemoteNote,
   installPreviewFeatures,
+  formatPageStatus,
 }) {
   return class PostPageController {
     constructor(info) {
@@ -355,16 +356,16 @@ function createPostPageController({
       });
       const loadedPages = this.loadedPages;
       const loading = this.loading || options.progressive;
-      let status = this.failedPages.length
-        ? `楼中楼已整理：读取 ${loadedPages} 页，${this.failedPages.length} 页失败。`
-        : loading && this.hasRemotePages
-          ? `楼中楼已整理：已读取 ${loadedPages} 页，正在读取其他分页…`
-        : `楼中楼已整理：共读取 ${loadedPages} 页。`;
-      if (this.truncated) status += ` 帖子共 ${this.totalPages} 页，只读取了前 ${maxPage} 页，后面页的楼层没有显示。`;
-      const summary = this.records.length
-        ? `${this.records.length} 条评论${this.failedPages.length ? ` · ${this.failedPages.length} 页失败` : ''}`
-        : status;
-      this.showStatus(status, this.failedPages.length ? 'is-failed' : '', summary);
+      const pagination = formatPageStatus({
+        loadedPages,
+        totalPages: this.totalPages,
+        failedPages: this.failedPages,
+        truncated: this.truncated,
+        loading: loading && this.hasRemotePages,
+        commentCount: this.records.length,
+      });
+      const detail = pagination.detail || '暂无分页信息';
+      this.showStatus(`楼中楼已整理 · ${detail}`, pagination.tone, pagination.compact);
     }
 
     restoreOriginal(options = {}) {
@@ -419,4 +420,5 @@ const PostEnhancer = createPostPageController({
   prepareCommentRecord,
   addRemoteNote,
   installPreviewFeatures,
+  formatPageStatus,
 });

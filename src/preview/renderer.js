@@ -24,6 +24,7 @@ function createPreviewRenderer({
   flattenReplyTree,
   createCommentVirtualizer,
   addRemoteNote,
+  formatPageStatus,
 }) {
   function ensurePreviewEditOption(node, record) {
     if (!node || !record?.isMine) return;
@@ -116,9 +117,7 @@ function createPreviewRenderer({
   }
 
   function renderPreviewStatus(section, options = {}) {
-    const targetPages = Math.min(maxPage, Number(options.totalPages) || 0);
-    const loadedPages = Number(options.loadedPages) || 0;
-    const failedPages = Array.isArray(options.failedPages) ? options.failedPages : [];
+    const status = formatPageStatus(options);
     const statusNode = options.statusNode || qs(section, ':scope > .xns-preview-status') || createElement('div', 'xns-preview-status');
     if (!statusNode.parentNode) section.insertBefore(statusNode, qs(section, ':scope > .xns-preview-thread'));
     clearElement(statusNode);
@@ -126,20 +125,19 @@ function createPreviewRenderer({
     statusNode.removeAttribute('title');
     statusNode.setAttribute('role', 'status');
     statusNode.setAttribute('aria-live', 'polite');
-    const progress = loadedPages && targetPages ? `已读取 ${loadedPages}/${targetPages} 页` : '';
     if (options.loading) {
       statusNode.classList.add('is-loading');
-      statusNode.appendChild(createElement('span', 'xns-page-loading', progress ? `正在加载其他分页 · ${progress}` : '正在加载其他分页…'));
-    } else if (loadedPages && targetPages) {
-      statusNode.appendChild(createElement('span', 'xns-page-complete', `已读取 ${loadedPages}/${targetPages} 页`));
+      statusNode.appendChild(createElement('span', 'xns-page-loading', status.stage));
+    } else if (status.stage) {
+      statusNode.appendChild(createElement('span', 'xns-page-complete', status.stage));
     }
-    if (failedPages.length) {
+    if (status.failed) {
       statusNode.classList.add('is-failed');
-      statusNode.appendChild(createElement('span', 'xns-page-failed', `${failedPages.length} 页读取失败`));
+      statusNode.appendChild(createElement('span', 'xns-page-failed', status.failed));
     }
-    if (options.truncated) {
+    if (status.truncated) {
       statusNode.classList.add('is-truncated');
-      statusNode.appendChild(createElement('span', 'xns-page-truncated', `帖子共 ${Number(options.totalPages) || maxPage} 页，仅显示前 ${maxPage} 页`));
+      statusNode.appendChild(createElement('span', 'xns-page-truncated', status.truncated));
     }
     statusNode.hidden = !statusNode.childNodes.length;
     return statusNode;
@@ -224,6 +222,7 @@ const xnsPreviewRenderer = createPreviewRenderer({
   flattenReplyTree,
   createCommentVirtualizer,
   addRemoteNote,
+  formatPageStatus,
 });
 
 const ensurePreviewEditOption = (...args) => xnsPreviewRenderer.ensurePreviewEditOption(...args);
