@@ -766,6 +766,23 @@ scenario('预览分页失败保留内容并在工具栏提示', async (ctx) => {
   await page.close();
 });
 
+scenario('帖子页重试只读取失败分页', async (ctx) => {
+  const page = await ctx.newPage();
+  dataOf(page).expectedResponses.push({ status: 503, url: '/post-129-2' });
+  await page.goto(`${ctx.base}/post-129-1`, { waitUntil: 'domcontentloaded' });
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '2 条回复', 8_000, '帖子页失败分页提示');
+  const before = dataOf(page).gets.length;
+  await page.click('.xns-post-refresh');
+  await waitFor(page, () => document.querySelector('.xns-post-refresh')?.getAttribute('aria-busy') !== 'true', 15_000, '帖子页失败分页重试完成');
+  const retriedPostReads = dataOf(page).gets.slice(before)
+    .map(({ url }) => new URL(url).pathname)
+    .filter((pathname) => /^\/post-129-\d+$/.test(pathname));
+  assert(retriedPostReads.length >= 1, `重试应再次读取失败页，实际 ${JSON.stringify(retriedPostReads)}`);
+  assert(retriedPostReads.every((pathname) => pathname === '/post-129-2'),
+    `重试不应重新读取成功页，实际 ${JSON.stringify(retriedPostReads)}`);
+  await page.close();
+});
+
 scenario('帖子页当前页优先渲染，远端分页后台加载', async (ctx) => {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/post-124-1`, { waitUntil: 'domcontentloaded' });

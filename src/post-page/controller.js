@@ -106,7 +106,9 @@ function createPostPageController({
       refresh.title = '重新读取当前页和评论分页';
       refresh.setAttribute('aria-label', '重新读取当前页和评论分页');
       refresh.addEventListener('click', () => {
-        if (!this.loading) void this.reloadPages({ refreshCurrentPage: true });
+        if (this.loading) return;
+        if (this.failedPages.length) void this.reloadPages({ onlyPages: [...this.failedPages] });
+        else void this.reloadPages({ refreshCurrentPage: true });
       });
       toolbar.appendChild(refresh);
       this.list.closest(selectors.commentContainer)?.insertAdjacentElement('beforebegin', toolbar);
@@ -141,6 +143,11 @@ function createPostPageController({
 
     async reloadPages(options = {}) {
       if (!this.list) return;
+      const pageLimit = Math.min(maxPage, Math.max(1, Number(getMaxPage?.()) || maxPage));
+      const retryPages = Array.isArray(options.onlyPages)
+        ? [...new Set(options.onlyPages.map((page) => Number(page)).filter((page) => Number.isInteger(page) && page >= 1 && page <= pageLimit))]
+        : [];
+      const retryOnly = retryPages.length > 0;
       const generation = ++this.generation;
       this.clearProgressiveRender();
       this.progressiveRendered = false;
@@ -148,13 +155,13 @@ function createPostPageController({
       const requestController = windowObj.AbortController ? new windowObj.AbortController() : null;
       this.requestController = requestController;
       this.loading = true;
-      this.showLoading('正在读取评论分页…');
+      this.showLoading(retryOnly ? `正在重试 ${retryPages.length} 个失败分页…` : '正在读取评论分页…');
       try {
         if (options.refreshCurrentPage) await this.adoptNewReplies(generation, requestController?.signal);
         if (generation !== this.generation) return;
-        this.loadCurrentPage();
+        if (!retryOnly) this.loadCurrentPage();
         if (appState.mode === 'thread') this.render({ progressive: true });
-        await this.loadPages(generation, options, requestController?.signal);
+        await this.loadPages(generation, { ...options, onlyPages: retryOnly ? retryPages : undefined }, requestController?.signal);
         if (generation !== this.generation) return;
         this.clearProgressiveRender();
         this.loading = false;
@@ -221,7 +228,9 @@ function createPostPageController({
     }
 
     async loadPages(generation, options = {}, signal) {
-      this.failedPages = [];
+      const retryPages = Array.isArray(options.onlyPages) ? options.onlyPages : [];
+      const retryOnly = retryPages.length > 0;
+      this.failedPages = retryOnly ? [...retryPages] : [];
       const remoteRecords = [];
       const updateProgress = (progress) => {
         if (!progress || generation !== this.generation) return;
@@ -238,10 +247,17 @@ function createPostPageController({
         this.scheduleProgressiveRender(generation);
       };
       const fresh = options.noStore === true || options.refreshCurrentPage === true;
+      const pageLimit = Math.min(maxPage, Math.max(1, Number(getMaxPage?.()) || maxPage));
+      const knownTotalPages = Math.max(1, Number(this.totalPages) || pageLimit);
+      const initialLoadedPages = retryOnly
+        ? Array.from({ length: Math.min(pageLimit, knownTotalPages) }, (_, index) => index + 1)
+          .filter((page) => !retryPages.includes(page))
+        : undefined;
       const { loadedPages, failedPages, truncated, totalPages } = await fetchPostPages(this.info, documentObj, {
         noStore: fresh,
         allowCache: !fresh,
         retainDocuments: false,
+        ...(retryOnly ? { onlyPages: retryPages, initialLoadedPages, initialFailedPages: retryPages } : {}),
         signal,
         onPageLoaded: (page, root, progress) => {
           if (page !== this.info.page) {
