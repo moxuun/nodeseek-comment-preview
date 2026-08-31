@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.44
+// @version      0.5.46
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -4186,7 +4186,17 @@ function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPr
     if (!inPreview && !inPost) return;
     const comment = menuItem.closest('.content-item');
     const action = menuItem.dataset.xnsAction || getMenuActionKey(menuItem);
-    if (!comment || !action) return;
+    if (!comment) return;
+    // 官方帖子页的“编辑”由 NodeSeek/Vue 处理。虚拟列表裁掉同级楼层后，
+    // Vue 的事件状态可能失效；先恢复官方列表，再重新触发一次原生入口。
+    if (inPost && !action && (menuItem.textContent || '').trim() === '编辑') {
+      if (state.post?.prepareNativeEdit?.(comment)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+      return;
+    }
+    if (!action) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     void runPreviewAction(action, menuItem, comment, getActionContext(menuItem));
@@ -4268,6 +4278,8 @@ function createPostPageController({
   updateSettings,
   getMaxPage,
 }) {
+  const NATIVE_EDIT_REQUEST_KEY = 'xns-comment-preview-native-edit';
+
   return class PostPageController {
     constructor(info) {
       this.info = info;
@@ -4295,11 +4307,50 @@ function createPostPageController({
       this.requestController = null;
     }
 
+    consumeNativeEditRequest() {
+      try {
+        const raw = windowObj.sessionStorage?.getItem(NATIVE_EDIT_REQUEST_KEY);
+        windowObj.sessionStorage?.removeItem(NATIVE_EDIT_REQUEST_KEY);
+        const request = raw ? JSON.parse(raw) : null;
+        if (!request || String(request.postId) !== String(this.info.postId)) return null;
+        if (!/^\d{1,15}$/.test(String(request.floor))) return null;
+        return String(request.floor);
+      } catch {
+        return null;
+      }
+    }
+
+    openNativeEditAfterReload(floor) {
+      const started = Date.now();
+      const findEdit = () => {
+        const comment = Array.from(this.list?.children || [])
+          .find((node) => node.nodeType === 1 && String(node.id) === String(floor));
+        return Array.from(comment?.querySelectorAll?.(':scope > .comment-menu > .menu-item, :scope > .comment-actions > .menu-item') || [])
+          .find((item) => (item.textContent || '').trim() === '编辑');
+      };
+      const check = () => {
+        const edit = findEdit();
+        if (edit) {
+          edit.click();
+          return;
+        }
+        if (Date.now() - started < 12_000) windowObj.setTimeout(check, 80);
+      };
+      check();
+    }
+
     async init() {
       this.list = await this.waitForCommentList();
       if (!this.list) return;
       this.originalChildren = Array.from(this.list.childNodes);
       this.createToolbar();
+      const nativeEditFloor = this.consumeNativeEditRequest();
+      if (nativeEditFloor) {
+        appState.mode = 'original';
+        this.showStatus('原版评论已恢复。');
+        this.openNativeEditAfterReload(nativeEditFloor);
+        return;
+      }
       await this.reloadPages();
     }
 
@@ -4353,7 +4404,8 @@ function createPostPageController({
         else void this.reloadPages({ refreshCurrentPage: true });
       });
       toolbar.appendChild(refresh);
-      this.list.closest(selectors.commentContainer)?.insertAdjacentElement('beforebegin', toolbar);
+      const container = this.list.closest(selectors.commentContainer);
+      container?.insertBefore(toolbar, this.list);
       this.toolbar = toolbar;
       this.updateToolbar();
     }
@@ -4576,6 +4628,22 @@ function createPostPageController({
       }
       else this.reloadPages();
       updateSettings({ mode });
+    }
+
+    prepareNativeEdit(comment) {
+      if (!this.virtualizer || !this.originalChildren.includes(comment)) return false;
+      const floor = comment.getAttribute('data-xns-floor') || comment.id || '';
+      if (!/^\d{1,15}$/.test(String(floor))) return false;
+      try {
+        windowObj.sessionStorage?.setItem(NATIVE_EDIT_REQUEST_KEY, JSON.stringify({
+          postId: this.info.postId,
+          floor: String(floor),
+        }));
+      } catch {
+        return false;
+      }
+      windowObj.location.reload();
+      return true;
     }
 
     showLoading(text) {

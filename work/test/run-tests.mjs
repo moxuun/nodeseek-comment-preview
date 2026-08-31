@@ -1269,30 +1269,32 @@ scenario('楼中楼显示自己的评论编辑入口并保留官方编辑器（0
     const menu = document.querySelector('.comment-container > ul.comments .content-item[data-xns-floor="1"] > .comment-menu');
     return menu && Array.from(menu.children).some((el) => (el.textContent || '' ).trim() === '编辑');
   }, 15_000, '楼中楼里自己的评论显示编辑入口');
-  const state = await page.evaluate(() => {
-    const item = Array.from(document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor="1"] .menu-item')).find((el) => (el.textContent || '' ).trim() === '编辑');
+  await page.evaluate(() => {
+    const item = Array.from(document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor="1"] .menu-item')).find((el) => (el.textContent || '').trim() === '编辑');
     const comment = item.closest('.content-item');
-    const originalOpen = window.open;
-    let openCalls = 0;
-    window.open = (...args) => { openCalls += 1; return null; };
-    item.addEventListener('click', (event) => {
-      event.preventDefault();
-      const editor = document.createElement('textarea');
-      editor.className = 'official-edit-composer';
-      editor.value = '官方编辑器';
-      comment.appendChild(editor);
-    });
-    item.click();
-    window.open = originalOpen;
-    return {
-      href: location.href,
-      openCalls,
-      hasEditor: !!comment.querySelector('.official-edit-composer'),
-    };
+    const list = comment.closest('.comments');
+    const spacer = document.createElement('li');
+    spacer.className = 'xns-virtual-spacer';
+    spacer.style.height = '900px';
+    list.replaceChildren(spacer, comment);
   });
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15_000 }),
+    page.click('.comment-container > ul.comments > li[id="1"] .menu-item[aria-label="编辑"]'),
+  ]);
+  await waitFor(page, () => Boolean(document.querySelector('.content-item[id="1"] .official-edit-composer')), 15_000, '刷新后打开官方楼层编辑器');
+  const state = await page.evaluate(() => ({
+    href: location.href,
+    hasEditor: !!document.querySelector('.content-item[id="1"] .official-edit-composer'),
+    originalMode: document.querySelector('.xns-post-toolbar [data-mode="original"]')?.getAttribute('aria-pressed') === 'true',
+    status: document.querySelector('.xns-toolbar-status')?.textContent || '',
+    pendingRequest: sessionStorage.getItem('xns-comment-preview-native-edit'),
+  }));
   assert(state.href === `${ctx.base}/post-123-1`, `帖子页编辑不应改变 URL，实际 ${state.href}`);
-  assert(state.openCalls === 0, `帖子页编辑不应调用 window.open，实际 ${state.openCalls} 次`);
   assert(state.hasEditor, '点击帖子页编辑应保留官方楼层下方编辑器');
+  assert(state.originalMode, '官方编辑兜底页应保持原版评论布局');
+  assert(state.status === '原版评论已恢复。', `官方编辑兜底页状态应明确，实际 “${state.status}”`);
+  assert(state.pendingRequest === null, '官方编辑请求消费后不应残留 sessionStorage 标记');
 });
 11
 

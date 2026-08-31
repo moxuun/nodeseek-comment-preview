@@ -8,7 +8,17 @@ function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPr
     if (!inPreview && !inPost) return;
     const comment = menuItem.closest('.content-item');
     const action = menuItem.dataset.xnsAction || getMenuActionKey(menuItem);
-    if (!comment || !action) return;
+    if (!comment) return;
+    // 官方帖子页的“编辑”由 NodeSeek/Vue 处理。虚拟列表裁掉同级楼层后，
+    // Vue 的事件状态可能失效；先恢复官方列表，再重新触发一次原生入口。
+    if (inPost && !action && (menuItem.textContent || '').trim() === '编辑') {
+      if (state.post?.prepareNativeEdit?.(comment)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+      return;
+    }
+    if (!action) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     void runPreviewAction(action, menuItem, comment, getActionContext(menuItem));
