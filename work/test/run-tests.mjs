@@ -347,6 +347,16 @@ scenario('长帖分页截断明示（0.5.13 回归）', async (ctx) => {
   assert(/帖子共 52 页，仅读取前 50 页/.test(state.status), `状态栏应明示截断，实际 ${state.status}`);
   assert(state.virtualCount === 50, `截断后数据模型应有前 50 楼，实际 ${state.virtualCount}`);
   assert(state.activeItems < state.virtualCount, `截断长帖不应把 50 楼全部物化，实际 ${state.activeItems}/${state.virtualCount}`);
+  const threadStyles = await page.evaluate(() => {
+    const list = document.querySelector('.comment-container > ul.comments');
+    const root = list?.querySelector(':scope > .xns-comment-root');
+    return {
+      hasPreviewThreadClass: list?.classList.contains('xns-preview-thread') || false,
+      rootBorderLeftWidth: root ? getComputedStyle(root).borderLeftWidth : null,
+    };
+  });
+  assert(threadStyles.hasPreviewThreadClass, '帖子详情页评论列表应带预览线程作用域');
+  assert(threadStyles.rootBorderLeftWidth === '3px', `根楼层应显示 3px 蓝色左栏，实际 ${JSON.stringify(threadStyles)}`);
   assert(dataOf(page).pageErrors.length === 0, `页面出现未捕获异常：${dataOf(page).pageErrors.join('; ')}`);
   await page.close();
 });

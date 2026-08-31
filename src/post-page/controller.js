@@ -331,6 +331,9 @@ function createPostPageController({
       if (!this.list || appState.mode !== 'thread') return;
       if (!this.virtualizer) {
         this.restoreOriginal({ releaseRemote: false });
+        // 帖子详情页复用官方的 ul.comments；补上预览线程作用域，
+        // 让根楼层蓝栏、楼号和其他预览样式与弹窗预览保持一致。
+        this.list.classList.add('xns-preview-thread');
         this.virtualizer = createCommentVirtualizer({
           windowObj,
           documentObj,
@@ -386,6 +389,7 @@ function createPostPageController({
       if (!this.list) return;
       this.virtualizer?.destroy();
       this.virtualizer = null;
+      this.list.classList.remove('xns-preview-thread');
       qsa(this.list, '.xns-reply-list, .xns-remote-note').forEach((node) => node.remove());
       this.originalChildren.forEach(stripRenderArtifacts);
       while (this.list.firstChild) this.list.removeChild(this.list.firstChild);
