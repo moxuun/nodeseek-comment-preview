@@ -444,6 +444,9 @@ function createPreviewController({
       const preview = await loadPreviewRecords(info, modal.previewSeed, {
         noStore: true,
         allowCache: false,
+        // 重试必须沿用本次预览的分页边界；设置面板可以在弹窗打开后被修改，
+        // 但不能因此把当前失败页从重试目标中静默过滤掉。
+        pageLimit,
         initialRecords: modal.previewRecords || [],
         onlyPages: retryPages,
         initialLoadedPages: loadedPages,
