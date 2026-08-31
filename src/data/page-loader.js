@@ -3,7 +3,7 @@
 function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, requestGapMs, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid }) {
   function createRequestGate(gapMs) {
     const cooldownGap = Number.isFinite(Number(gapMs)) ? Math.max(0, Number(gapMs)) : 0;
-    let currentGap = 0;
+    let currentGap = cooldownGap;
     let successStreak = 0;
     let queue = Promise.resolve();
     let nextStartAt = 0;
@@ -26,7 +26,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
       if (status >= 200 && status < 300) {
         successStreak += 1;
         if (successStreak >= 8 && currentGap > 0) {
-          currentGap = Math.max(0, currentGap - 25);
+          currentGap = Math.max(cooldownGap, currentGap - 25);
           successStreak = 0;
         }
       }

@@ -327,6 +327,19 @@ async function installAbortCounter(page) {
   });
 }
 
+async function installPageRequestTimingCounter(page, postId) {
+  await page.evaluateOnNewDocument((targetPostId) => {
+    const starts = [];
+    const original = window.fetch.bind(window);
+    window.fetch = function patchedFetch(input, init = {}) {
+      const url = typeof input === 'string' ? input : input?.url || '';
+      if (url.includes(`/post-${targetPostId}-`)) starts.push({ url, time: performance.now() });
+      return original(input, init);
+    };
+    window.__xnsPageRequestStarts = starts;
+  }, postId);
+}
+
 // ---------- 场景 ----------
 
 scenario('长帖分页截断明示（0.5.13 回归）', async (ctx) => {
@@ -782,6 +795,22 @@ scenario('分页 429 按 Retry-After 重试后继续加载', async (ctx) => {
   assert(dataOf(page).pageErrors.length === 0, `页面出现未捕获异常：${dataOf(page).pageErrors.join('; ')}`);
   await page.close();
 });
+
+scenario('分页请求从首个请求开始遵守基础间隔', async (ctx) => {
+  const page = await ctx.newPage();
+  await installPageRequestTimingCounter(page, 460);
+  await page.goto(`${ctx.base}/post-460-1`, { waitUntil: 'networkidle0' });
+  await waitFor(page, () => {
+    const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
+    return /已读取 50\/50 页/.test(status);
+  }, 30_000, '分页基础间隔');
+  const starts = await page.evaluate(() => window.__xnsPageRequestStarts || []);
+  assert(starts.length >= 2, `应至少记录两个分页请求，实际 ${JSON.stringify(starts)}`);
+  const firstGap = starts[1].time - starts[0].time;
+  assert(firstGap >= 100, `前两个分页请求不应同时发出，实际间隔 ${firstGap.toFixed(1)}ms`);
+  await page.close();
+});
+
 scenario('帖子页楼中楼构建与跨页来源链接', async (ctx) => {
   const page = await openPostPage(ctx);
   for (const floor of [4, 5]) {
