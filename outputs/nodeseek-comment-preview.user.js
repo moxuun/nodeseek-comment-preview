@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.49
+// @version      0.5.50
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
 // @match        https://www.nodeseek.com/*
 // @run-at       document-start
-// @grant        none
+// @grant        GM_registerMenuCommand
 // @noframes
 // ==/UserScript==
 
@@ -330,6 +330,10 @@ function createSettingsUi({ windowObj, documentObj, state, createElement, getSet
 
   function openSettings() {
     closeSettings();
+    if (!documentObj.body) {
+      documentObj.addEventListener('DOMContentLoaded', openSettings, { once: true });
+      return;
+    }
     const values = getSettings();
     const overlay = createElement('div', 'xns-settings-overlay');
     overlay.tabIndex = -1;
@@ -402,7 +406,17 @@ function createSettingsUi({ windowObj, documentObj, state, createElement, getSet
     dialog.querySelector('select, input, button')?.focus();
   }
 
-  return Object.freeze({ openSettings, closeSettings });
+  function registerSettingsMenu() {
+    if (typeof GM_registerMenuCommand !== 'function') return false;
+    try {
+      GM_registerMenuCommand('NodeSeek 评论预览：打开设置', openSettings);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  return Object.freeze({ openSettings, closeSettings, registerSettingsMenu });
 }
 
 const xnsSettingsUi = createSettingsUi({
@@ -416,6 +430,7 @@ const xnsSettingsUi = createSettingsUi({
 });
 const openSettings = (...args) => xnsSettingsUi.openSettings(...args);
 const closeSettings = (...args) => xnsSettingsUi.closeSettings(...args);
+const registerSettingsMenu = (...args) => xnsSettingsUi.registerSettingsMenu(...args);
 
 
 // 共享视觉 token；组件样式只引用这些语义颜色，避免页面状态各自维护一套颜色。
@@ -4159,7 +4174,6 @@ function createPostPageController({
   addRemoteNote,
   installPreviewFeatures,
   formatPageStatus,
-  openSettings,
   updateSettings,
   getMaxPage,
 }) {
@@ -4269,12 +4283,6 @@ function createPostPageController({
       });
       toolbar.appendChild(modeSwitch);
       toolbar.appendChild(createElement('span', 'xns-toolbar-status'));
-      const settings = createElement('button', 'xns-post-settings', '设置');
-      settings.type = 'button';
-      settings.title = '打开预览设置';
-      settings.setAttribute('aria-label', '打开预览设置');
-      settings.addEventListener('click', openSettings);
-      toolbar.appendChild(settings);
       const refresh = createElement('button', 'xns-post-refresh', '刷新');
       refresh.type = 'button';
       refresh.title = '重新读取当前页和评论分页';
@@ -4661,7 +4669,6 @@ const PostEnhancer = createPostPageController({
   addRemoteNote,
   installPreviewFeatures,
   formatPageStatus,
-  openSettings,
   updateSettings,
   getMaxPage,
 });
@@ -4686,7 +4693,6 @@ function installStyle() {
       .xns-post-toolbar button { padding:5px 10px; border:1px solid var(--xns-border); border-radius:6px; color:inherit; background:transparent; cursor:pointer; font:inherit; }
       .xns-post-toolbar button:hover, .xns-post-toolbar button:focus-visible { border-color:var(--xns-accent-strong); outline:none; }
       .xns-post-toolbar button[aria-pressed="true"] { color:var(--xns-accent); border-color:var(--xns-accent-strong); background:var(--xns-accent-soft); }
-      .xns-post-settings { margin-left:0 !important; }
       .xns-post-mode-switch { display:inline-flex; padding:2px; border:1px solid rgba(100,116,139,.25); border-radius:6px; background:rgba(148,163,184,.08); }
       .xns-post-mode-switch button { padding:4px 8px; border:0; border-radius:4px; background:transparent; }
       .xns-post-mode-switch button:hover, .xns-post-mode-switch button:focus-visible { border-color:transparent; color:#2563eb; background:#eff6ff; }
@@ -4857,6 +4863,7 @@ function createAppBootstrap({
   pageInfo,
   state,
   installStyle,
+  registerSettingsMenu,
   createPreviewEntryController,
   createFloorNavigationController,
   parseSameOriginUrl,
@@ -4870,6 +4877,7 @@ function createAppBootstrap({
 }) {
   function start() {
     installStyle();
+    registerSettingsMenu();
     const previewEntry = createPreviewEntryController({
       document: documentObj,
       location: windowObj.location,
@@ -4905,6 +4913,7 @@ const xnsAppBootstrap = createAppBootstrap({
   pageInfo,
   state,
   installStyle,
+  registerSettingsMenu,
   createPreviewEntryController,
   createFloorNavigationController,
   parseSameOriginUrl,

@@ -26,7 +26,6 @@ function createPostPageController({
   addRemoteNote,
   installPreviewFeatures,
   formatPageStatus,
-  openSettings,
   updateSettings,
   getMaxPage,
 }) {
@@ -136,12 +135,6 @@ function createPostPageController({
       });
       toolbar.appendChild(modeSwitch);
       toolbar.appendChild(createElement('span', 'xns-toolbar-status'));
-      const settings = createElement('button', 'xns-post-settings', '设置');
-      settings.type = 'button';
-      settings.title = '打开预览设置';
-      settings.setAttribute('aria-label', '打开预览设置');
-      settings.addEventListener('click', openSettings);
-      toolbar.appendChild(settings);
       const refresh = createElement('button', 'xns-post-refresh', '刷新');
       refresh.type = 'button';
       refresh.title = '重新读取当前页和评论分页';
@@ -528,7 +521,6 @@ const PostEnhancer = createPostPageController({
   addRemoteNote,
   installPreviewFeatures,
   formatPageStatus,
-  openSettings,
   updateSettings,
   getMaxPage,
 });

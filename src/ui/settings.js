@@ -27,6 +27,10 @@ function createSettingsUi({ windowObj, documentObj, state, createElement, getSet
 
   function openSettings() {
     closeSettings();
+    if (!documentObj.body) {
+      documentObj.addEventListener('DOMContentLoaded', openSettings, { once: true });
+      return;
+    }
     const values = getSettings();
     const overlay = createElement('div', 'xns-settings-overlay');
     overlay.tabIndex = -1;
@@ -99,7 +103,17 @@ function createSettingsUi({ windowObj, documentObj, state, createElement, getSet
     dialog.querySelector('select, input, button')?.focus();
   }
 
-  return Object.freeze({ openSettings, closeSettings });
+  function registerSettingsMenu() {
+    if (typeof GM_registerMenuCommand !== 'function') return false;
+    try {
+      GM_registerMenuCommand('NodeSeek 评论预览：打开设置', openSettings);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  return Object.freeze({ openSettings, closeSettings, registerSettingsMenu });
 }
 
 const xnsSettingsUi = createSettingsUi({
@@ -113,3 +127,4 @@ const xnsSettingsUi = createSettingsUi({
 });
 const openSettings = (...args) => xnsSettingsUi.openSettings(...args);
 const closeSettings = (...args) => xnsSettingsUi.closeSettings(...args);
+const registerSettingsMenu = (...args) => xnsSettingsUi.registerSettingsMenu(...args);

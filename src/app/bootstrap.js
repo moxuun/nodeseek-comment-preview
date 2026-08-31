@@ -5,6 +5,7 @@ function createAppBootstrap({
   pageInfo,
   state,
   installStyle,
+  registerSettingsMenu,
   createPreviewEntryController,
   createFloorNavigationController,
   parseSameOriginUrl,
@@ -18,6 +19,7 @@ function createAppBootstrap({
 }) {
   function start() {
     installStyle();
+    registerSettingsMenu();
     const previewEntry = createPreviewEntryController({
       document: documentObj,
       location: windowObj.location,
@@ -53,6 +55,7 @@ const xnsAppBootstrap = createAppBootstrap({
   pageInfo,
   state,
   installStyle,
+  registerSettingsMenu,
   createPreviewEntryController,
   createFloorNavigationController,
   parseSameOriginUrl,

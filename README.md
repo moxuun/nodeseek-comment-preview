@@ -8,7 +8,7 @@
 2. 打开 [outputs/nodeseek-comment-preview.user.js](outputs/nodeseek-comment-preview.user.js) 并安装
 3. 刷新 NodeSeek 页面即可生效
 
-脚本使用 `@grant none`，不加载远程模块，不执行远程代码。
+脚本只使用 `GM_registerMenuCommand` 注册油猴菜单中的“打开设置”入口，不加载远程模块，不执行远程代码。安装后可在 Tampermonkey/Violentmonkey 的脚本菜单中打开设置。
 
 ## 功能
 

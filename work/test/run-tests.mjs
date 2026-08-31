@@ -578,6 +578,61 @@ scenario('工具栏隐藏冗余上下文标签', async (ctx) => {
   await previewPage.close();
 });
 
+scenario('设置入口迁移到油猴菜单', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.evaluateOnNewDocument(() => {
+    const commands = [];
+    window.__xnsMenuCommands = commands;
+    window.GM_registerMenuCommand = (name, callback) => {
+      commands.push({ name });
+      window.__xnsSettingsMenuCallback = callback;
+      return commands.length;
+    };
+  });
+  await page.goto(`${ctx.base}/post-123-1`, { waitUntil: 'networkidle0' });
+  const originalSettings = await page.evaluate(() => localStorage.getItem('xns-comment-preview-settings'));
+  try {
+    await waitFor(page, () => /^9 条回复$/.test(document.querySelector('.xns-toolbar-status')?.textContent || ''), 15_000, '帖子页设置入口初始化');
+    const initial = await page.evaluate(() => ({
+      commands: window.__xnsMenuCommands?.map((command) => command.name) || [],
+      pageSettingsButton: !!document.querySelector('.xns-post-settings'),
+      modeButtons: [...document.querySelectorAll('.xns-post-toolbar [data-mode]')].map((node) => node.textContent?.trim()),
+    }));
+    assert(initial.commands.length === 1 && initial.commands[0] === 'NodeSeek 评论预览：打开设置',
+      `设置应注册到油猴菜单，实际 ${JSON.stringify(initial.commands)}`);
+    assert(!initial.pageSettingsButton, '帖子页不应再显示设置按钮');
+    assert(JSON.stringify(initial.modeButtons) === JSON.stringify(['楼中楼', '原版']),
+      `设置迁移不应影响评论布局切换，实际 ${JSON.stringify(initial.modeButtons)}`);
+
+    await page.evaluate(() => window.__xnsSettingsMenuCallback?.());
+    await waitFor(page, () => !!document.querySelector('.xns-settings-panel'), 5_000, '油猴菜单打开设置面板');
+    const panel = await page.evaluate(() => ({
+      title: document.querySelector('.xns-settings-panel h2')?.textContent?.trim() || '',
+      maxPages: document.querySelectorAll('.xns-settings-panel select')[1]?.value || '',
+      hasDone: !!document.querySelector('.xns-settings-primary'),
+    }));
+    assert(panel.title === '预览设置', `油猴菜单应打开原有设置面板，实际 ${panel.title}`);
+    assert(panel.maxPages === '50', `设置面板默认页数应保持原值，实际 ${panel.maxPages}`);
+    assert(panel.hasDone, '原有设置面板操作按钮应保留');
+
+    await page.evaluate(() => {
+      const maxPages = document.querySelectorAll('.xns-settings-panel select')[1];
+      maxPages.value = '20';
+      maxPages.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.click('.xns-settings-primary');
+    await page.evaluate(() => window.__xnsSettingsMenuCallback?.());
+    await waitFor(page, () => document.querySelectorAll('.xns-settings-panel select')[1]?.value === '20', 5_000, '设置从油猴菜单重新打开后保持');
+    await page.click('.xns-settings-primary');
+  } finally {
+    await page.evaluate((raw) => {
+      if (raw === null) localStorage.removeItem('xns-comment-preview-settings');
+      else localStorage.setItem('xns-comment-preview-settings', raw);
+    }, originalSettings);
+    await page.close();
+  }
+});
+
 scenario('短期缓存命中 HTML 但不保留 Document，刷新时重新抓取', async (ctx) => {
   const page = await ctx.newPage();
   await installParserCounter(page);
