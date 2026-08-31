@@ -39,6 +39,9 @@ function createPostPageController({
       this.toolbar = null;
       this.statusNode = null;
       this.loadingNode = null;
+      this.toolbarStatusText = '';
+      this.toolbarStatusTone = '';
+      this.toolbarStatusDetail = '';
       this.loading = false;
       this.hasRemotePages = false;
       this.virtualizer = null;
@@ -72,10 +75,12 @@ function createPostPageController({
       const toolbar = createElement('nav', 'xns-post-toolbar');
       toolbar.setAttribute('aria-label', '评论布局');
       toolbar.appendChild(createElement('span', '', '评论布局：'));
-      [['thread', '楼中楼'], ['original', '原版']].forEach(([mode, text]) => {
+      [['thread', '楼中楼', '切换到楼中楼布局'], ['original', '原版', '恢复官方评论布局']].forEach(([mode, text, title]) => {
         const button = createElement('button', '', text);
         button.type = 'button';
         button.dataset.mode = mode;
+        button.title = title;
+        button.setAttribute('aria-label', title);
         button.addEventListener('click', () => this.setMode(mode));
         toolbar.appendChild(button);
       });
@@ -91,7 +96,14 @@ function createPostPageController({
         button.setAttribute('aria-pressed', String(button.dataset.mode === appState.mode));
       });
       const status = qs(this.toolbar, '.xns-toolbar-status');
-      if (status) status.textContent = this.records.length ? `${this.records.length} 条评论` : '读取中…';
+      if (!status) return;
+      const text = this.toolbarStatusText || (this.records.length ? `${this.records.length} 条评论` : '读取中…');
+      status.className = `xns-toolbar-status${this.toolbarStatusTone ? ` ${this.toolbarStatusTone}` : ''}`;
+      status.textContent = text;
+      const detail = this.toolbarStatusDetail || (text.length > 24 ? text : '');
+      if (detail && detail !== text) status.title = detail;
+      else if (text.length > 24) status.title = text;
+      else status.removeAttribute('title');
     }
 
     async reloadPages(options = {}) {
@@ -226,14 +238,20 @@ function createPostPageController({
 
     showLoading(text) {
       this.loadingNode?.remove();
-      this.loadingNode = createElement('div', 'xns-loading', text);
-      this.list?.closest(selectors.commentContainer)?.insertAdjacentElement('beforebegin', this.loadingNode);
+      this.loadingNode = null;
+      this.toolbarStatusText = this.records.length ? `${this.records.length} 条评论` : text;
+      this.toolbarStatusTone = 'is-loading';
+      this.toolbarStatusDetail = text;
+      this.updateToolbar();
     }
 
-    showStatus(text) {
+    showStatus(text, tone = '', visibleText = '') {
       this.statusNode?.remove();
-      this.statusNode = createElement('div', 'xns-status', text);
-      this.list?.closest(selectors.commentContainer)?.insertAdjacentElement('beforebegin', this.statusNode);
+      this.statusNode = null;
+      this.toolbarStatusText = visibleText || (this.records.length ? `${this.records.length} 条评论` : text);
+      this.toolbarStatusTone = tone;
+      this.toolbarStatusDetail = text;
+      this.updateToolbar();
     }
 
     render(options = {}) {
@@ -285,8 +303,10 @@ function createPostPageController({
           ? `楼中楼已整理：已读取 ${loadedPages} 页，正在读取其他分页…`
         : `楼中楼已整理：共读取 ${loadedPages} 页。`;
       if (this.truncated) status += ` 帖子共 ${this.totalPages} 页，只读取了前 ${maxPage} 页，后面页的楼层没有显示。`;
-      this.showStatus(status);
-      this.updateToolbar();
+      const summary = this.records.length
+        ? `${this.records.length} 条评论${this.failedPages.length ? ` · ${this.failedPages.length} 页失败` : ''}`
+        : status;
+      this.showStatus(status, this.failedPages.length ? 'is-failed' : '', summary);
     }
 
     restoreOriginal(options = {}) {
@@ -300,6 +320,17 @@ function createPostPageController({
       if (options.releaseRemote !== false) this.records.forEach(releaseCommentNode);
       this.statusNode?.remove();
       this.statusNode = null;
+      this.loadingNode?.remove();
+      this.loadingNode = null;
+      if (appState.mode === 'original') {
+        this.toolbarStatusText = '原版评论';
+        this.toolbarStatusTone = '';
+        this.toolbarStatusDetail = '';
+      } else {
+        this.toolbarStatusText = '';
+        this.toolbarStatusTone = '';
+        this.toolbarStatusDetail = '';
+      }
       this.updateToolbar();
     }
   };

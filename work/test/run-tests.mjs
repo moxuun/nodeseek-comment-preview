@@ -326,13 +326,13 @@ scenario('长帖分页截断明示（0.5.13 回归）', async (ctx) => {
   await page.goto(`${ctx.base}/post-456-1`, { waitUntil: 'networkidle0' });
   // 456 帖共 52 页、每页 1 楼：MAX_PAGE 之上应截断并在状态栏明示，而不是静默丢楼层。
   await waitFor(page, () => {
-    const status = document.querySelector('.xns-status')?.textContent || '';
+    const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
     const virtualCount = Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0);
     return /只读取了前/.test(status) && virtualCount === 50;
   }, 30_000, '截断状态提示');
   const state = await page.evaluate(() => ({
     toolbar: document.querySelector('.xns-toolbar-status')?.textContent,
-    status: document.querySelector('.xns-status')?.textContent || '',
+    status: document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '',
     virtualCount: Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0),
     activeItems: document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length,
   }));
@@ -348,7 +348,7 @@ scenario('长帖内容增强按可视远端评论执行', async (ctx) => {
   await installFeatureQueryCounter(page);
   await page.goto(`${ctx.base}/post-456-1`, { waitUntil: 'networkidle0' });
   await waitFor(page, () => {
-    const status = document.querySelector('.xns-status')?.textContent || '';
+    const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
     const virtualCount = Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0);
     return /只读取了前/.test(status) && virtualCount === 50;
   }, 30_000, '长帖内容增强扫描完成');
@@ -362,7 +362,7 @@ scenario('长帖分页发现优先扫描分页链接', async (ctx) => {
   await installPaginationQueryCounter(page);
   await page.goto(`${ctx.base}/post-456-1`, { waitUntil: 'networkidle0' });
   await waitFor(page, () => {
-    const status = document.querySelector('.xns-status')?.textContent || '';
+    const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
     const virtualCount = Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0);
     return /只读取了前/.test(status) && virtualCount === 50;
   }, 30_000, '分页发现完成');
@@ -378,7 +378,7 @@ scenario('无标准分页标记时仍回退发现分页', async (ctx) => {
   await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '2 条评论', 5_000, '分页回退加载完成');
   const state = await page.evaluate(() => ({
     items: document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length,
-    status: document.querySelector('.xns-status')?.textContent || '',
+    status: document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '',
   }));
   assert(state.items === 2, `分页回退应读取两页评论，实际 ${state.items}`);
   assert(/共读取 2 页/.test(state.status), `分页回退状态应为 2 页，实际 ${state.status}`);
@@ -390,7 +390,7 @@ scenario('长帖安全克隆只做一次全树查询', async (ctx) => {
   await installSanitizeQueryCounter(page);
   await page.goto(`${ctx.base}/post-456-1`, { waitUntil: 'networkidle0' });
   await waitFor(page, () => {
-    const status = document.querySelector('.xns-status')?.textContent || '';
+    const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
     const virtualCount = Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0);
     return /只读取了前/.test(status) && virtualCount === 50;
   }, 30_000, '安全克隆完成');
@@ -723,14 +723,14 @@ scenario('帖子页当前页优先渲染，远端分页后台加载', async (ctx
   await page.goto(`${ctx.base}/post-124-1`, { waitUntil: 'domcontentloaded' });
   await waitFor(page, () => {
     const toolbar = document.querySelector('.xns-toolbar-status')?.textContent || '';
-    const status = document.querySelector('.xns-status')?.textContent || '';
+    const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
     const items = document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length;
     return toolbar === '2 条评论' && /正在读取其他分页/.test(status) && items === 2;
   }, 1_000, '当前页优先渲染');
   await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '4 条评论', 5_000, '远端分页完成');
   const state = await page.evaluate(() => ({
     items: document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length,
-    status: document.querySelector('.xns-status')?.textContent || '',
+    status: document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '',
   }));
   assert(state.items === 4, `后台分页完成后应有 4 个楼层，实际 ${state.items}`);
   assert(/共读取 2 页/.test(state.status), `后台分页完成后状态应为 2 页，实际 ${state.status}`);

@@ -3479,6 +3479,9 @@ function createPostPageController({
       this.toolbar = null;
       this.statusNode = null;
       this.loadingNode = null;
+      this.toolbarStatusText = '';
+      this.toolbarStatusTone = '';
+      this.toolbarStatusDetail = '';
       this.loading = false;
       this.hasRemotePages = false;
       this.virtualizer = null;
@@ -3512,10 +3515,12 @@ function createPostPageController({
       const toolbar = createElement('nav', 'xns-post-toolbar');
       toolbar.setAttribute('aria-label', '评论布局');
       toolbar.appendChild(createElement('span', '', '评论布局：'));
-      [['thread', '楼中楼'], ['original', '原版']].forEach(([mode, text]) => {
+      [['thread', '楼中楼', '切换到楼中楼布局'], ['original', '原版', '恢复官方评论布局']].forEach(([mode, text, title]) => {
         const button = createElement('button', '', text);
         button.type = 'button';
         button.dataset.mode = mode;
+        button.title = title;
+        button.setAttribute('aria-label', title);
         button.addEventListener('click', () => this.setMode(mode));
         toolbar.appendChild(button);
       });
@@ -3531,7 +3536,14 @@ function createPostPageController({
         button.setAttribute('aria-pressed', String(button.dataset.mode === appState.mode));
       });
       const status = qs(this.toolbar, '.xns-toolbar-status');
-      if (status) status.textContent = this.records.length ? `${this.records.length} 条评论` : '读取中…';
+      if (!status) return;
+      const text = this.toolbarStatusText || (this.records.length ? `${this.records.length} 条评论` : '读取中…');
+      status.className = `xns-toolbar-status${this.toolbarStatusTone ? ` ${this.toolbarStatusTone}` : ''}`;
+      status.textContent = text;
+      const detail = this.toolbarStatusDetail || (text.length > 24 ? text : '');
+      if (detail && detail !== text) status.title = detail;
+      else if (text.length > 24) status.title = text;
+      else status.removeAttribute('title');
     }
 
     async reloadPages(options = {}) {
@@ -3666,14 +3678,20 @@ function createPostPageController({
 
     showLoading(text) {
       this.loadingNode?.remove();
-      this.loadingNode = createElement('div', 'xns-loading', text);
-      this.list?.closest(selectors.commentContainer)?.insertAdjacentElement('beforebegin', this.loadingNode);
+      this.loadingNode = null;
+      this.toolbarStatusText = this.records.length ? `${this.records.length} 条评论` : text;
+      this.toolbarStatusTone = 'is-loading';
+      this.toolbarStatusDetail = text;
+      this.updateToolbar();
     }
 
-    showStatus(text) {
+    showStatus(text, tone = '', visibleText = '') {
       this.statusNode?.remove();
-      this.statusNode = createElement('div', 'xns-status', text);
-      this.list?.closest(selectors.commentContainer)?.insertAdjacentElement('beforebegin', this.statusNode);
+      this.statusNode = null;
+      this.toolbarStatusText = visibleText || (this.records.length ? `${this.records.length} 条评论` : text);
+      this.toolbarStatusTone = tone;
+      this.toolbarStatusDetail = text;
+      this.updateToolbar();
     }
 
     render(options = {}) {
@@ -3725,8 +3743,10 @@ function createPostPageController({
           ? `楼中楼已整理：已读取 ${loadedPages} 页，正在读取其他分页…`
         : `楼中楼已整理：共读取 ${loadedPages} 页。`;
       if (this.truncated) status += ` 帖子共 ${this.totalPages} 页，只读取了前 ${maxPage} 页，后面页的楼层没有显示。`;
-      this.showStatus(status);
-      this.updateToolbar();
+      const summary = this.records.length
+        ? `${this.records.length} 条评论${this.failedPages.length ? ` · ${this.failedPages.length} 页失败` : ''}`
+        : status;
+      this.showStatus(status, this.failedPages.length ? 'is-failed' : '', summary);
     }
 
     restoreOriginal(options = {}) {
@@ -3740,6 +3760,17 @@ function createPostPageController({
       if (options.releaseRemote !== false) this.records.forEach(releaseCommentNode);
       this.statusNode?.remove();
       this.statusNode = null;
+      this.loadingNode?.remove();
+      this.loadingNode = null;
+      if (appState.mode === 'original') {
+        this.toolbarStatusText = '原版评论';
+        this.toolbarStatusTone = '';
+        this.toolbarStatusDetail = '';
+      } else {
+        this.toolbarStatusText = '';
+        this.toolbarStatusTone = '';
+        this.toolbarStatusDetail = '';
+      }
       this.updateToolbar();
     }
   };
@@ -3789,7 +3820,9 @@ function installStyle() {
       .xns-post-toolbar button { padding:5px 10px; border:1px solid rgba(100,116,139,.28); border-radius:6px; color:inherit; background:transparent; cursor:pointer; font:inherit; }
       .xns-post-toolbar button:hover, .xns-post-toolbar button:focus-visible { border-color:#3b82f6; outline:none; }
       .xns-post-toolbar button[aria-pressed="true"] { color:#2563eb; border-color:#3b82f6; background:rgba(59,130,246,.1); }
-      .xns-toolbar-status { margin-left:auto; color:#64748b; font-size:12px; }
+      .xns-toolbar-status { display:inline-flex; align-items:center; gap:6px; max-width:min(62vw,720px); min-width:0; margin-left:auto; overflow:hidden; color:#64748b; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
+      .xns-toolbar-status.is-loading::before { width:8px; height:8px; flex:0 0 8px; border:2px solid rgba(37,99,235,.22); border-top-color:#2563eb; border-radius:50%; content:""; animation:xns-spin .9s linear infinite; }
+      .xns-toolbar-status.is-failed { color:#b91c1c; }
       .xns-modal { position:relative; }
       .xns-preview-scroll-btns { position:absolute; top:50%; right:8px; bottom:auto; display:flex; flex-direction:column; gap:6px; z-index:3; transform:translateY(-50%); transition:opacity .3s ease; pointer-events:none; }
       .xns-scroll-btn { position:relative; box-sizing:border-box !important; width:34px !important; min-width:34px !important; max-width:34px !important; height:34px !important; min-height:34px !important; max-height:34px !important; flex:0 0 34px; padding:0 !important; border:1px solid rgba(100,116,139,.28); border-radius:50%; color:#475569; background:rgba(255,255,255,.96); display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 2px 8px rgba(15,23,42,.14); opacity:.9; line-height:1; transition:all .2s ease; pointer-events:auto; }
@@ -3959,11 +3992,12 @@ function installStyle() {
       .dark-layout .xns-vote-results .xns-vote-bar { color:#0b1220; background:#60a5fa; }
       .dark-layout .xns-vote-results .xns-vote-mine .vote-item-text { color:#93c5fd; }
       .dark-layout .xns-toolbar-status, .dark-layout .xns-modal-toolbar-status, .dark-layout .xns-preview-status, .dark-layout .xns-loading, .dark-layout .xns-status, .dark-layout .xns-vote-status { color:#9ca3af; }
+      .dark-layout .xns-toolbar-status.is-failed { color:#fca5a5; }
       .dark-layout .xns-preview-status.is-failed { color:#fca5a5; }
       .dark-layout .xns-preview-status.is-truncated { color:#fcd34d; }
       .dark-layout .xns-preview-thread .floor-link-wrapper .floor-link, .dark-layout .xns-preview-content .floor-link-wrapper .floor-link { color:#6b7280; }
       @media (max-width:800px) { .xns-preview-scroll-btns { right:6px; } .xns-scroll-btn { width:30px !important; min-width:30px !important; max-width:30px !important; height:30px !important; min-height:30px !important; max-height:30px !important; flex-basis:30px; } }
-      @media (max-width:640px) { .xns-overlay { padding:0; } .xns-modal { width:100%; max-height:100vh; } .xns-modal-header { gap:8px; padding:9px 10px; } .xns-modal-eyebrow { display:none; } .xns-modal-actions { gap:4px; } .xns-modal-header a, .xns-modal-header .xns-modal-reply { padding:5px 6px; } .xns-modal-toolbar { padding:5px 10px; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-scroll-btns { right:5px; } .xns-scroll-btn { width:28px !important; min-width:28px !important; max-width:28px !important; height:28px !important; min-height:28px !important; max-height:28px !important; flex-basis:28px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; margin-left:0; } }
+      @media (max-width:640px) { .xns-overlay { padding:0; } .xns-modal { width:100%; max-height:100vh; } .xns-modal-header { gap:8px; padding:9px 10px; } .xns-modal-eyebrow { display:none; } .xns-modal-actions { gap:4px; } .xns-modal-header a, .xns-modal-header .xns-modal-reply { padding:5px 6px; } .xns-modal-toolbar { padding:5px 10px; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-scroll-btns { right:5px; } .xns-scroll-btn { width:28px !important; min-width:28px !important; max-width:28px !important; height:28px !important; min-height:28px !important; max-height:28px !important; flex-basis:28px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; max-width:none; margin-left:0; } }
     `;
   (documentObj.head || documentObj.documentElement || documentObj.body)?.appendChild(style);
 }
