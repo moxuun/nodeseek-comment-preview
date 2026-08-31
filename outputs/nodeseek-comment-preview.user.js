@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.22
+// @version      0.5.24
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -918,18 +918,30 @@ function createCommentVirtualizer({
     return next || windowObj;
   }
 
+  function getHostOffset(nextViewport) {
+    if (isWindowViewport(nextViewport)) {
+      return (host?.getBoundingClientRect?.().top || 0) + (Number(windowObj.scrollY) || 0);
+    }
+    const scrollTop = Math.max(0, Number(nextViewport.scrollTop) || 0);
+    const hostRect = host?.getBoundingClientRect?.();
+    const viewportRect = nextViewport.getBoundingClientRect?.();
+    if (!hostRect || !viewportRect) return Math.max(0, Number(host?.offsetTop) || 0);
+    return Math.max(0, hostRect.top - viewportRect.top - (Number(nextViewport.clientTop) || 0) + scrollTop);
+  }
+
   function getViewportMetrics() {
     const nextViewport = resolveViewport();
     if (nextViewport !== viewport) bindViewport(nextViewport);
     if (isWindowViewport(nextViewport)) {
       const scrollTop = Number(windowObj.scrollY) || 0;
-      const hostTop = (host?.getBoundingClientRect?.().top || 0) + scrollTop;
+      const hostTop = getHostOffset(nextViewport);
       const height = Math.max(1, Number(windowObj.innerHeight) || 800);
       return { start: Math.max(0, scrollTop - hostTop), end: Math.max(0, scrollTop - hostTop) + height, height };
     }
     const height = Math.max(1, Number(nextViewport.clientHeight) || 800);
     const scrollTop = Math.max(0, Number(nextViewport.scrollTop) || 0);
-    return { start: scrollTop, end: scrollTop + height, height };
+    const start = Math.max(0, scrollTop - getHostOffset(nextViewport));
+    return { start, end: start + height, height };
   }
 
   function createSpacer(height) {
@@ -1046,9 +1058,17 @@ function createCommentVirtualizer({
 
   function bindViewport(nextViewport) {
     if (nextViewport === viewport) return;
-    if (viewport?.removeEventListener) viewport.removeEventListener('scroll', scheduleRender);
+    if (viewport?.removeEventListener) {
+      viewport.removeEventListener('scroll', scheduleRender);
+      viewport.removeEventListener('load', scheduleRender, true);
+      viewport.removeEventListener('error', scheduleRender, true);
+    }
     viewport = nextViewport || windowObj;
     viewport?.addEventListener?.('scroll', scheduleRender, { passive: true });
+    // 预览正文位于虚拟列表之前。长图完成加载后列表的内容坐标会变化，
+    // load/error 不冒泡，因此使用捕获阶段重新计算活动窗口。
+    viewport?.addEventListener?.('load', scheduleRender, true);
+    viewport?.addEventListener?.('error', scheduleRender, true);
   }
 
   function setEntries(nextEntries, options = {}) {
@@ -1093,10 +1113,10 @@ function createCommentVirtualizer({
     const nextViewport = resolveViewport();
     const offset = sumHeights(0, index);
     if (isWindowViewport(nextViewport)) {
-      const top = (host.getBoundingClientRect?.().top || 0) + (Number(windowObj.scrollY) || 0) + offset;
+      const top = getHostOffset(nextViewport) + offset;
       windowObj.scrollTo?.({ top, behavior });
     } else {
-      nextViewport.scrollTo?.({ top: offset, behavior });
+      nextViewport.scrollTo?.({ top: getHostOffset(nextViewport) + offset, behavior });
     }
     forceIndex = null;
     scheduleRender();
@@ -1114,7 +1134,11 @@ function createCommentVirtualizer({
     if (destroyed) return;
     destroyed = true;
     if (frame) windowObj.cancelAnimationFrame(frame);
-    if (viewport?.removeEventListener) viewport.removeEventListener('scroll', scheduleRender);
+    if (viewport?.removeEventListener) {
+      viewport.removeEventListener('scroll', scheduleRender);
+      viewport.removeEventListener('load', scheduleRender, true);
+      viewport.removeEventListener('error', scheduleRender, true);
+    }
     resizeObserver?.disconnect();
     mounted.forEach((_, index) => unmount(index));
     mounted.clear();
@@ -1189,10 +1213,16 @@ function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetch
     const maxSeed = truncated ? maxPage : Math.min(maxPage, Math.max(...pages));
     for (let page = 1; page <= maxSeed; page += 1) pages.add(page);
     pages.delete(info.page);
+    const progressState = () => ({
+      loadedPages: loadedPages.size,
+      failedPages: [...failedPages],
+      truncated,
+      totalPages,
+    });
 
     const pending = Array.from(pages).sort((a, b) => a - b);
     const requestGate = createRequestGate(options.requestGapMs ?? requestGapMs);
-    options.onPageLoaded?.(info.page, firstDocument);
+    options.onPageLoaded?.(info.page, firstDocument, progressState());
     const worker = async () => {
       while (pending.length) {
         if (options.isAborted?.()) return;
@@ -1209,7 +1239,7 @@ function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetch
           const parsed = parseHtml(response.html, response.url);
           loadedPages.add(page);
           if (pageDocs) pageDocs.set(page, parsed);
-          options.onPageLoaded?.(page, parsed);
+          options.onPageLoaded?.(page, parsed, progressState());
           getPageNumbers(parsed, info.postId).forEach((foundPage) => {
             if (foundPage <= maxPage && !pages.has(foundPage) && foundPage !== info.page) {
               pages.add(foundPage);
@@ -1218,6 +1248,7 @@ function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetch
           });
         } catch {
           failedPages.push(page);
+          options.onPageFailed?.(page, progressState());
         }
       }
     };
@@ -1229,18 +1260,34 @@ function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetch
 
   async function loadPreviewRecords(info, firstDocument, options = {}) {
     const initialRecords = Array.isArray(options.initialRecords) ? options.initialRecords : null;
-    const allRecords = initialRecords ? [...initialRecords] : [];
+    const unique = new Map();
+    const mergeRecords = (records) => records.forEach((record) => {
+      const previous = unique.get(record.floor);
+      if (!previous || record.current) unique.set(record.floor, record);
+    });
+    if (initialRecords) mergeRecords(initialRecords);
     const { loadedPages, failedPages, truncated, totalPages } = await fetchPostPages(info, firstDocument, {
       ...options,
       retainDocuments: false,
-      onPageLoaded: (page, root) => {
+      onPageLoaded: (page, root, progress) => {
         if (initialRecords && page === info.page) return;
-        allRecords.push(...collectPageRecords(info, root, page));
+        mergeRecords(collectPageRecords(info, root, page));
+        options.onRecordsLoaded?.({
+          records: Array.from(unique.values()),
+          ...progress,
+          page,
+          loading: true,
+        });
       },
-    });
-    const unique = new Map();
-    allRecords.forEach((record) => {
-      if (!unique.has(record.floor)) unique.set(record.floor, record);
+      onPageFailed: (page, progress) => {
+        options.onPageFailed?.(page, progress);
+        options.onRecordsLoaded?.({
+          records: Array.from(unique.values()),
+          ...progress,
+          page,
+          loading: true,
+        });
+      },
     });
     return {
       records: Array.from(unique.values()),
@@ -1435,6 +1482,7 @@ function createCommentActions({
     item.appendChild(iconNode);
     if (withCount) item.appendChild(createElement('span', 'xns-action-count', '0'));
     item.appendChild(createElement('span', 'xns-action-label', label));
+    item.setAttribute('aria-label', label);
     return item;
   }
 
@@ -1481,6 +1529,8 @@ function createCommentActions({
       const action = getMenuActionKey(item);
       if (action) {
         item.dataset.xnsAction = action;
+        const actionMeta = PREVIEW_ACTIONS.find(([key]) => key === action);
+        if (!item.hasAttribute('aria-label')) item.setAttribute('aria-label', actionMeta?.[1] || action);
         if (action === 'favorite' && /已收藏|取消收藏/.test(`${item.title} ${item.textContent}`)) item.dataset.xnsFavoriteState = 'added';
       }
       if (!item.hasAttribute('role')) item.setAttribute('role', 'button');
@@ -1780,6 +1830,7 @@ function createPreviewRenderUtils({ qs, qsa, createElement }) {
     source.target = '_blank';
     source.rel = 'noopener noreferrer';
     source.title = `打开原楼层 #${record.floor}`;
+    source.setAttribute('aria-label', `打开原楼层 #${record.floor}`);
     wrapper?.classList.add('xns-remote-floor-link');
   }
 
@@ -1827,7 +1878,10 @@ function createPreviewRenderer({
     // 处理器，由官方在楼层下方展开编辑器；脚本不能覆盖成打开新标签。
     // 如果原生项没有渲染出来，仍要先补回可见入口；后面不接管当前页的点击，
     // 避免把“修复显示”又回归成跳转行为。
-    if (record.current && item) return;
+    if (record.current && item) {
+      item.setAttribute('aria-label', '编辑');
+      return;
+    }
     if (!item) {
       item = createElement('span', 'menu-item');
       item.setAttribute('role', 'button');
@@ -1835,6 +1889,7 @@ function createPreviewRenderer({
       item.innerHTML = '<svg class="iconpark-icon" aria-hidden="true"><use href="#edit"></use></svg><span>编辑</span>';
       menu.appendChild(item);
     }
+    item.setAttribute('aria-label', '编辑');
     if (record.current) return;
     if (item.dataset.xnsEditBound === 'true') return;
     item.dataset.xnsEditBound = 'true';
@@ -1904,13 +1959,42 @@ function createPreviewRenderer({
     return node;
   }
 
+  function renderPreviewStatus(section, options = {}) {
+    const targetPages = Math.min(maxPage, Number(options.totalPages) || 0);
+    const loadedPages = Number(options.loadedPages) || 0;
+    const failedPages = Array.isArray(options.failedPages) ? options.failedPages : [];
+    const statusNode = options.statusNode || qs(section, ':scope > .xns-preview-status') || createElement('div', 'xns-preview-status');
+    if (!statusNode.parentNode) section.insertBefore(statusNode, qs(section, ':scope > .xns-preview-thread'));
+    clearElement(statusNode);
+    statusNode.className = options.statusNode ? 'xns-modal-toolbar-status xns-preview-status' : 'xns-preview-status';
+    statusNode.removeAttribute('title');
+    statusNode.setAttribute('role', 'status');
+    statusNode.setAttribute('aria-live', 'polite');
+    const progress = loadedPages && targetPages ? `已读取 ${loadedPages}/${targetPages} 页` : '';
+    if (options.loading) {
+      statusNode.classList.add('is-loading');
+      statusNode.appendChild(createElement('span', 'xns-page-loading', progress ? `正在加载其他分页 · ${progress}` : '正在加载其他分页…'));
+    } else if (loadedPages && targetPages) {
+      statusNode.appendChild(createElement('span', 'xns-page-complete', `已读取 ${loadedPages}/${targetPages} 页`));
+    }
+    if (failedPages.length) {
+      statusNode.classList.add('is-failed');
+      statusNode.appendChild(createElement('span', 'xns-page-failed', `${failedPages.length} 页读取失败`));
+    }
+    if (options.truncated) {
+      statusNode.classList.add('is-truncated');
+      statusNode.appendChild(createElement('span', 'xns-page-truncated', `帖子共 ${Number(options.totalPages) || maxPage} 页，仅显示前 ${maxPage} 页`));
+    }
+    statusNode.hidden = !statusNode.childNodes.length;
+    return statusNode;
+  }
+
   function renderPreviewRecords(section, info, records, options = {}) {
     const heading = qs(section, ':scope > h3');
     const thread = qs(section, ':scope > .xns-preview-thread');
     if (!heading || !thread) return;
     heading.textContent = `楼中楼预览 · ${records.length} 条回复`;
     qs(section, ':scope > .xns-preview-empty')?.remove();
-    qsa(section, ':scope > .xns-page-loading, :scope > .xns-page-failed').forEach((node) => node.remove());
     if (records.length) {
       const onNodeMounted = (node, entry) => {
         const record = entry.record;
@@ -1947,13 +2031,7 @@ function createPreviewRenderer({
       clearElement(thread);
       section.appendChild(createElement('p', 'xns-status xns-preview-empty', '没有读取到评论。'));
     }
-    if (options.loading) section.appendChild(createElement('p', 'xns-status xns-page-loading', '正在加载其他分页…'));
-    if (options.failedPages?.length) {
-      section.appendChild(createElement('p', 'xns-status xns-page-failed', `已读取 ${options.loadedPages} 页，${options.failedPages.length} 页读取失败。`));
-    }
-    if (options.truncated) {
-      section.appendChild(createElement('p', 'xns-status xns-page-truncated', `帖子共 ${options.totalPages} 页，只读取了前 ${maxPage} 页，后面页的楼层没有显示。`));
-    }
+    renderPreviewStatus(section, options);
   }
 
   return Object.freeze({
@@ -1961,6 +2039,7 @@ function createPreviewRenderer({
     prepareCommentRecord,
     appendNestedRecord,
     buildPreviewPostNode,
+    renderPreviewStatus,
     renderPreviewRecords,
   });
 }
@@ -1995,6 +2074,7 @@ const ensurePreviewEditOption = (...args) => xnsPreviewRenderer.ensurePreviewEdi
 const prepareCommentRecord = (...args) => xnsPreviewRenderer.prepareCommentRecord(...args);
 const appendNestedRecord = (...args) => xnsPreviewRenderer.appendNestedRecord(...args);
 const buildPreviewPostNode = (...args) => xnsPreviewRenderer.buildPreviewPostNode(...args);
+const renderPreviewStatus = (...args) => xnsPreviewRenderer.renderPreviewStatus(...args);
 const renderPreviewRecords = (...args) => xnsPreviewRenderer.renderPreviewRecords(...args);
 
 
@@ -2406,7 +2486,7 @@ const installPreviewImageFallback = (...args) => xnsPreviewLightbox.installPrevi
 
 
 // 预览弹窗 UI 基础设施：锁定页面、滚动控制、关闭操作。
-function createPreviewModalUi({ windowObj, documentObj, state, createElement, closeImageLightbox, refreshPreviewModal }) {
+function createPreviewModalUi({ windowObj, documentObj, state, createElement, closeImageLightbox }) {
   function removeBodyLock() {
     if (!state.modal) documentObj.documentElement.style.removeProperty('overflow');
   }
@@ -2433,22 +2513,31 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     return svg;
   }
 
+  function createRefreshButton(onClick) {
+    const button = createElement('button', 'xns-modal-tool xns-refresh-post');
+    button.type = 'button';
+    button.title = '刷新帖子';
+    button.setAttribute('aria-label', '刷新帖子');
+    button.append(createRefreshArrow(), createElement('span', 'xns-modal-tool-label', '刷新'));
+    button.addEventListener('click', onClick);
+    return button;
+  }
+
   function installPreviewScrollButtons(dialog, body) {
     const group = createElement('div', 'xns-preview-scroll-btns');
-    const refresh = createElement('button', 'xns-scroll-btn xns-refresh-post');
-    refresh.type = 'button';
-    refresh.title = '刷新帖子';
-    refresh.setAttribute('aria-label', '刷新帖子');
-    refresh.appendChild(createRefreshArrow());
+    group.setAttribute('role', 'toolbar');
+    group.setAttribute('aria-label', '阅读导航');
     const top = createElement('button', 'xns-scroll-btn xns-to-top');
     top.type = 'button';
     top.title = '回到顶部';
     top.setAttribute('aria-label', '回到顶部');
+    top.setAttribute('data-xns-tip', '回到顶部');
     top.appendChild(createScrollArrow('18 15 12 9 6 15'));
     const bottom = createElement('button', 'xns-scroll-btn xns-to-bottom');
     bottom.type = 'button';
     bottom.title = '回到底部';
     bottom.setAttribute('aria-label', '回到底部');
+    bottom.setAttribute('data-xns-tip', '回到底部');
     bottom.appendChild(createScrollArrow('6 9 12 15 18 9'));
     const scrollTo = (edge) => {
       const topPosition = edge === 'bottom' ? Math.max(0, body.scrollHeight - body.clientHeight) : 0;
@@ -2456,8 +2545,7 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     };
     top.addEventListener('click', () => scrollTo('top'));
     bottom.addEventListener('click', () => scrollTo('bottom'));
-    refresh.addEventListener('click', () => { void refreshPreviewModal(); });
-    group.append(refresh, top, bottom);
+    group.append(top, bottom);
     dialog.appendChild(group);
     const update = () => {
       const distanceFromBottom = body.scrollHeight - (body.scrollTop + body.clientHeight);
@@ -2497,11 +2585,12 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     const button = createElement('button', 'xns-modal-close', '×');
     button.type = 'button';
     button.setAttribute('aria-label', '关闭');
+    button.title = '关闭预览（Esc）';
     button.addEventListener('click', onClick);
     return button;
   }
 
-  return Object.freeze({ removeBodyLock, installPreviewScrollButtons, closeModal, createCloseButton });
+  return Object.freeze({ removeBodyLock, installPreviewScrollButtons, closeModal, createCloseButton, createRefreshButton });
 }
 
 const xnsPreviewModalUi = createPreviewModalUi({
@@ -2510,12 +2599,12 @@ const xnsPreviewModalUi = createPreviewModalUi({
   state,
   createElement,
   closeImageLightbox,
-  refreshPreviewModal: (...args) => refreshPreviewModal(...args),
 });
 const removeBodyLock = (...args) => xnsPreviewModalUi.removeBodyLock(...args);
 const installPreviewScrollButtons = (...args) => xnsPreviewModalUi.installPreviewScrollButtons(...args);
 const closeModal = (...args) => xnsPreviewModalUi.closeModal(...args);
 const createCloseButton = (...args) => xnsPreviewModalUi.createCloseButton(...args);
+const createRefreshButton = (...args) => xnsPreviewModalUi.createRefreshButton(...args);
 
 
 // 预览内容增强：ANSI、官方魔法标签页、Markdown 标签页、图片和代码复制。
@@ -2885,6 +2974,7 @@ function createPreviewController({
   closeImageLightbox,
   closeModal,
   createCloseButton,
+  createRefreshButton,
   openPreviewComposer,
 }) {
   function buildPreviewContent(url, parsed, options = {}) {
@@ -2907,20 +2997,51 @@ function createPreviewController({
     section.appendChild(createElement('h3', '', '楼中楼预览'));
     const thread = createElement('ul', 'xns-preview-thread');
     section.appendChild(thread);
-    renderPreviewRecords(section, info, currentRecords, {
-      loading: hasRemotePages,
-      onNodeMounted: (node) => installPreviewFeatures(node),
+      renderPreviewRecords(section, info, currentRecords, {
+        loading: hasRemotePages,
+        statusNode: options.statusNode,
+        onNodeMounted: (node) => installPreviewFeatures(node),
     });
     wrapper.appendChild(section);
+    let progressiveTimer = 0;
+    let pendingProgress = null;
+    let renderedProgress = false;
+    const renderProgress = (progress) => {
+      if (!progress || !section.isConnected) return false;
+      renderPreviewRecords(section, info, progress.records, {
+        ...progress,
+        statusNode: options.statusNode,
+        onNodeMounted: (node) => installPreviewFeatures(node),
+      });
+      return true;
+    };
+    const scheduleProgressiveRender = (progress) => {
+      if (options.renderDetached === true) return;
+      pendingProgress = progress;
+      if (progressiveTimer) return;
+      // 第 2 页进入很短的合并窗口，后续页面按 500ms 合并，避免 50 页触发
+      // 49 次完整树重排。全部请求很快完成时，定时批次会被最终渲染取消。
+      progressiveTimer = windowObj.setTimeout(() => {
+        progressiveTimer = 0;
+        const next = pendingProgress;
+        pendingProgress = null;
+        if (renderProgress(next)) renderedProgress = true;
+      }, renderedProgress ? 500 : 300);
+    };
     const hydrate = loadPreviewRecords(info, parsed, {
       noStore: options.noStore === true,
       allowCache: options.allowCache === true,
       initialRecords: currentRecords,
       signal: options.signal,
+      onRecordsLoaded: scheduleProgressiveRender,
     }).then((preview) => {
+      if (progressiveTimer) windowObj.clearTimeout(progressiveTimer);
+      progressiveTimer = 0;
+      pendingProgress = null;
       if (section.isConnected || options.renderDetached === true) {
         renderPreviewRecords(section, info, preview.records, {
           ...preview,
+          statusNode: options.statusNode,
           onNodeMounted: (node) => installPreviewFeatures(node),
         });
       }
@@ -3082,6 +3203,14 @@ function createPreviewController({
 
   function showPreviewLoadError(modal, error) {
     clearElement(modal.body);
+    const toolbarStatus = qs(modal.dialog, '.xns-modal-toolbar-status');
+    if (toolbarStatus) {
+      toolbarStatus.className = 'xns-modal-toolbar-status xns-preview-status is-failed';
+      toolbarStatus.hidden = false;
+      const detail = error?.message || '网络错误';
+      toolbarStatus.textContent = '预览加载失败';
+      toolbarStatus.title = detail;
+    }
     modal.body.appendChild(createElement('p', 'xns-status', `预览加载失败：${error?.message || '网络错误'}`));
     if (modal.fallbackLink) {
       const link = createElement('a', '', '在原页面打开');
@@ -3093,11 +3222,14 @@ function createPreviewController({
   }
 
   function showPreviewRefreshError(modal, error) {
-    qs(modal.body, '.xns-refresh-status')?.remove();
-    const status = createElement('p', 'xns-status xns-refresh-status', `刷新失败，保留当前内容：${error?.message || '网络错误'}`);
-    status.classList.add('xns-refresh-failed');
-    modal.body.prepend(status);
-    windowObj.setTimeout(() => { if (status.isConnected) status.remove(); }, 4_000);
+    const toolbarStatus = qs(modal.dialog, '.xns-modal-toolbar-status');
+    if (toolbarStatus) {
+      toolbarStatus.className = 'xns-modal-toolbar-status xns-preview-status xns-refresh-status is-failed';
+      toolbarStatus.hidden = false;
+      const detail = error?.message || '网络错误';
+      toolbarStatus.textContent = `刷新失败，保留当前内容 · ${detail}`;
+      toolbarStatus.title = detail;
+    }
   }
 
   async function loadPreviewModal(modal, loadingText, options = {}) {
@@ -3114,8 +3246,15 @@ function createPreviewController({
     const generation = (modal.loadGeneration || 0) + 1;
     modal.loadGeneration = generation;
     const refresh = qs(modal.dialog, '.xns-refresh-post');
+    const toolbarStatus = qs(modal.dialog, '.xns-modal-toolbar-status');
     refresh?.classList.add('xns-action-pending');
     refresh?.setAttribute('aria-busy', 'true');
+    if (toolbarStatus) {
+      toolbarStatus.className = 'xns-modal-toolbar-status xns-preview-status is-loading';
+      toolbarStatus.hidden = false;
+      toolbarStatus.removeAttribute('title');
+      toolbarStatus.textContent = preserveContent ? '正在刷新…' : '正在读取…';
+    }
     closeImageLightbox();
     if (!preserveContent) {
       modal.body.scrollTop = 0;
@@ -3129,6 +3268,7 @@ function createPreviewController({
         allowCache: !fresh,
         renderDetached: preserveContent,
         signal: requestController?.signal,
+        statusNode: toolbarStatus,
       });
       if (preserveContent && preview.hydrate) await preview.hydrate;
       if (state.modal !== modal || modal.loadGeneration !== generation) return false;
@@ -3174,24 +3314,41 @@ function createPreviewController({
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
     const header = createElement('header', 'xns-modal-header');
+    const heading = createElement('div', 'xns-modal-heading');
+    heading.appendChild(createElement('span', 'xns-modal-eyebrow', 'NodeSeek 主题预览'));
     const title = createElement('h2', 'xns-modal-title', '正在加载帖子…');
+    heading.appendChild(title);
+    const actions = createElement('div', 'xns-modal-actions');
     const replyPost = createElement('button', 'xns-modal-reply', '回复帖子');
     replyPost.type = 'button';
+    replyPost.title = '回复帖子';
     replyPost.addEventListener('click', () => openPreviewComposer('post-reply', null));
-    const original = createElement('a', '', '新标签打开');
+    const original = createElement('a', 'xns-modal-original', '打开原帖');
     original.href = url.href;
     original.target = '_blank';
     original.rel = 'noopener noreferrer';
+    original.title = '在新标签打开原帖';
     const close = createCloseButton(closeModal);
-    header.append(title, replyPost, original, close);
+    actions.append(replyPost, original, close);
+    header.append(heading, actions);
+    const toolbar = createElement('div', 'xns-modal-toolbar');
+    toolbar.setAttribute('role', 'toolbar');
+    toolbar.setAttribute('aria-label', '预览工具');
+    const toolbarStatus = createElement('span', 'xns-modal-toolbar-status xns-preview-status', '准备读取…');
+    toolbar.append(
+      createElement('span', 'xns-modal-toolbar-label', '阅读'),
+      createElement('span', 'xns-modal-mode', '楼中楼'),
+      toolbarStatus,
+      createRefreshButton(() => { void refreshPreviewModal(); }),
+    );
     const body = createElement('div', 'xns-modal-body');
     body.appendChild(createElement('p', 'xns-loading', '正在读取帖子内容…'));
-    dialog.append(header, body);
+    dialog.append(header, toolbar, body);
     const scrollCleanup = installPreviewScrollButtons(dialog, body);
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, loading: false, loadGeneration: 0, requestController: null };
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, loading: false, loadGeneration: 0, requestController: null, toolbarStatus };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }
@@ -3223,6 +3380,7 @@ const xnsPreviewController = createPreviewController({
   closeImageLightbox,
   closeModal,
   createCloseButton,
+  createRefreshButton,
   openPreviewComposer: (...args) => openPreviewComposer(...args),
 });
 const buildPreviewContent = (...args) => xnsPreviewController.buildPreviewContent(...args);
@@ -3634,8 +3792,10 @@ function installStyle() {
       .xns-toolbar-status { margin-left:auto; color:#64748b; font-size:12px; }
       .xns-modal { position:relative; }
       .xns-preview-scroll-btns { position:absolute; top:50%; right:8px; bottom:auto; display:flex; flex-direction:column; gap:6px; z-index:3; transform:translateY(-50%); transition:opacity .3s ease; pointer-events:none; }
-      .xns-scroll-btn { box-sizing:border-box !important; width:34px !important; min-width:34px !important; max-width:34px !important; height:34px !important; min-height:34px !important; max-height:34px !important; flex:0 0 34px; padding:0 !important; border:0; border-radius:50%; color:#fff; background:rgba(46,164,79,.8); display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,.2); opacity:.8; line-height:1; transition:all .2s ease; pointer-events:auto; }
-      .xns-scroll-btn:hover, .xns-scroll-btn:focus-visible { background:rgba(46,164,79,1); opacity:1; transform:scale(1.05); outline:none; }
+      .xns-scroll-btn { position:relative; box-sizing:border-box !important; width:34px !important; min-width:34px !important; max-width:34px !important; height:34px !important; min-height:34px !important; max-height:34px !important; flex:0 0 34px; padding:0 !important; border:1px solid rgba(100,116,139,.28); border-radius:50%; color:#475569; background:rgba(255,255,255,.96); display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 2px 8px rgba(15,23,42,.14); opacity:.9; line-height:1; transition:all .2s ease; pointer-events:auto; }
+      .xns-scroll-btn:hover, .xns-scroll-btn:focus-visible { border-color:#3b82f6; color:#2563eb; background:#fff; opacity:1; transform:scale(1.05); outline:none; }
+      .xns-scroll-btn[data-xns-tip]::after { position:absolute; right:calc(100% + 8px); top:50%; padding:4px 7px; border:1px solid rgba(100,116,139,.2); border-radius:5px; color:#334155; background:#fff; box-shadow:0 3px 10px rgba(15,23,42,.14); content:attr(data-xns-tip); font:12px/1.2 system-ui,sans-serif; opacity:0; pointer-events:none; transform:translateY(-50%) translateX(4px); transition:opacity .15s ease,transform .15s ease; white-space:nowrap; }
+      .xns-scroll-btn:hover::after, .xns-scroll-btn:focus-visible::after { opacity:1; transform:translateY(-50%) translateX(0); }
       .xns-scroll-btn svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
       .xns-scroll-btn.hidden { opacity:0; pointer-events:none; }
       .xns-scroll-btn.xns-action-pending { opacity:.45; pointer-events:none; }
@@ -3643,19 +3803,37 @@ function installStyle() {
       .xns-refresh-post.xns-action-pending svg { animation:xns-spin .9s linear infinite; }
       .xns-loading, .xns-status { margin:10px 0; padding:7px 10px; border:1px solid rgba(100,116,139,.2); border-radius:7px; color:#64748b; background:rgba(148,163,184,.08); font:13px/1.4 system-ui,sans-serif; }
       .xns-comment-root[data-xns-floor], .xns-comment-child[data-xns-floor] { position:relative; }
-      .xns-preview-thread .floor-link-wrapper, .xns-preview-content .floor-link-wrapper { position:absolute; top:8px; right:9px; }
-      .xns-preview-thread .floor-link-wrapper .floor-link, .xns-preview-content .floor-link-wrapper .floor-link { color:#c5c5c5; font-size:13px; font-weight:400; line-height:19.5px; text-decoration:none; cursor:pointer; }
+      .xns-preview-thread .floor-link-wrapper, .xns-preview-content .floor-link-wrapper { position:absolute; top:9px; right:10px; }
+      .xns-preview-thread .floor-link-wrapper .floor-link, .xns-preview-content .floor-link-wrapper .floor-link { padding:2px 5px; border-radius:4px; color:#c5c5c5; background:rgba(148,163,184,.1); font-size:13px; font-weight:400; line-height:19.5px; text-decoration:none; cursor:pointer; }
+      .xns-preview-thread .floor-link-wrapper .floor-link:hover, .xns-preview-thread .floor-link-wrapper .floor-link:focus-visible, .xns-preview-content .floor-link-wrapper .floor-link:hover, .xns-preview-content .floor-link-wrapper .floor-link:focus-visible { color:#2563eb; background:#eff6ff; outline:none; }
       .xns-comment-child { margin-top:7px !important; margin-left:clamp(8px,2vw,28px) !important; padding-left:clamp(8px,1.5vw,18px) !important; border-left:2px solid rgba(59,130,246,.35); }
       .xns-reply-list { margin:6px 0 0 !important; padding:0 !important; list-style:none !important; }
       .xns-floor-highlight { animation:xns-floor-highlight 1.8s ease both; }
       @keyframes xns-floor-highlight { 0%,100%{box-shadow:none} 20%{box-shadow:0 0 0 4px rgba(59,130,246,.3)} }
       .xns-overlay { position:fixed; z-index:2147483000; inset:0; display:flex; align-items:stretch; justify-content:center; padding:0 clamp(32px,5vw,110px); background:rgba(15,23,42,.55); }
       .xns-modal { display:flex; flex-direction:column; width:min(1040px,100%); height:100vh; max-height:100vh; overflow:hidden; border-radius:0; color:#1f2937; background:#fff; box-shadow:0 18px 55px rgba(15,23,42,.3); }
-      .xns-modal-header { display:flex; align-items:center; gap:10px; padding:12px 14px; border-bottom:1px solid rgba(100,116,139,.2); }
-      .xns-modal-title { flex:1; min-width:0; overflow:hidden; margin:0; font-size:17px; text-overflow:ellipsis; white-space:nowrap; }
+      .xns-modal-header { display:flex; align-items:center; gap:16px; padding:11px 16px; border-bottom:1px solid rgba(100,116,139,.2); }
+      .xns-modal-heading { flex:1; min-width:0; }
+      .xns-modal-eyebrow { display:block; margin-bottom:2px; color:#64748b; font:11px/1.2 system-ui,sans-serif; letter-spacing:.02em; }
+      .xns-modal-title { min-width:0; overflow:hidden; margin:0; font-size:17px; line-height:1.3; text-overflow:ellipsis; white-space:nowrap; }
+      .xns-modal-actions { display:flex; align-items:center; gap:6px; flex:0 0 auto; }
       .xns-modal-header a, .xns-modal-header .xns-modal-reply, .xns-modal-close { padding:5px 8px; border:1px solid rgba(100,116,139,.25); border-radius:6px; color:inherit; background:#f8fafc; cursor:pointer; text-decoration:none; font:12px/1.2 system-ui,sans-serif; }
-      .xns-modal-header .xns-modal-reply:hover, .xns-modal-header .xns-modal-reply:focus-visible { border-color:#3b82f6; outline:none; }
-      .xns-modal-close { font-size:18px; }
+      .xns-modal-header a:hover, .xns-modal-header a:focus-visible, .xns-modal-header .xns-modal-reply:hover, .xns-modal-header .xns-modal-reply:focus-visible, .xns-modal-close:hover, .xns-modal-close:focus-visible { border-color:#3b82f6; color:#2563eb; outline:none; }
+      .xns-modal-close { font-size:18px; line-height:1; }
+      .xns-modal-toolbar { display:flex; align-items:center; gap:8px; min-height:38px; padding:5px 16px; border-bottom:1px solid rgba(100,116,139,.16); color:#64748b; background:#f8fafc; font:12px/1.2 system-ui,sans-serif; }
+      .xns-modal-toolbar-label { color:#94a3b8; }
+      .xns-modal-mode { padding:4px 8px; border:1px solid rgba(59,130,246,.28); border-radius:5px; color:#1d4ed8; background:#eff6ff; }
+      .xns-modal-toolbar-status { display:inline-flex; flex:1 1 auto; align-items:center; min-width:0; gap:6px; overflow:hidden; color:#64748b; white-space:nowrap; text-overflow:ellipsis; }
+      .xns-modal-toolbar-status > span { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+      .xns-preview-status.is-loading::before { width:8px; height:8px; flex:0 0 8px; border:2px solid rgba(37,99,235,.22); border-top-color:#2563eb; border-radius:50%; content:""; animation:xns-spin .9s linear infinite; }
+      .xns-preview-status.is-failed { color:#b91c1c; }
+      .xns-preview-status.is-truncated { color:#92400e; }
+      .xns-preview-status > span + span::before { margin:0 4px 0 1px; color:#94a3b8; content:"·"; }
+      .xns-preview-status:not(.xns-modal-toolbar-status) { display:flex; flex-wrap:wrap; gap:4px 8px; margin:7px 0; padding:6px 9px; border:1px solid rgba(100,116,139,.16); border-radius:6px; color:#64748b; background:#f8fafc; font:12px/1.4 system-ui,sans-serif; }
+      .xns-preview-status[hidden] { display:none !important; }
+      .xns-modal-tool { display:inline-flex; align-items:center; gap:5px; margin-left:auto; padding:4px 8px; border:1px solid rgba(100,116,139,.25); border-radius:6px; color:#475569; background:#fff; cursor:pointer; font:12px/1.2 system-ui,sans-serif; }
+      .xns-modal-tool:hover, .xns-modal-tool:focus-visible { border-color:#3b82f6; color:#2563eb; outline:none; }
+      .xns-modal-tool svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
       .xns-modal-body { overflow:auto; padding:clamp(10px,2vw,18px); }
       .xns-modal-body img { max-width:100%; height:auto; }
       .xns-preview-content { font-size:14px; line-height:1.45; }
@@ -3699,9 +3877,10 @@ function installStyle() {
       .xns-preview-thread { margin:0; padding:0; list-style:none; }
       .xns-virtual-list > .xns-virtual-spacer { display:block !important; height:0; margin:0 !important; padding:0 !important; border:0 !important; list-style:none !important; pointer-events:none; }
       .xns-virtual-list > .content-item[data-xns-depth] { margin-left:var(--xns-indent,0px) !important; }
-      .xns-preview-thread > .content-item { margin:4px 0; padding:6px 8px; border:1px solid rgba(100,116,139,.2); border-radius:6px; background:#f8fafc; content-visibility:auto; contain-intrinsic-size:150px; }
-      .xns-preview-thread .xns-comment-child { margin-top:3px !important; padding-left:8px !important; }
-      .xns-preview-thread .nsk-content-meta-info { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; margin:0 0 2px; color:#64748b; font-size:12px; line-height:1.25; }
+      .xns-preview-thread > .content-item { margin:4px 0; padding:8px 10px 7px; border:1px solid rgba(100,116,139,.2); border-radius:7px; background:#f8fafc; content-visibility:auto; contain-intrinsic-size:150px; }
+      .xns-preview-thread > .content-item[data-xns-floor] { border-left:3px solid rgba(37,99,235,.72); }
+      .xns-preview-thread .xns-comment-child { margin:3px 0 0 14px !important; padding:7px 8px 6px 10px !important; border:0 !important; border-left:2px solid rgba(59,130,246,.4) !important; border-radius:0 !important; background:transparent !important; }
+      .xns-preview-thread .nsk-content-meta-info { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; margin:0 0 3px; color:#64748b; font-size:12px; line-height:1.25; }
       .xns-preview-content .nsk-content-meta-info .content-info, .xns-preview-content .nsk-content-meta-info .date-created { display:inline-flex; align-items:center; flex-wrap:wrap; gap:5px; margin:0 !important; line-height:1.25; }
       .xns-preview-content .nsk-content-meta-info .date-created time { display:inline; white-space:nowrap; }
       .xns-preview-content .user-info-display { position:static !important; display:inline-flex !important; align-items:center; transform:none !important; margin:0 !important; padding:0 !important; }
@@ -3709,9 +3888,12 @@ function installStyle() {
       .xns-preview-thread .post-content p, .xns-preview-thread article.post-content p { margin:2px 0 4px; }
       .xns-preview-thread .post-content > :first-child, .xns-preview-thread article.post-content > :first-child { margin-top:0; }
       .xns-preview-thread .post-content > :last-child, .xns-preview-thread article.post-content > :last-child { margin-bottom:0; }
-      .xns-preview-thread .comment-menu, .xns-preview-menu { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-top:4px; color:#8b95a1; font:12px/1.2 system-ui,sans-serif; }
-      .xns-preview-thread .comment-menu > .menu-item, .xns-preview-menu > .menu-item { display:inline-flex; align-items:center; gap:4px; padding:2px 0; border:0; color:inherit; background:transparent; cursor:pointer; text-decoration:none; }
-      .xns-preview-thread .comment-menu > .menu-item:hover, .xns-preview-thread .comment-menu > .menu-item:focus-visible, .xns-preview-menu > .menu-item:hover, .xns-preview-menu > .menu-item:focus-visible { color:#2563eb; outline:none; }
+      .xns-preview-thread .comment-menu, .xns-preview-menu { display:flex; align-items:center; flex-wrap:wrap; gap:2px 5px; margin-top:7px; padding-top:5px; border-top:1px solid rgba(100,116,139,.13); color:#8b95a1; font:12px/1.2 system-ui,sans-serif; }
+      .xns-preview-thread .comment-menu > .menu-item, .xns-preview-menu > .menu-item { display:inline-flex; align-items:center; gap:4px; min-height:22px; padding:2px 5px; border:0; border-radius:4px; color:inherit; background:transparent; cursor:pointer; text-decoration:none; }
+      .xns-preview-thread .comment-menu > .menu-item:hover, .xns-preview-thread .comment-menu > .menu-item:focus-visible, .xns-preview-menu > .menu-item:hover, .xns-preview-menu > .menu-item:focus-visible { color:#2563eb; background:#eff6ff; outline:none; }
+      .xns-preview-thread .comment-menu > .menu-item[data-xns-action="quote"], .xns-preview-thread .comment-menu > .menu-item[data-xns-action="reply"], .xns-preview-menu > .menu-item[data-xns-action="quote"], .xns-preview-menu > .menu-item[data-xns-action="reply"] { margin-left:4px; }
+      .xns-preview-thread .xns-action-icon, .xns-preview-menu .xns-action-icon { display:inline-flex; min-width:14px; justify-content:center; color:inherit; font-size:14px; line-height:1; }
+      .xns-preview-thread .xns-action-count, .xns-preview-menu .xns-action-count { font-variant-numeric:tabular-nums; }
       .xns-preview-thread .comment-menu > .menu-item.xns-action-pending, .xns-preview-menu > .menu-item.xns-action-pending { opacity:.55; pointer-events:none; }
       .xns-preview-thread .comment-menu > .menu-item.xns-action-failed, .xns-preview-menu > .menu-item.xns-action-failed { color:#b91c1c; }
       .xns-action-state { font-size:11px; }
@@ -3751,7 +3933,18 @@ function installStyle() {
       .xns-lightbox-open { left:10px; bottom:10px; }
       .xns-lightbox-close:hover, .xns-lightbox-open:hover, .xns-lightbox-close:focus-visible, .xns-lightbox-open:focus-visible { background:rgba(15,23,42,.9); outline:none; }
       .dark-layout .xns-modal { color:#e5e7eb; background:#18202b; }
-      .dark-layout .xns-modal-header a, .dark-layout .xns-modal-header .xns-modal-reply, .dark-layout .xns-modal-close, .dark-layout .xns-preview-post, .dark-layout .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
+      .dark-layout .xns-modal-header a, .dark-layout .xns-modal-header .xns-modal-reply, .dark-layout .xns-modal-close, .dark-layout .xns-modal-tool, .dark-layout .xns-preview-post, .dark-layout .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
+      .dark-layout .xns-modal-toolbar { color:#9ca3af; background:#111827; }
+      .dark-layout .xns-modal-eyebrow, .dark-layout .xns-modal-toolbar-label { color:#9ca3af; }
+      .dark-layout .xns-modal-mode { color:#93c5fd; border-color:rgba(96,165,250,.45); background:rgba(59,130,246,.18); }
+      .dark-layout .xns-scroll-btn { border-color:rgba(148,163,184,.35); color:#cbd5e1; background:rgba(15,23,42,.96); }
+      .dark-layout .xns-scroll-btn:hover, .dark-layout .xns-scroll-btn:focus-visible { border-color:#60a5fa; color:#93c5fd; background:#111827; }
+      .dark-layout .xns-scroll-btn[data-xns-tip]::after { color:#e5e7eb; background:#111827; border-color:rgba(148,163,184,.35); }
+      .dark-layout .xns-preview-thread > .content-item[data-xns-floor] { border-left-color:#60a5fa; }
+      .dark-layout .xns-preview-thread .xns-comment-child { border-left-color:rgba(96,165,250,.6) !important; }
+      .dark-layout .xns-preview-thread .floor-link-wrapper .floor-link, .dark-layout .xns-preview-content .floor-link-wrapper .floor-link { background:rgba(148,163,184,.14); }
+      .dark-layout .xns-preview-thread .floor-link-wrapper .floor-link:hover, .dark-layout .xns-preview-thread .floor-link-wrapper .floor-link:focus-visible, .dark-layout .xns-preview-content .floor-link-wrapper .floor-link:hover, .dark-layout .xns-preview-content .floor-link-wrapper .floor-link:focus-visible { color:#93c5fd; background:rgba(59,130,246,.18); }
+      .dark-layout .xns-preview-thread .comment-menu > .menu-item:hover, .dark-layout .xns-preview-thread .comment-menu > .menu-item:focus-visible, .dark-layout .xns-preview-menu > .menu-item:hover, .dark-layout .xns-preview-menu > .menu-item:focus-visible { color:#93c5fd; background:rgba(59,130,246,.18); }
       .dark-layout .xns-preview-content pre.xns-code-block { color:#e5e7eb; background:#0b1220; }
       .dark-layout .xns-preview-content .xns-ansi-fg-black { color:#e5e7eb; } .dark-layout .xns-preview-content .xns-ansi-fg-white { color:#111827; }
       .dark-layout .xns-preview-content .xns-markdown-tabs { background:#111827; } .dark-layout .xns-preview-content .xns-markdown-tabs-nav { background:rgba(15,23,42,.65); } .dark-layout .xns-preview-content .xns-markdown-tab.is-active { color:#93c5fd; background:#18202b; }
@@ -3765,10 +3958,12 @@ function installStyle() {
       .dark-layout .xns-preview-content .vote-panel button { color:#93c5fd; border-color:rgba(59,130,246,.5); }
       .dark-layout .xns-vote-results .xns-vote-bar { color:#0b1220; background:#60a5fa; }
       .dark-layout .xns-vote-results .xns-vote-mine .vote-item-text { color:#93c5fd; }
-      .dark-layout .xns-toolbar-status, .dark-layout .xns-loading, .dark-layout .xns-status, .dark-layout .xns-vote-status { color:#9ca3af; }
+      .dark-layout .xns-toolbar-status, .dark-layout .xns-modal-toolbar-status, .dark-layout .xns-preview-status, .dark-layout .xns-loading, .dark-layout .xns-status, .dark-layout .xns-vote-status { color:#9ca3af; }
+      .dark-layout .xns-preview-status.is-failed { color:#fca5a5; }
+      .dark-layout .xns-preview-status.is-truncated { color:#fcd34d; }
       .dark-layout .xns-preview-thread .floor-link-wrapper .floor-link, .dark-layout .xns-preview-content .floor-link-wrapper .floor-link { color:#6b7280; }
       @media (max-width:800px) { .xns-preview-scroll-btns { right:6px; } .xns-scroll-btn { width:30px !important; min-width:30px !important; max-width:30px !important; height:30px !important; min-height:30px !important; max-height:30px !important; flex-basis:30px; } }
-      @media (max-width:640px) { .xns-overlay { padding:0; } .xns-modal { width:100%; max-height:100vh; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-scroll-btns { right:5px; } .xns-scroll-btn { width:28px !important; min-width:28px !important; max-width:28px !important; height:28px !important; min-height:28px !important; max-height:28px !important; flex-basis:28px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; margin-left:0; } }
+      @media (max-width:640px) { .xns-overlay { padding:0; } .xns-modal { width:100%; max-height:100vh; } .xns-modal-header { gap:8px; padding:9px 10px; } .xns-modal-eyebrow { display:none; } .xns-modal-actions { gap:4px; } .xns-modal-header a, .xns-modal-header .xns-modal-reply { padding:5px 6px; } .xns-modal-toolbar { padding:5px 10px; } .xns-modal-body { padding:9px; } .xns-preview-post { padding:7px 8px; } .xns-preview-post h1, .xns-preview-post h1.post-title, .xns-preview-post .post-title { font-size:18px; } .xns-preview-scroll-btns { right:5px; } .xns-scroll-btn { width:28px !important; min-width:28px !important; max-width:28px !important; height:28px !important; min-height:28px !important; max-height:28px !important; flex-basis:28px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; margin-left:0; } }
     `;
   (documentObj.head || documentObj.documentElement || documentObj.body)?.appendChild(style);
 }

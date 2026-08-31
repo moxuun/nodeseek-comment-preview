@@ -58,10 +58,16 @@ function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetch
     const maxSeed = truncated ? maxPage : Math.min(maxPage, Math.max(...pages));
     for (let page = 1; page <= maxSeed; page += 1) pages.add(page);
     pages.delete(info.page);
+    const progressState = () => ({
+      loadedPages: loadedPages.size,
+      failedPages: [...failedPages],
+      truncated,
+      totalPages,
+    });
 
     const pending = Array.from(pages).sort((a, b) => a - b);
     const requestGate = createRequestGate(options.requestGapMs ?? requestGapMs);
-    options.onPageLoaded?.(info.page, firstDocument);
+    options.onPageLoaded?.(info.page, firstDocument, progressState());
     const worker = async () => {
       while (pending.length) {
         if (options.isAborted?.()) return;
@@ -78,7 +84,7 @@ function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetch
           const parsed = parseHtml(response.html, response.url);
           loadedPages.add(page);
           if (pageDocs) pageDocs.set(page, parsed);
-          options.onPageLoaded?.(page, parsed);
+          options.onPageLoaded?.(page, parsed, progressState());
           getPageNumbers(parsed, info.postId).forEach((foundPage) => {
             if (foundPage <= maxPage && !pages.has(foundPage) && foundPage !== info.page) {
               pages.add(foundPage);
@@ -87,6 +93,7 @@ function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetch
           });
         } catch {
           failedPages.push(page);
+          options.onPageFailed?.(page, progressState());
         }
       }
     };
@@ -98,18 +105,34 @@ function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetch
 
   async function loadPreviewRecords(info, firstDocument, options = {}) {
     const initialRecords = Array.isArray(options.initialRecords) ? options.initialRecords : null;
-    const allRecords = initialRecords ? [...initialRecords] : [];
+    const unique = new Map();
+    const mergeRecords = (records) => records.forEach((record) => {
+      const previous = unique.get(record.floor);
+      if (!previous || record.current) unique.set(record.floor, record);
+    });
+    if (initialRecords) mergeRecords(initialRecords);
     const { loadedPages, failedPages, truncated, totalPages } = await fetchPostPages(info, firstDocument, {
       ...options,
       retainDocuments: false,
-      onPageLoaded: (page, root) => {
+      onPageLoaded: (page, root, progress) => {
         if (initialRecords && page === info.page) return;
-        allRecords.push(...collectPageRecords(info, root, page));
+        mergeRecords(collectPageRecords(info, root, page));
+        options.onRecordsLoaded?.({
+          records: Array.from(unique.values()),
+          ...progress,
+          page,
+          loading: true,
+        });
       },
-    });
-    const unique = new Map();
-    allRecords.forEach((record) => {
-      if (!unique.has(record.floor)) unique.set(record.floor, record);
+      onPageFailed: (page, progress) => {
+        options.onPageFailed?.(page, progress);
+        options.onRecordsLoaded?.({
+          records: Array.from(unique.values()),
+          ...progress,
+          page,
+          loading: true,
+        });
+      },
     });
     return {
       records: Array.from(unique.values()),

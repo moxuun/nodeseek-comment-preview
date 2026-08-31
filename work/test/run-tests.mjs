@@ -451,6 +451,33 @@ scenario('预览首屏第一页评论不重复克隆', async (ctx) => {
   await page.close();
 });
 
+scenario('预览弹窗操作入口统一', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.goto(`${ctx.base}/list`, { waitUntil: 'networkidle0' });
+  await page.click('a[href="/post-123-1"]');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3'), 15_000, '预览弹窗打开');
+  const state = await page.evaluate(() => ({
+    eyebrow: document.querySelector('.xns-modal-eyebrow')?.textContent?.trim(),
+    original: document.querySelector('.xns-modal-original')?.textContent?.trim(),
+    refreshInToolbar: !!document.querySelector('.xns-modal-toolbar .xns-refresh-post'),
+    refreshInFloatingRail: !!document.querySelector('.xns-preview-scroll-btns .xns-refresh-post'),
+    toolbarLabel: document.querySelector('.xns-modal-toolbar')?.getAttribute('aria-label'),
+    navigationLabel: document.querySelector('.xns-preview-scroll-btns')?.getAttribute('aria-label'),
+    topTip: document.querySelector('.xns-to-top')?.getAttribute('data-xns-tip'),
+    bottomTip: document.querySelector('.xns-to-bottom')?.getAttribute('data-xns-tip'),
+    closeTitle: document.querySelector('.xns-modal-close')?.getAttribute('title'),
+  }));
+  assert(state.eyebrow === 'NodeSeek 主题预览', `预览应显示统一标题提示，实际 ${state.eyebrow}`);
+  assert(state.original === '打开原帖', `原帖入口文案应明确，实际 ${state.original}`);
+  assert(state.refreshInToolbar, '刷新应位于预览工具栏');
+  assert(!state.refreshInFloatingRail, '浮动阅读导航不应重复显示刷新');
+  assert(state.toolbarLabel === '预览工具', `工具栏应有无障碍标签，实际 ${state.toolbarLabel}`);
+  assert(state.navigationLabel === '阅读导航', `阅读导航应有无障碍标签，实际 ${state.navigationLabel}`);
+  assert(state.topTip === '回到顶部' && state.bottomTip === '回到底部', '上下导航应提供明确提示');
+  assert(state.closeTitle === '关闭预览（Esc）', `关闭按钮应提示 Esc，实际 ${state.closeTitle}`);
+  await page.close();
+});
+
 scenario('短期缓存命中 HTML 但不保留 Document，刷新时重新抓取', async (ctx) => {
   const page = await ctx.newPage();
   await installParserCounter(page);
@@ -590,6 +617,104 @@ scenario('预览弹窗远端内容滚动后才增强', async (ctx) => {
   }));
   assert(after.remoteCopyButtons > before.remoteCopyButtons, `预览滚动后应增强远端代码块：${JSON.stringify({ before, after })}`);
   assert(after.remoteImagesBound > 0, `预览滚动后应增强远端图片：${JSON.stringify(after)}`);
+  await page.close();
+});
+
+scenario('预览正文长图加载后虚拟楼层坐标不偏移（0.5.23 回归）', async (ctx) => {
+  const page = await openPreviewModal(ctx);
+  await page.evaluate(async () => {
+    const content = document.querySelector('.xns-modal .xns-preview-post .post-content');
+    const image = document.createElement('img');
+    image.alt = '长图坐标回归测试';
+    const loaded = new Promise((resolve) => {
+      image.addEventListener('load', resolve, { once: true });
+      image.addEventListener('error', resolve, { once: true });
+    });
+    content.appendChild(image);
+    image.src = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="2400"><rect width="640" height="2400" fill="#ddd"/></svg>')}`;
+    await loaded;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const body = document.querySelector('.xns-modal-body');
+    const thread = document.querySelector('.xns-modal .xns-preview-thread');
+    const threadTop = thread.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
+    body.scrollTo({ top: threadTop, behavior: 'auto' });
+  });
+  await waitFor(page, () => Boolean(document.querySelector('.xns-modal .xns-preview-thread > .content-item[data-xns-floor="1"]')), 5_000, '长图后的首层评论物化');
+  const atThreadTop = await page.evaluate(() => {
+    const thread = document.querySelector('.xns-modal .xns-preview-thread');
+    const first = thread.firstElementChild;
+    return {
+      firstFloor: first?.getAttribute('data-xns-floor') || null,
+      leadingSpacer: first?.classList.contains('xns-virtual-spacer') ? first.getBoundingClientRect().height : 0,
+    };
+  });
+  assert(atThreadTop.firstFloor === '1' && atThreadTop.leadingSpacer === 0,
+    `滚到长图后的评论区顶部应从 #1 开始，实际 ${JSON.stringify(atThreadTop)}`);
+
+  assert(await materializeFloor(page, 9, '.xns-modal .xns-preview-thread'), '长图后应能定位并物化 #9');
+  await waitFor(page, () => {
+    const body = document.querySelector('.xns-modal-body');
+    const target = document.querySelector('.xns-modal .xns-preview-thread > .content-item[data-xns-floor="9"]');
+    if (!body || !target) return false;
+    const bodyRect = body.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    return targetRect.bottom > bodyRect.top && targetRect.top < bodyRect.bottom;
+  }, 5_000, '长图后的楼层导航进入视口');
+  await page.close();
+});
+
+scenario('预览楼层显示蓝色左侧标识（0.5.23 回归）', async (ctx) => {
+  const page = await openPreviewModal(ctx);
+  const style = await page.evaluate(() => {
+    const floor = document.querySelector('.xns-modal .xns-preview-thread > .content-item[data-xns-floor]');
+    const computed = floor && getComputedStyle(floor);
+    return computed ? {
+      width: Number.parseFloat(computed.borderLeftWidth),
+      style: computed.borderLeftStyle,
+      color: computed.borderLeftColor,
+    } : null;
+  });
+  assert(style?.width >= 3 && style.style === 'solid' && /37,\s*99,\s*235/.test(style.color),
+    `预览楼层应显示蓝色左侧长条，实际 ${JSON.stringify(style)}`);
+  await page.close();
+});
+
+scenario('预览分页完成一页就立即显示（0.5.24 回归）', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.goto(`${ctx.base}/list-127`, { waitUntil: 'networkidle0' });
+  await page.click('a[href="/post-127-1"]');
+  await waitFor(page, () => {
+    const heading = document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent || '';
+    const status = document.querySelector('.xns-modal .xns-page-loading')?.textContent || '';
+    return heading === '楼中楼预览 · 4 条回复' && /已读取 2\/4 页/.test(status);
+  }, 1_200, '预览第 2 页渐进显示');
+  const partial = await page.evaluate(() => ({
+    heading: document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent || '',
+    loading: document.querySelector('.xns-modal .xns-page-loading')?.textContent || '',
+    virtualCount: Number(document.querySelector('.xns-modal .xns-preview-thread')?.dataset.xnsVirtualCount || 0),
+  }));
+  assert(partial.virtualCount === 4 && /正在加载其他分页/.test(partial.loading),
+    `第 2 页返回时应先显示 4 条并继续后台加载，实际 ${JSON.stringify(partial)}`);
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '楼中楼预览 · 8 条回复', 6_000, '预览剩余分页完成');
+  await page.close();
+});
+
+scenario('预览分页失败保留内容并在工具栏提示', async (ctx) => {
+  const page = await ctx.newPage();
+  dataOf(page).expectedResponses.push({ status: 503, url: '/post-129-2' });
+  await page.goto(`${ctx.base}/list-129`, { waitUntil: 'networkidle0' });
+  await page.click('a[href="/post-129-1"]');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-page-failed'), 8_000, '预览分页失败提示');
+  const state = await page.evaluate(() => ({
+    heading: document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent || '',
+    status: document.querySelector('.xns-modal .xns-modal-toolbar-status')?.textContent || '',
+    virtualCount: Number(document.querySelector('.xns-modal .xns-preview-thread')?.dataset.xnsVirtualCount || 0),
+    bodyStatuses: document.querySelectorAll('.xns-modal .xns-preview-comments > .xns-preview-status').length,
+  }));
+  assert(state.heading === '楼中楼预览 · 2 条回复', `分页失败时已读内容应保留，实际 ${state.heading}`);
+  assert(state.virtualCount === 2, `分页失败时虚拟数据应保留 2 条，实际 ${state.virtualCount}`);
+  assert(/1 页读取失败/.test(state.status), `工具栏应提示失败页数，实际 ${state.status}`);
+  assert(state.bodyStatuses === 0, `分页状态不应重复插入评论列表底部，实际 ${state.bodyStatuses} 个`);
   await page.close();
 });
 
@@ -805,10 +930,15 @@ scenario('列表页预览弹窗结构与操作菜单', async (ctx) => {
     const postActions = [...post.querySelector(':scope > .comment-menu').children].map((item) => item.dataset.xnsAction);
     const root = modal.querySelector('.xns-preview-thread .xns-comment-root');
     const floorActions = [...root.querySelector(':scope > .comment-menu').children].map((item) => item.dataset.xnsAction);
+    const floorHints = [...root.querySelectorAll(':scope > .comment-menu > .menu-item')].map((item) => item.getAttribute('aria-label'));
+    const remoteFloorLink = modal.querySelector('.xns-preview-thread .xns-remote-floor-link > .floor-link');
     return {
       title: modal.querySelector('.xns-modal-title')?.textContent,
       postActions,
       floorActions,
+      floorHints,
+      rootClass: root.className,
+      remoteFloorLabel: remoteFloorLink?.getAttribute('aria-label') || '',
       virtualCount: Number(modal.querySelector('.xns-preview-thread')?.dataset.xnsVirtualCount || 0),
     };
   });
@@ -816,6 +946,9 @@ scenario('列表页预览弹窗结构与操作菜单', async (ctx) => {
   assert(JSON.stringify(state.postActions) === JSON.stringify(['like', 'chicken', 'dislike', 'favorite', 'quote', 'reply']), `主帖应有 6 项操作，实际 ${JSON.stringify(state.postActions)}`);
   assert(JSON.stringify(state.floorActions.slice(0, 5)) === JSON.stringify(['like', 'chicken', 'dislike', 'quote', 'reply']), `回复楼层应有 5 项标准操作（不含收藏），实际 ${JSON.stringify(state.floorActions.slice(0, 5))}`);
   assert(state.floorActions[5] === null, `回复楼层第 6 项应为官方编辑项（null），实际 ${JSON.stringify(state.floorActions[5])}`);
+  assert(state.rootClass.includes('xns-comment-root'), `一级楼层应带根楼层标识，实际 ${state.rootClass}`);
+  assert(state.floorHints.every(Boolean), `评论操作应有无障碍提示，实际 ${JSON.stringify(state.floorHints)}`);
+  assert(state.remoteFloorLabel === '打开原楼层 #4', `跨页楼层应有明确来源提示，实际 ${state.remoteFloorLabel}`);
   assert(state.virtualCount === 9, `弹窗数据模型应有 9 条回复，实际 ${state.virtualCount}`);
 });
 

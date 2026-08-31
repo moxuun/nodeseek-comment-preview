@@ -60,6 +60,7 @@ function createCommentActions({
     item.appendChild(iconNode);
     if (withCount) item.appendChild(createElement('span', 'xns-action-count', '0'));
     item.appendChild(createElement('span', 'xns-action-label', label));
+    item.setAttribute('aria-label', label);
     return item;
   }
 
@@ -106,6 +107,8 @@ function createCommentActions({
       const action = getMenuActionKey(item);
       if (action) {
         item.dataset.xnsAction = action;
+        const actionMeta = PREVIEW_ACTIONS.find(([key]) => key === action);
+        if (!item.hasAttribute('aria-label')) item.setAttribute('aria-label', actionMeta?.[1] || action);
         if (action === 'favorite' && /已收藏|取消收藏/.test(`${item.title} ${item.textContent}`)) item.dataset.xnsFavoriteState = 'added';
       }
       if (!item.hasAttribute('role')) item.setAttribute('role', 'button');

@@ -35,6 +35,7 @@ function createPreviewRenderUtils({ qs, qsa, createElement }) {
     source.target = '_blank';
     source.rel = 'noopener noreferrer';
     source.title = `打开原楼层 #${record.floor}`;
+    source.setAttribute('aria-label', `打开原楼层 #${record.floor}`);
     wrapper?.classList.add('xns-remote-floor-link');
   }
 

@@ -66,6 +66,18 @@ function progressivePage(postId, page) {
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Fixture progressive ${postId} page ${page}</title></head><body><div class="nsk-post"><div class="content-item" id="0"><h1 class="post-title">渐进加载测试帖</h1><article class="post-content"><p>用于验证当前页优先渲染。</p></article></div></div><div class="comment-container"><div class="nsk-pager post-top-pager">${pager}</div><ul class="comments">${floors}</ul><div class="nsk-pager post-bottom-pager">${pager}</div></div><script src="/outputs/nodeseek-comment-preview.user.js"></script></body></html>`;
 }
 
+function progressiveDeliveryPage(postId, page, pageCount = 4) {
+  const pager = Array.from({ length: pageCount }, (_, index) => {
+    const target = index + 1;
+    return `<a class="pager-pos${target === page ? ' pager-cur' : ''}" href="/post-${postId}-${target}">${target}</a>`;
+  }).join('');
+  const firstFloor = (page - 1) * 2 + 1;
+  const floors = [firstFloor, firstFloor + 1].map((floor) => (
+    `<li id="${floor}" data-comment-id="${postId}${floor}" class="content-item"><div class="nsk-content-meta-info"><a href="/space/${floor}">U${floor}</a></div><article class="post-content"><p>渐进交付第 ${page} 页，第 ${floor} 楼。</p></article></li>`
+  )).join('');
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Fixture progressive delivery ${postId} page ${page}</title></head><body><div class="nsk-post"><div class="content-item" id="0"><h1 class="post-title">分页渐进交付测试帖</h1><article class="post-content"><p>第 2 页先返回，后续页面保持慢响应。</p></article></div></div><div class="comment-container"><div class="nsk-pager post-top-pager">${pager}</div><ul class="comments">${floors}</ul><div class="nsk-pager post-bottom-pager">${pager}</div></div><script src="/outputs/nodeseek-comment-preview.user.js"></script></body></html>`;
+}
+
 function paginationFallbackPage(postId, page) {
   const pageLinks = '<div class="page-links"><a href="/post-126-1">1</a><a href="/post-126-2">2</a></div>';
   const floor = page === 1
@@ -175,6 +187,23 @@ const server = http.createServer((req, res) => {
     else send();
     return;
   }
+  const progressiveDeliveryMatch = /^\/post-127-(\d+)$/.exec(pathname);
+  if (progressiveDeliveryMatch) {
+    const page = Number(progressiveDeliveryMatch[1]);
+    if (page < 1 || page > 4) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('not found');
+      return;
+    }
+    const send = () => {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(progressiveDeliveryPage(127, page));
+    };
+    const delay = new Map([[1, 0], [2, 250], [3, 1_800], [4, 2_200]]).get(page) || 0;
+    if (delay) setTimeout(send, delay);
+    else send();
+    return;
+  }
   const retryMatch = /^\/post-125-(\d+)$/.exec(pathname);
   if (retryMatch) {
     const page = Number(retryMatch[1]);
@@ -193,6 +222,23 @@ const server = http.createServer((req, res) => {
     }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(progressivePage(125, page));
+    return;
+  }
+  const failedPreviewMatch = /^\/post-129-(\d+)$/.exec(pathname);
+  if (failedPreviewMatch) {
+    const page = Number(failedPreviewMatch[1]);
+    if (page === 2) {
+      res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end('preview page unavailable');
+      return;
+    }
+    if (page !== 1) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('not found');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(progressivePage(129, 1, 2));
     return;
   }
   const paginationFallbackMatch = /^\/post-126-(\d+)$/.exec(pathname);
@@ -240,6 +286,16 @@ const server = http.createServer((req, res) => {
   if (pathname === '/list-124') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(delayedPostList(124));
+    return;
+  }
+  if (pathname === '/list-127') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(delayedPostList(127));
+    return;
+  }
+  if (pathname === '/list-129') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(delayedPostList(129));
     return;
   }
   if (pathname === '/list-460') {

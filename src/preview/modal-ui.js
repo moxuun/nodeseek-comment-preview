@@ -1,5 +1,5 @@
 // 预览弹窗 UI 基础设施：锁定页面、滚动控制、关闭操作。
-function createPreviewModalUi({ windowObj, documentObj, state, createElement, closeImageLightbox, refreshPreviewModal }) {
+function createPreviewModalUi({ windowObj, documentObj, state, createElement, closeImageLightbox }) {
   function removeBodyLock() {
     if (!state.modal) documentObj.documentElement.style.removeProperty('overflow');
   }
@@ -26,22 +26,31 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     return svg;
   }
 
+  function createRefreshButton(onClick) {
+    const button = createElement('button', 'xns-modal-tool xns-refresh-post');
+    button.type = 'button';
+    button.title = '刷新帖子';
+    button.setAttribute('aria-label', '刷新帖子');
+    button.append(createRefreshArrow(), createElement('span', 'xns-modal-tool-label', '刷新'));
+    button.addEventListener('click', onClick);
+    return button;
+  }
+
   function installPreviewScrollButtons(dialog, body) {
     const group = createElement('div', 'xns-preview-scroll-btns');
-    const refresh = createElement('button', 'xns-scroll-btn xns-refresh-post');
-    refresh.type = 'button';
-    refresh.title = '刷新帖子';
-    refresh.setAttribute('aria-label', '刷新帖子');
-    refresh.appendChild(createRefreshArrow());
+    group.setAttribute('role', 'toolbar');
+    group.setAttribute('aria-label', '阅读导航');
     const top = createElement('button', 'xns-scroll-btn xns-to-top');
     top.type = 'button';
     top.title = '回到顶部';
     top.setAttribute('aria-label', '回到顶部');
+    top.setAttribute('data-xns-tip', '回到顶部');
     top.appendChild(createScrollArrow('18 15 12 9 6 15'));
     const bottom = createElement('button', 'xns-scroll-btn xns-to-bottom');
     bottom.type = 'button';
     bottom.title = '回到底部';
     bottom.setAttribute('aria-label', '回到底部');
+    bottom.setAttribute('data-xns-tip', '回到底部');
     bottom.appendChild(createScrollArrow('6 9 12 15 18 9'));
     const scrollTo = (edge) => {
       const topPosition = edge === 'bottom' ? Math.max(0, body.scrollHeight - body.clientHeight) : 0;
@@ -49,8 +58,7 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     };
     top.addEventListener('click', () => scrollTo('top'));
     bottom.addEventListener('click', () => scrollTo('bottom'));
-    refresh.addEventListener('click', () => { void refreshPreviewModal(); });
-    group.append(refresh, top, bottom);
+    group.append(top, bottom);
     dialog.appendChild(group);
     const update = () => {
       const distanceFromBottom = body.scrollHeight - (body.scrollTop + body.clientHeight);
@@ -90,11 +98,12 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     const button = createElement('button', 'xns-modal-close', '×');
     button.type = 'button';
     button.setAttribute('aria-label', '关闭');
+    button.title = '关闭预览（Esc）';
     button.addEventListener('click', onClick);
     return button;
   }
 
-  return Object.freeze({ removeBodyLock, installPreviewScrollButtons, closeModal, createCloseButton });
+  return Object.freeze({ removeBodyLock, installPreviewScrollButtons, closeModal, createCloseButton, createRefreshButton });
 }
 
 const xnsPreviewModalUi = createPreviewModalUi({
@@ -103,9 +112,9 @@ const xnsPreviewModalUi = createPreviewModalUi({
   state,
   createElement,
   closeImageLightbox,
-  refreshPreviewModal: (...args) => refreshPreviewModal(...args),
 });
 const removeBodyLock = (...args) => xnsPreviewModalUi.removeBodyLock(...args);
 const installPreviewScrollButtons = (...args) => xnsPreviewModalUi.installPreviewScrollButtons(...args);
 const closeModal = (...args) => xnsPreviewModalUi.closeModal(...args);
 const createCloseButton = (...args) => xnsPreviewModalUi.createCloseButton(...args);
+const createRefreshButton = (...args) => xnsPreviewModalUi.createRefreshButton(...args);

@@ -34,7 +34,10 @@ function createPreviewRenderer({
     // 处理器，由官方在楼层下方展开编辑器；脚本不能覆盖成打开新标签。
     // 如果原生项没有渲染出来，仍要先补回可见入口；后面不接管当前页的点击，
     // 避免把“修复显示”又回归成跳转行为。
-    if (record.current && item) return;
+    if (record.current && item) {
+      item.setAttribute('aria-label', '编辑');
+      return;
+    }
     if (!item) {
       item = createElement('span', 'menu-item');
       item.setAttribute('role', 'button');
@@ -42,6 +45,7 @@ function createPreviewRenderer({
       item.innerHTML = '<svg class="iconpark-icon" aria-hidden="true"><use href="#edit"></use></svg><span>编辑</span>';
       menu.appendChild(item);
     }
+    item.setAttribute('aria-label', '编辑');
     if (record.current) return;
     if (item.dataset.xnsEditBound === 'true') return;
     item.dataset.xnsEditBound = 'true';
@@ -111,13 +115,42 @@ function createPreviewRenderer({
     return node;
   }
 
+  function renderPreviewStatus(section, options = {}) {
+    const targetPages = Math.min(maxPage, Number(options.totalPages) || 0);
+    const loadedPages = Number(options.loadedPages) || 0;
+    const failedPages = Array.isArray(options.failedPages) ? options.failedPages : [];
+    const statusNode = options.statusNode || qs(section, ':scope > .xns-preview-status') || createElement('div', 'xns-preview-status');
+    if (!statusNode.parentNode) section.insertBefore(statusNode, qs(section, ':scope > .xns-preview-thread'));
+    clearElement(statusNode);
+    statusNode.className = options.statusNode ? 'xns-modal-toolbar-status xns-preview-status' : 'xns-preview-status';
+    statusNode.removeAttribute('title');
+    statusNode.setAttribute('role', 'status');
+    statusNode.setAttribute('aria-live', 'polite');
+    const progress = loadedPages && targetPages ? `已读取 ${loadedPages}/${targetPages} 页` : '';
+    if (options.loading) {
+      statusNode.classList.add('is-loading');
+      statusNode.appendChild(createElement('span', 'xns-page-loading', progress ? `正在加载其他分页 · ${progress}` : '正在加载其他分页…'));
+    } else if (loadedPages && targetPages) {
+      statusNode.appendChild(createElement('span', 'xns-page-complete', `已读取 ${loadedPages}/${targetPages} 页`));
+    }
+    if (failedPages.length) {
+      statusNode.classList.add('is-failed');
+      statusNode.appendChild(createElement('span', 'xns-page-failed', `${failedPages.length} 页读取失败`));
+    }
+    if (options.truncated) {
+      statusNode.classList.add('is-truncated');
+      statusNode.appendChild(createElement('span', 'xns-page-truncated', `帖子共 ${Number(options.totalPages) || maxPage} 页，仅显示前 ${maxPage} 页`));
+    }
+    statusNode.hidden = !statusNode.childNodes.length;
+    return statusNode;
+  }
+
   function renderPreviewRecords(section, info, records, options = {}) {
     const heading = qs(section, ':scope > h3');
     const thread = qs(section, ':scope > .xns-preview-thread');
     if (!heading || !thread) return;
     heading.textContent = `楼中楼预览 · ${records.length} 条回复`;
     qs(section, ':scope > .xns-preview-empty')?.remove();
-    qsa(section, ':scope > .xns-page-loading, :scope > .xns-page-failed').forEach((node) => node.remove());
     if (records.length) {
       const onNodeMounted = (node, entry) => {
         const record = entry.record;
@@ -154,13 +187,7 @@ function createPreviewRenderer({
       clearElement(thread);
       section.appendChild(createElement('p', 'xns-status xns-preview-empty', '没有读取到评论。'));
     }
-    if (options.loading) section.appendChild(createElement('p', 'xns-status xns-page-loading', '正在加载其他分页…'));
-    if (options.failedPages?.length) {
-      section.appendChild(createElement('p', 'xns-status xns-page-failed', `已读取 ${options.loadedPages} 页，${options.failedPages.length} 页读取失败。`));
-    }
-    if (options.truncated) {
-      section.appendChild(createElement('p', 'xns-status xns-page-truncated', `帖子共 ${options.totalPages} 页，只读取了前 ${maxPage} 页，后面页的楼层没有显示。`));
-    }
+    renderPreviewStatus(section, options);
   }
 
   return Object.freeze({
@@ -168,6 +195,7 @@ function createPreviewRenderer({
     prepareCommentRecord,
     appendNestedRecord,
     buildPreviewPostNode,
+    renderPreviewStatus,
     renderPreviewRecords,
   });
 }
@@ -202,4 +230,5 @@ const ensurePreviewEditOption = (...args) => xnsPreviewRenderer.ensurePreviewEdi
 const prepareCommentRecord = (...args) => xnsPreviewRenderer.prepareCommentRecord(...args);
 const appendNestedRecord = (...args) => xnsPreviewRenderer.appendNestedRecord(...args);
 const buildPreviewPostNode = (...args) => xnsPreviewRenderer.buildPreviewPostNode(...args);
+const renderPreviewStatus = (...args) => xnsPreviewRenderer.renderPreviewStatus(...args);
 const renderPreviewRecords = (...args) => xnsPreviewRenderer.renderPreviewRecords(...args);

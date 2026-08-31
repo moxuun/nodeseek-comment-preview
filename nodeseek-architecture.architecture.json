@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "NodeSeek 楼中楼预览脚本架构",
+    "locale": "zh-CN",
+    "output": "nodeseek-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/moxuun/nodeseek-comment-preview.git",
+      "revision": "504fd913e88e1b18101c23dcf986b9dad24f6327"
+    }
+  },
+  "components": [
+    {
+      "id": "nodeseek-page",
+      "type": "external",
+      "label": "NodeSeek 页面",
+      "sublabel": "列表页 / 帖子页 / 预览入口",
+      "tag": "Browser DOM",
+      "sources": [{ "path": "src/core/dom.js" }],
+      "pos": [40, 110],
+      "size": [170, 72]
+    },
+    {
+      "id": "bootstrap-events",
+      "type": "frontend",
+      "label": "启动与事件代理",
+      "sublabel": "bootstrap.js · events.js",
+      "tag": "入口",
+      "sources": [{ "path": "src/app/bootstrap.js" }, { "path": "src/app/events.js" }],
+      "pos": [270, 110],
+      "size": [180, 72]
+    },
+    {
+      "id": "controllers",
+      "type": "backend",
+      "label": "帖子 / 预览控制器",
+      "sublabel": "生命周期与用户交互",
+      "tag": "协调层",
+      "sources": [{ "path": "src/post-page/controller.js" }, { "path": "src/preview/controller.js" }],
+      "pos": [510, 110],
+      "size": [190, 72]
+    },
+    {
+      "id": "page-loader",
+      "type": "backend",
+      "label": "分页读取与 HTTP",
+      "sublabel": "自动读取 · 并发上限 2",
+      "tag": "数据入口",
+      "sources": [{ "path": "src/data/page-loader.js" }, { "path": "src/nodeseek/http.js" }],
+      "pos": [760, 110],
+      "size": [190, 72]
+    },
+    {
+      "id": "nodeseek-server",
+      "type": "external",
+      "label": "NodeSeek 同源服务",
+      "sublabel": "HTML · SSR 状态 · 操作 API",
+      "tag": "同源请求",
+      "pos": [1010, 110],
+      "size": [190, 72]
+    },
+    {
+      "id": "sanitizer-parser",
+      "type": "security",
+      "label": "安全清洗与 SSR 解析",
+      "sublabel": "安全 URL · 图片源恢复",
+      "tag": "边界",
+      "sources": [{ "path": "src/nodeseek/content-parser.js" }],
+      "pos": [760, 300],
+      "size": [190, 72]
+    },
+    {
+      "id": "thread-model",
+      "type": "backend",
+      "label": "楼中楼关系模型",
+      "sublabel": "引用解析 · 树构建 · flatten",
+      "tag": "纯数据",
+      "sources": [{ "path": "src/comments/thread.js" }],
+      "pos": [510, 300],
+      "size": [190, 72]
+    },
+    {
+      "id": "virtual-stream",
+      "type": "frontend",
+      "label": "虚拟楼层流",
+      "sublabel": "活动窗口 · 等高占位 · 回收恢复",
+      "tag": "性能核心",
+      "sources": [{ "path": "src/preview/virtualizer.js" }],
+      "pos": [270, 300],
+      "size": [190, 72]
+    },
+    {
+      "id": "official-renderer",
+      "type": "frontend",
+      "label": "官方风格楼层渲染",
+      "sublabel": "主帖 / 评论 / depth 视觉缩进",
+      "tag": "视图层",
+      "sources": [{ "path": "src/preview/renderer.js" }, { "path": "src/preview/render-utils.js" }],
+      "pos": [40, 300],
+      "size": [190, 72]
+    },
+    {
+      "id": "features-actions",
+      "type": "frontend",
+      "label": "内容增强与操作",
+      "sublabel": "图片灯箱 · 代码 · 标签页 · 投票",
+      "tag": "按需绑定",
+      "sources": [{ "path": "src/features/content.js" }, { "path": "src/features/comment-actions.js" }, { "path": "src/features/vote.js" }],
+      "pos": [40, 490],
+      "size": [190, 72]
+    }
+  ],
+  "connections": [
+    { "id": "page-bootstrap", "from": "nodeseek-page", "to": "bootstrap-events", "label": "页面加载 / 点击", "variant": "emphasis", "labelDy": -30 },
+    { "id": "bootstrap-controllers", "from": "bootstrap-events", "to": "controllers", "label": "创建控制器" },
+    { "id": "controllers-loader", "from": "controllers", "to": "page-loader", "label": "读取当前页与分页", "labelDy": -30 },
+    { "id": "loader-server", "from": "page-loader", "to": "nodeseek-server", "label": "同源 HTML / API", "variant": "emphasis", "labelDy": -30 },
+    { "id": "server-parser", "from": "nodeseek-server", "to": "sanitizer-parser", "label": "SSR HTML + 状态", "fromSide": "bottom", "toSide": "top" },
+    { "id": "parser-model", "from": "sanitizer-parser", "to": "thread-model", "label": "轻量评论记录", "fromSide": "left", "toSide": "right", "labelDy": -30 },
+    { "id": "model-virtual", "from": "thread-model", "to": "virtual-stream", "label": "扁平顺序 + depth", "fromSide": "left", "toSide": "right", "labelDy": -30 },
+    { "id": "virtual-render", "from": "virtual-stream", "to": "official-renderer", "label": "物化活动楼层", "fromSide": "left", "toSide": "right", "variant": "emphasis", "labelDy": -30 },
+    { "id": "renderer-page", "from": "official-renderer", "to": "nodeseek-page", "label": "更新 DOM", "fromSide": "top", "toSide": "bottom" },
+    { "id": "renderer-features", "from": "official-renderer", "to": "features-actions", "label": "按需增强", "fromSide": "bottom", "toSide": "top", "labelDy": 24 },
+    { "id": "features-server", "from": "features-actions", "to": "nodeseek-server", "label": "用户点击后调用 API", "variant": "dashed", "fromSide": "right", "toSide": "bottom" }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "浏览器中的 userscript 运行时", "wraps": ["bootstrap-events", "controllers", "page-loader", "sanitizer-parser", "thread-model", "virtual-stream", "official-renderer", "features-actions"], "pad": 28 }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "性能模型", "items": ["50 页仍自动读取", "关系数据完整保留", "活动 DOM 维持固定窗口"] },
+    { "dot": "emerald", "title": "功能链路", "items": ["当前页优先显示", "楼中楼关系独立于 DOM", "楼层跳转可重新物化"] },
+    { "dot": "rose", "title": "安全边界", "items": ["同源 HTML 先清洗", "只在用户点击后写入操作 API", "图片源地址经过安全 URL 校验"] }
+  ]
+}

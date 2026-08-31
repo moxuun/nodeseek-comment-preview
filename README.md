@@ -32,6 +32,14 @@
 
 完整使用说明、故障排查与版本历史见 [outputs/README.md](outputs/README.md)。
 
+## 架构图
+
+项目的模块划分、数据流和安全边界见下图。README 使用白色调静态预览；点击图片可打开交互式架构图。
+
+[![NodeSeek 楼中楼预览脚本架构图](nodeseek-architecture.visual-check.2048x1320.light.png)](nodeseek-architecture.html)
+
+架构图源规格见 [nodeseek-architecture.architecture.json](nodeseek-architecture.architecture.json)。
+
 ## 已知问题
 
 - Stardust 收款码不会显示（有意不支持）。

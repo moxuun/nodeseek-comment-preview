@@ -23,6 +23,7 @@ function createPreviewController({
   closeImageLightbox,
   closeModal,
   createCloseButton,
+  createRefreshButton,
   openPreviewComposer,
 }) {
   function buildPreviewContent(url, parsed, options = {}) {
@@ -45,20 +46,51 @@ function createPreviewController({
     section.appendChild(createElement('h3', '', '楼中楼预览'));
     const thread = createElement('ul', 'xns-preview-thread');
     section.appendChild(thread);
-    renderPreviewRecords(section, info, currentRecords, {
-      loading: hasRemotePages,
-      onNodeMounted: (node) => installPreviewFeatures(node),
+      renderPreviewRecords(section, info, currentRecords, {
+        loading: hasRemotePages,
+        statusNode: options.statusNode,
+        onNodeMounted: (node) => installPreviewFeatures(node),
     });
     wrapper.appendChild(section);
+    let progressiveTimer = 0;
+    let pendingProgress = null;
+    let renderedProgress = false;
+    const renderProgress = (progress) => {
+      if (!progress || !section.isConnected) return false;
+      renderPreviewRecords(section, info, progress.records, {
+        ...progress,
+        statusNode: options.statusNode,
+        onNodeMounted: (node) => installPreviewFeatures(node),
+      });
+      return true;
+    };
+    const scheduleProgressiveRender = (progress) => {
+      if (options.renderDetached === true) return;
+      pendingProgress = progress;
+      if (progressiveTimer) return;
+      // 第 2 页进入很短的合并窗口，后续页面按 500ms 合并，避免 50 页触发
+      // 49 次完整树重排。全部请求很快完成时，定时批次会被最终渲染取消。
+      progressiveTimer = windowObj.setTimeout(() => {
+        progressiveTimer = 0;
+        const next = pendingProgress;
+        pendingProgress = null;
+        if (renderProgress(next)) renderedProgress = true;
+      }, renderedProgress ? 500 : 300);
+    };
     const hydrate = loadPreviewRecords(info, parsed, {
       noStore: options.noStore === true,
       allowCache: options.allowCache === true,
       initialRecords: currentRecords,
       signal: options.signal,
+      onRecordsLoaded: scheduleProgressiveRender,
     }).then((preview) => {
+      if (progressiveTimer) windowObj.clearTimeout(progressiveTimer);
+      progressiveTimer = 0;
+      pendingProgress = null;
       if (section.isConnected || options.renderDetached === true) {
         renderPreviewRecords(section, info, preview.records, {
           ...preview,
+          statusNode: options.statusNode,
           onNodeMounted: (node) => installPreviewFeatures(node),
         });
       }
@@ -220,6 +252,14 @@ function createPreviewController({
 
   function showPreviewLoadError(modal, error) {
     clearElement(modal.body);
+    const toolbarStatus = qs(modal.dialog, '.xns-modal-toolbar-status');
+    if (toolbarStatus) {
+      toolbarStatus.className = 'xns-modal-toolbar-status xns-preview-status is-failed';
+      toolbarStatus.hidden = false;
+      const detail = error?.message || '网络错误';
+      toolbarStatus.textContent = '预览加载失败';
+      toolbarStatus.title = detail;
+    }
     modal.body.appendChild(createElement('p', 'xns-status', `预览加载失败：${error?.message || '网络错误'}`));
     if (modal.fallbackLink) {
       const link = createElement('a', '', '在原页面打开');
@@ -231,11 +271,14 @@ function createPreviewController({
   }
 
   function showPreviewRefreshError(modal, error) {
-    qs(modal.body, '.xns-refresh-status')?.remove();
-    const status = createElement('p', 'xns-status xns-refresh-status', `刷新失败，保留当前内容：${error?.message || '网络错误'}`);
-    status.classList.add('xns-refresh-failed');
-    modal.body.prepend(status);
-    windowObj.setTimeout(() => { if (status.isConnected) status.remove(); }, 4_000);
+    const toolbarStatus = qs(modal.dialog, '.xns-modal-toolbar-status');
+    if (toolbarStatus) {
+      toolbarStatus.className = 'xns-modal-toolbar-status xns-preview-status xns-refresh-status is-failed';
+      toolbarStatus.hidden = false;
+      const detail = error?.message || '网络错误';
+      toolbarStatus.textContent = `刷新失败，保留当前内容 · ${detail}`;
+      toolbarStatus.title = detail;
+    }
   }
 
   async function loadPreviewModal(modal, loadingText, options = {}) {
@@ -252,8 +295,15 @@ function createPreviewController({
     const generation = (modal.loadGeneration || 0) + 1;
     modal.loadGeneration = generation;
     const refresh = qs(modal.dialog, '.xns-refresh-post');
+    const toolbarStatus = qs(modal.dialog, '.xns-modal-toolbar-status');
     refresh?.classList.add('xns-action-pending');
     refresh?.setAttribute('aria-busy', 'true');
+    if (toolbarStatus) {
+      toolbarStatus.className = 'xns-modal-toolbar-status xns-preview-status is-loading';
+      toolbarStatus.hidden = false;
+      toolbarStatus.removeAttribute('title');
+      toolbarStatus.textContent = preserveContent ? '正在刷新…' : '正在读取…';
+    }
     closeImageLightbox();
     if (!preserveContent) {
       modal.body.scrollTop = 0;
@@ -267,6 +317,7 @@ function createPreviewController({
         allowCache: !fresh,
         renderDetached: preserveContent,
         signal: requestController?.signal,
+        statusNode: toolbarStatus,
       });
       if (preserveContent && preview.hydrate) await preview.hydrate;
       if (state.modal !== modal || modal.loadGeneration !== generation) return false;
@@ -312,24 +363,41 @@ function createPreviewController({
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
     const header = createElement('header', 'xns-modal-header');
+    const heading = createElement('div', 'xns-modal-heading');
+    heading.appendChild(createElement('span', 'xns-modal-eyebrow', 'NodeSeek 主题预览'));
     const title = createElement('h2', 'xns-modal-title', '正在加载帖子…');
+    heading.appendChild(title);
+    const actions = createElement('div', 'xns-modal-actions');
     const replyPost = createElement('button', 'xns-modal-reply', '回复帖子');
     replyPost.type = 'button';
+    replyPost.title = '回复帖子';
     replyPost.addEventListener('click', () => openPreviewComposer('post-reply', null));
-    const original = createElement('a', '', '新标签打开');
+    const original = createElement('a', 'xns-modal-original', '打开原帖');
     original.href = url.href;
     original.target = '_blank';
     original.rel = 'noopener noreferrer';
+    original.title = '在新标签打开原帖';
     const close = createCloseButton(closeModal);
-    header.append(title, replyPost, original, close);
+    actions.append(replyPost, original, close);
+    header.append(heading, actions);
+    const toolbar = createElement('div', 'xns-modal-toolbar');
+    toolbar.setAttribute('role', 'toolbar');
+    toolbar.setAttribute('aria-label', '预览工具');
+    const toolbarStatus = createElement('span', 'xns-modal-toolbar-status xns-preview-status', '准备读取…');
+    toolbar.append(
+      createElement('span', 'xns-modal-toolbar-label', '阅读'),
+      createElement('span', 'xns-modal-mode', '楼中楼'),
+      toolbarStatus,
+      createRefreshButton(() => { void refreshPreviewModal(); }),
+    );
     const body = createElement('div', 'xns-modal-body');
     body.appendChild(createElement('p', 'xns-loading', '正在读取帖子内容…'));
-    dialog.append(header, body);
+    dialog.append(header, toolbar, body);
     const scrollCleanup = installPreviewScrollButtons(dialog, body);
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, loading: false, loadGeneration: 0, requestController: null };
+    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, loading: false, loadGeneration: 0, requestController: null, toolbarStatus };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }
@@ -361,6 +429,7 @@ const xnsPreviewController = createPreviewController({
   closeImageLightbox,
   closeModal,
   createCloseButton,
+  createRefreshButton,
   openPreviewComposer: (...args) => openPreviewComposer(...args),
 });
 const buildPreviewContent = (...args) => xnsPreviewController.buildPreviewContent(...args);

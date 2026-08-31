@@ -54,18 +54,30 @@ function createCommentVirtualizer({
     return next || windowObj;
   }
 
+  function getHostOffset(nextViewport) {
+    if (isWindowViewport(nextViewport)) {
+      return (host?.getBoundingClientRect?.().top || 0) + (Number(windowObj.scrollY) || 0);
+    }
+    const scrollTop = Math.max(0, Number(nextViewport.scrollTop) || 0);
+    const hostRect = host?.getBoundingClientRect?.();
+    const viewportRect = nextViewport.getBoundingClientRect?.();
+    if (!hostRect || !viewportRect) return Math.max(0, Number(host?.offsetTop) || 0);
+    return Math.max(0, hostRect.top - viewportRect.top - (Number(nextViewport.clientTop) || 0) + scrollTop);
+  }
+
   function getViewportMetrics() {
     const nextViewport = resolveViewport();
     if (nextViewport !== viewport) bindViewport(nextViewport);
     if (isWindowViewport(nextViewport)) {
       const scrollTop = Number(windowObj.scrollY) || 0;
-      const hostTop = (host?.getBoundingClientRect?.().top || 0) + scrollTop;
+      const hostTop = getHostOffset(nextViewport);
       const height = Math.max(1, Number(windowObj.innerHeight) || 800);
       return { start: Math.max(0, scrollTop - hostTop), end: Math.max(0, scrollTop - hostTop) + height, height };
     }
     const height = Math.max(1, Number(nextViewport.clientHeight) || 800);
     const scrollTop = Math.max(0, Number(nextViewport.scrollTop) || 0);
-    return { start: scrollTop, end: scrollTop + height, height };
+    const start = Math.max(0, scrollTop - getHostOffset(nextViewport));
+    return { start, end: start + height, height };
   }
 
   function createSpacer(height) {
@@ -182,9 +194,17 @@ function createCommentVirtualizer({
 
   function bindViewport(nextViewport) {
     if (nextViewport === viewport) return;
-    if (viewport?.removeEventListener) viewport.removeEventListener('scroll', scheduleRender);
+    if (viewport?.removeEventListener) {
+      viewport.removeEventListener('scroll', scheduleRender);
+      viewport.removeEventListener('load', scheduleRender, true);
+      viewport.removeEventListener('error', scheduleRender, true);
+    }
     viewport = nextViewport || windowObj;
     viewport?.addEventListener?.('scroll', scheduleRender, { passive: true });
+    // 预览正文位于虚拟列表之前。长图完成加载后列表的内容坐标会变化，
+    // load/error 不冒泡，因此使用捕获阶段重新计算活动窗口。
+    viewport?.addEventListener?.('load', scheduleRender, true);
+    viewport?.addEventListener?.('error', scheduleRender, true);
   }
 
   function setEntries(nextEntries, options = {}) {
@@ -229,10 +249,10 @@ function createCommentVirtualizer({
     const nextViewport = resolveViewport();
     const offset = sumHeights(0, index);
     if (isWindowViewport(nextViewport)) {
-      const top = (host.getBoundingClientRect?.().top || 0) + (Number(windowObj.scrollY) || 0) + offset;
+      const top = getHostOffset(nextViewport) + offset;
       windowObj.scrollTo?.({ top, behavior });
     } else {
-      nextViewport.scrollTo?.({ top: offset, behavior });
+      nextViewport.scrollTo?.({ top: getHostOffset(nextViewport) + offset, behavior });
     }
     forceIndex = null;
     scheduleRender();
@@ -250,7 +270,11 @@ function createCommentVirtualizer({
     if (destroyed) return;
     destroyed = true;
     if (frame) windowObj.cancelAnimationFrame(frame);
-    if (viewport?.removeEventListener) viewport.removeEventListener('scroll', scheduleRender);
+    if (viewport?.removeEventListener) {
+      viewport.removeEventListener('scroll', scheduleRender);
+      viewport.removeEventListener('load', scheduleRender, true);
+      viewport.removeEventListener('error', scheduleRender, true);
+    }
     resizeObserver?.disconnect();
     mounted.forEach((_, index) => unmount(index));
     mounted.clear();
