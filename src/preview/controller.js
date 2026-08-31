@@ -26,6 +26,9 @@ function createPreviewController({
   createRefreshButton,
   createMoreMenu,
   openSettings,
+  getSettings,
+  hasSeenPrompt,
+  markPromptSeen,
   openPreviewComposer,
 }) {
   function createPreviewHelpPanel() {
@@ -106,6 +109,20 @@ function createPreviewController({
       items[key] = { item, value: item.lastElementChild };
     });
     return { root, items };
+  }
+
+  function createPreviewPrompt() {
+    const prompt = createElement('div', 'xns-one-time-prompt');
+    prompt.setAttribute('role', 'status');
+    prompt.appendChild(createElement('span', '', '提示：按 ? 打开帮助，也可以在“更多”里复制链接或调整设置。'));
+    const dismiss = createElement('button', '', '知道了');
+    dismiss.type = 'button';
+    dismiss.addEventListener('click', () => {
+      markPromptSeen('preview-help');
+      prompt.remove();
+    });
+    prompt.appendChild(dismiss);
+    return prompt;
   }
 
   function buildPreviewContent(url, parsed, options = {}) {
@@ -512,7 +529,10 @@ function createPreviewController({
     );
     const body = createElement('div', 'xns-modal-body');
     body.appendChild(createElement('p', 'xns-loading', '正在读取帖子内容…'));
-    dialog.append(header, toolbar, helpPanel, body);
+    const prompt = getSettings().prompts && !hasSeenPrompt('preview-help') ? createPreviewPrompt() : null;
+    dialog.append(header, toolbar, helpPanel);
+    if (prompt) dialog.appendChild(prompt);
+    dialog.appendChild(body);
     const scrollCleanup = installPreviewScrollButtons(dialog, body);
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);

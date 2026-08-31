@@ -86,6 +86,9 @@ function installStyle() {
       .xns-modal-help-list { display:flex; flex-wrap:wrap; gap:5px 16px; margin:5px 0 0; padding:0; list-style:none; }
       .xns-modal-help-item { display:inline-flex; align-items:center; gap:5px; }
       .xns-modal-help kbd { padding:1px 5px; border:1px solid rgba(100,116,139,.28); border-bottom-width:2px; border-radius:4px; color:#334155; background:#fff; font:11px/1.3 ui-monospace,SFMono-Regular,Consolas,monospace; }
+      .xns-one-time-prompt { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 16px; border-bottom:1px solid rgba(59,130,246,.18); color:#475569; background:#f8fbff; font:12px/1.35 system-ui,sans-serif; }
+      .xns-one-time-prompt button { flex:0 0 auto; padding:3px 8px; border:1px solid rgba(59,130,246,.3); border-radius:5px; color:#2563eb; background:#fff; cursor:pointer; font:inherit; }
+      .xns-one-time-prompt button:hover, .xns-one-time-prompt button:focus-visible { border-color:#2563eb; outline:none; }
       .xns-modal-body { overflow:auto; padding:clamp(10px,2vw,18px); }
       .xns-settings-overlay { position:fixed; z-index:2147483600; inset:0; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(15,23,42,.5); }
       .xns-settings-panel { box-sizing:border-box; width:min(500px,100%); max-height:calc(100vh - 36px); overflow:auto; padding:16px; border:1px solid rgba(100,116,139,.25); border-radius:10px; color:#1f2937; background:#fff; box-shadow:0 18px 55px rgba(15,23,42,.3); font:13px/1.4 system-ui,sans-serif; }
@@ -218,6 +221,8 @@ function installStyle() {
       .dark-layout .xns-modal-more-item:hover, .dark-layout .xns-modal-more-item:focus-visible { color:#93c5fd; background:rgba(59,130,246,.18); }
       .dark-layout .xns-modal-help { color:#cbd5e1; background:rgba(59,130,246,.14); border-bottom-color:rgba(96,165,250,.25); }
       .dark-layout .xns-modal-help kbd { color:#e5e7eb; background:#18202b; border-color:rgba(148,163,184,.35); }
+      .dark-layout .xns-one-time-prompt { color:#cbd5e1; background:#111827; border-bottom-color:rgba(96,165,250,.25); }
+      .dark-layout .xns-one-time-prompt button { color:#93c5fd; background:#18202b; border-color:rgba(96,165,250,.45); }
       .dark-layout .xns-modal-toolbar { color:#9ca3af; background:#111827; }
       .dark-layout .xns-modal-eyebrow, .dark-layout .xns-modal-toolbar-label { color:#9ca3af; }
       .dark-layout .xns-modal-mode { color:#93c5fd; border-color:rgba(96,165,250,.45); background:rgba(59,130,246,.18); }
