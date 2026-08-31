@@ -30,6 +30,7 @@ const ANSI_COLORS = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan
 const state = {
   post: null,
   modal: null,
+  settingsPanel: null,
   lightbox: null,
   mode: DEFAULT_MODE,
 };

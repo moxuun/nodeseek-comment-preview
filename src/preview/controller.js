@@ -25,6 +25,7 @@ function createPreviewController({
   createCloseButton,
   createRefreshButton,
   createMoreMenu,
+  openSettings,
   openPreviewComposer,
 }) {
   function createPreviewHelpPanel() {
@@ -481,6 +482,7 @@ function createPreviewController({
       onCopyLink: ({ setLabel }) => {
         void copyPreviewLink(url, setLabel).catch(() => setLabel('复制失败'));
       },
+      onSettings: () => openSettings(),
     });
     const helpButton = createElement('button', 'xns-modal-tool xns-modal-help-toggle', '?');
     helpButton.type = 'button';
@@ -543,6 +545,7 @@ const xnsPreviewController = createPreviewController({
   createCloseButton,
   createRefreshButton,
   createMoreMenu,
+  openSettings,
   openPreviewComposer: (...args) => openPreviewComposer(...args),
 });
 const buildPreviewContent = (...args) => xnsPreviewController.buildPreviewContent(...args);

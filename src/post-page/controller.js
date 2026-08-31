@@ -26,6 +26,9 @@ function createPostPageController({
   addRemoteNote,
   installPreviewFeatures,
   formatPageStatus,
+  openSettings,
+  updateSettings,
+  getMaxPage,
 }) {
   return class PostPageController {
     constructor(info) {
@@ -92,6 +95,12 @@ function createPostPageController({
       });
       toolbar.appendChild(modeSwitch);
       toolbar.appendChild(createElement('span', 'xns-toolbar-status'));
+      const settings = createElement('button', 'xns-post-settings', '设置');
+      settings.type = 'button';
+      settings.title = '打开预览设置';
+      settings.setAttribute('aria-label', '打开预览设置');
+      settings.addEventListener('click', openSettings);
+      toolbar.appendChild(settings);
       const refresh = createElement('button', 'xns-post-refresh', '刷新');
       refresh.type = 'button';
       refresh.title = '重新读取当前页和评论分页';
@@ -180,7 +189,7 @@ function createPostPageController({
       this.failedPages = [];
       const discovered = getPageNumbers(documentObj, this.info.postId);
       this.totalPages = discovered.size ? Math.max(...discovered, this.info.page) : this.info.page;
-      this.truncated = this.totalPages > maxPage;
+      this.truncated = this.totalPages > getMaxPage();
       this.hasRemotePages = this.totalPages > 1 || this.info.page > 1;
     }
 
@@ -293,6 +302,7 @@ function createPostPageController({
         else this.render();
       }
       else this.reloadPages();
+      updateSettings({ mode });
     }
 
     showLoading(text) {
@@ -421,4 +431,7 @@ const PostEnhancer = createPostPageController({
   addRemoteNote,
   installPreviewFeatures,
   formatPageStatus,
+  openSettings,
+  updateSettings,
+  getMaxPage,
 });

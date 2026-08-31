@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.29
+// @version      0.5.30
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -46,25 +46,113 @@ const ANSI_COLORS = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan
 const state = {
   post: null,
   modal: null,
+  settingsPanel: null,
   lightbox: null,
   mode: DEFAULT_MODE,
 };
 
 
+// 用户偏好存储；只保存界面设置，不保存帖子内容、登录信息或写操作数据。
+function createPreferences({ windowObj, documentObj, state, storageKey, defaultMode, maxPage }) {
+  const defaults = Object.freeze({
+    mode: defaultMode,
+    maxPages: maxPage,
+    density: 'comfortable',
+    prompts: true,
+    theme: 'auto',
+  });
+  let values = { ...defaults };
+  let ownsDarkClass = false;
+
+  function normalize(raw = {}) {
+    const mode = raw.mode === 'original' ? 'original' : defaultMode;
+    const requestedPages = Number(raw.maxPages);
+    const maxPages = [10, 20, 30, maxPage].includes(requestedPages) ? requestedPages : maxPage;
+    const density = raw.density === 'compact' ? 'compact' : 'comfortable';
+    const theme = raw.theme === 'dark' ? 'dark' : 'auto';
+    return { mode, maxPages, density, prompts: raw.prompts !== false, theme };
+  }
+
+  function read() {
+    try {
+      const raw = JSON.parse(windowObj.localStorage?.getItem(storageKey) || '{}');
+      return normalize(raw);
+    } catch {
+      return { ...defaults };
+    }
+  }
+
+  function apply() {
+    const root = documentObj.documentElement;
+    if (!root) return;
+    root.classList.toggle('xns-density-compact', values.density === 'compact');
+    if (values.theme === 'dark') {
+      if (!root.classList.contains('dark-layout')) {
+        root.classList.add('dark-layout');
+        ownsDarkClass = true;
+      }
+    } else if (ownsDarkClass) {
+      root.classList.remove('dark-layout');
+      ownsDarkClass = false;
+    }
+  }
+
+  function save() {
+    try { windowObj.localStorage?.setItem(storageKey, JSON.stringify(values)); } catch { /* 存储被禁用时仍允许本次使用。 */ }
+  }
+
+  function update(patch = {}) {
+    values = normalize({ ...values, ...patch });
+    state.mode = values.mode;
+    save();
+    apply();
+    return { ...values };
+  }
+
+  values = read();
+  state.mode = values.mode;
+  apply();
+
+  return Object.freeze({
+    get: () => ({ ...values }),
+    update,
+    reset: () => update(defaults),
+    getMaxPage: () => values.maxPages,
+    apply,
+  });
+}
+
+const xnsPreferences = createPreferences({
+  windowObj: window,
+  documentObj: document,
+  state,
+  storageKey: 'xns-comment-preview-settings',
+  defaultMode: DEFAULT_MODE,
+  maxPage: MAX_PAGE,
+});
+const getSettings = (...args) => xnsPreferences.get(...args);
+const updateSettings = (...args) => xnsPreferences.update(...args);
+const resetSettings = (...args) => xnsPreferences.reset(...args);
+const getMaxPage = (...args) => xnsPreferences.getMaxPage(...args);
+const applySettings = (...args) => xnsPreferences.apply(...args);
+
+
 // 分页状态文案与语义统一；预览页和帖子页共享同一套用户可见反馈。
-function createPageStatusFormatter({ maxPage }) {
+function createPageStatusFormatter({ maxPage, getPageLimit }) {
   function format(options = {}) {
+    const configuredLimit = Number(options.pageLimit) || Number(getPageLimit?.()) || maxPage;
+    const pageLimit = Math.min(maxPage, Math.max(1, configuredLimit));
     const totalPages = Number(options.totalPages) || 0;
     const loadedPages = Math.max(0, Number(options.loadedPages) || 0);
     const failedCount = Array.isArray(options.failedPages) ? options.failedPages.length : 0;
-    const targetPages = Math.min(maxPage, totalPages || loadedPages);
+    const targetPages = Math.min(pageLimit, totalPages || loadedPages);
     const pageProgress = targetPages ? `已读取 ${loadedPages}/${targetPages} 页` : '';
     const stage = options.loading
       ? (pageProgress ? `正在读取其他分页 · ${pageProgress}` : '正在读取其他分页…')
       : pageProgress;
     const failed = failedCount ? `${failedCount} 页读取失败` : '';
     const truncated = options.truncated
-      ? `帖子共 ${totalPages || maxPage} 页，仅读取前 ${maxPage} 页，后面的内容没有显示`
+      ? `帖子共 ${totalPages || pageLimit} 页，仅读取前 ${pageLimit} 页，后面的内容没有显示`
       : '';
     const detail = [stage, failed, truncated].filter(Boolean).join(' · ');
     const commentCount = Number.isFinite(options.commentCount) ? `${options.commentCount} 条回复` : '';
@@ -85,7 +173,7 @@ function createPageStatusFormatter({ maxPage }) {
   return Object.freeze({ format });
 }
 
-const xnsPageStatusFormatter = createPageStatusFormatter({ maxPage: MAX_PAGE });
+const xnsPageStatusFormatter = createPageStatusFormatter({ maxPage: MAX_PAGE, getPageLimit });
 const formatPageStatus = (...args) => xnsPageStatusFormatter.format(...args);
 
 
@@ -188,6 +276,122 @@ const getCommentId = (...args) => xnsDomTools.getCommentId(...args);
 const getAuthorName = (...args) => xnsDomTools.getAuthorName(...args);
 const getPostContent = (...args) => xnsDomTools.getPostContent(...args);
 const getSafeUrlAttribute = (...args) => xnsDomTools.getSafeUrlAttribute(...args);
+
+
+// 设置中心 UI；只管理界面偏好，不提供自动写操作开关。
+function createSettingsUi({ windowObj, documentObj, state, createElement, getSettings, updateSettings, resetSettings }) {
+  function closeSettings() {
+    state.settingsPanel?.overlay?.remove();
+    state.settingsPanel = null;
+  }
+
+  function createField(labelText, control, note = '') {
+    const field = createElement('label', 'xns-settings-field');
+    field.appendChild(createElement('span', 'xns-settings-label', labelText));
+    field.appendChild(control);
+    if (note) field.appendChild(createElement('small', 'xns-settings-note', note));
+    return field;
+  }
+
+  function createSelect(options, value) {
+    const select = documentObj.createElement('select');
+    options.forEach(([optionValue, label]) => {
+      const option = documentObj.createElement('option');
+      option.value = optionValue;
+      option.textContent = label;
+      option.selected = optionValue === String(value);
+      select.appendChild(option);
+    });
+    return select;
+  }
+
+  function openSettings() {
+    closeSettings();
+    const values = getSettings();
+    const overlay = createElement('div', 'xns-settings-overlay');
+    overlay.tabIndex = -1;
+    overlay.addEventListener('click', (event) => { if (event.target === overlay) closeSettings(); });
+    const dialog = createElement('section', 'xns-settings-panel');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'xns-settings-title');
+    const header = createElement('header', 'xns-settings-header');
+    const title = createElement('h2', '', '预览设置');
+    title.id = 'xns-settings-title';
+    const close = createElement('button', 'xns-settings-close', '×');
+    close.type = 'button';
+    close.title = '关闭设置';
+    close.setAttribute('aria-label', '关闭设置');
+    close.addEventListener('click', closeSettings);
+    header.append(title, close);
+    const form = createElement('div', 'xns-settings-form');
+    const layout = createSelect([['thread', '楼中楼'], ['original', '原版评论']], values.mode);
+    const maxPages = createSelect([['10', '10 页'], ['20', '20 页'], ['30', '30 页'], ['50', '50 页']], values.maxPages);
+    const density = createSelect([['comfortable', '舒适'], ['compact', '紧凑']], values.density);
+    const theme = createSelect([['auto', '跟随 NodeSeek'], ['dark', '深色']], values.theme);
+    const prompts = documentObj.createElement('input');
+    prompts.type = 'checkbox';
+    prompts.checked = values.prompts;
+    const promptField = createElement('label', 'xns-settings-check');
+    promptField.append(prompts, createElement('span', '', '显示一次性操作提示'));
+    form.append(
+      createField('默认评论布局', layout, '只影响帖子详情页，切换会立即生效。'),
+      createField('自动读取页数', maxPages, '最多 50 页；修改后在下次刷新或打开帖子时生效。'),
+      createField('评论密度', density),
+      createField('主题', theme),
+      promptField,
+    );
+    const footer = createElement('footer', 'xns-settings-actions');
+    const reset = createElement('button', '', '恢复默认');
+    reset.type = 'button';
+    const done = createElement('button', 'xns-settings-primary', '完成');
+    done.type = 'button';
+    done.addEventListener('click', closeSettings);
+    footer.append(reset, done);
+    dialog.append(header, form, footer);
+    overlay.appendChild(dialog);
+    documentObj.body.appendChild(overlay);
+    state.settingsPanel = { overlay, close: closeSettings };
+
+    const apply = () => {
+      const previousMode = state.mode;
+      const next = updateSettings({
+        mode: layout.value,
+        maxPages: Number(maxPages.value),
+        density: density.value,
+        theme: theme.value,
+        prompts: prompts.checked,
+      });
+      if (next.mode !== previousMode) state.post?.setMode?.(next.mode);
+    };
+    [layout, maxPages, density, theme].forEach((control) => control.addEventListener('change', apply));
+    prompts.addEventListener('change', apply);
+    reset.addEventListener('click', () => {
+      const next = resetSettings();
+      layout.value = next.mode;
+      maxPages.value = String(next.maxPages);
+      density.value = next.density;
+      theme.value = next.theme;
+      prompts.checked = next.prompts;
+      if (next.mode !== state.mode) state.post?.setMode?.(next.mode);
+    });
+    dialog.querySelector('select, input, button')?.focus();
+  }
+
+  return Object.freeze({ openSettings, closeSettings });
+}
+
+const xnsSettingsUi = createSettingsUi({
+  windowObj: window,
+  documentObj: document,
+  state,
+  createElement,
+  getSettings,
+  updateSettings,
+  resetSettings,
+});
+const openSettings = (...args) => xnsSettingsUi.openSettings(...args);
+const closeSettings = (...args) => xnsSettingsUi.closeSettings(...args);
 
 
 // NodeSeek 帖子 URL 规则与同源请求边界。
@@ -1193,7 +1397,7 @@ function createCommentVirtualizer({
 
 // 帖子分页读取服务。
 // 只负责“读哪些页、如何并发、如何合并”，不创建 DOM，也不决定如何展示失败。
-function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid }) {
+function createPageLoader({ windowObj, maxPage, getPageLimit, concurrency, requestGapMs, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid }) {
   function createRequestGate(gapMs) {
     const cooldownGap = Number.isFinite(Number(gapMs)) ? Math.max(0, Number(gapMs)) : 0;
     let currentGap = 0;
@@ -1235,6 +1439,7 @@ function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetch
   }
 
   async function fetchPostPages(info, firstDocument, options = {}) {
+    const pageLimit = Math.min(maxPage, Math.max(1, Number(options.pageLimit) || Number(getPageLimit?.()) || maxPage));
     const noStore = options.noStore !== false;
     const retainDocuments = options.retainDocuments !== false;
     const pageDocs = retainDocuments ? new Map([[info.page, firstDocument]]) : null;
@@ -1243,12 +1448,12 @@ function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetch
     const pages = new Set([info.page]);
     const discovered = getPageNumbers(firstDocument, info.postId);
     const totalPages = discovered.size ? Math.max(...discovered, info.page) : info.page;
-    const truncated = totalPages > maxPage;
+    const truncated = totalPages > pageLimit;
 
     discovered.forEach((page) => {
-      if (page <= maxPage) pages.add(page);
+      if (page <= pageLimit) pages.add(page);
     });
-    const maxSeed = truncated ? maxPage : Math.min(maxPage, Math.max(...pages));
+    const maxSeed = truncated ? pageLimit : Math.min(pageLimit, Math.max(...pages));
     for (let page = 1; page <= maxSeed; page += 1) pages.add(page);
     pages.delete(info.page);
     const progressState = () => ({
@@ -1279,7 +1484,7 @@ function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetch
           if (pageDocs) pageDocs.set(page, parsed);
           options.onPageLoaded?.(page, parsed, progressState());
           getPageNumbers(parsed, info.postId).forEach((foundPage) => {
-            if (foundPage <= maxPage && !pages.has(foundPage) && foundPage !== info.page) {
+            if (foundPage <= pageLimit && !pages.has(foundPage) && foundPage !== info.page) {
               pages.add(foundPage);
               pending.push(foundPage);
             }
@@ -1342,6 +1547,7 @@ function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetch
 const xnsPageLoader = createPageLoader({
   windowObj: window,
   maxPage: MAX_PAGE,
+  getPageLimit,
   concurrency: PAGE_CONCURRENCY,
   requestGapMs: PAGE_REQUEST_GAP,
   fetchHtml,
@@ -2560,7 +2766,7 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     return button;
   }
 
-  function createMoreMenu({ onHelp, onCopyLink }) {
+  function createMoreMenu({ onHelp, onCopyLink, onSettings }) {
     const wrapper = createElement('div', 'xns-modal-more');
     const toggle = createElement('button', 'xns-modal-tool xns-modal-more-toggle', '更多');
     toggle.type = 'button';
@@ -2577,7 +2783,10 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     const copy = createElement('button', 'xns-modal-more-item', '复制原帖链接');
     copy.type = 'button';
     copy.setAttribute('role', 'menuitem');
-    menu.append(help, copy);
+    const settings = createElement('button', 'xns-modal-more-item', '设置');
+    settings.type = 'button';
+    settings.setAttribute('role', 'menuitem');
+    menu.append(help, copy, settings);
     wrapper.append(toggle, menu);
 
     let open = false;
@@ -2601,6 +2810,10 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     copy.addEventListener('click', () => {
       close();
       onCopyLink?.({ setLabel: (label) => { copy.textContent = label; } });
+    });
+    settings.addEventListener('click', () => {
+      close();
+      onSettings?.();
     });
     documentObj.addEventListener('click', onDocumentClick, true);
 
@@ -3067,6 +3280,7 @@ function createPreviewController({
   createCloseButton,
   createRefreshButton,
   createMoreMenu,
+  openSettings,
   openPreviewComposer,
 }) {
   function createPreviewHelpPanel() {
@@ -3523,6 +3737,7 @@ function createPreviewController({
       onCopyLink: ({ setLabel }) => {
         void copyPreviewLink(url, setLabel).catch(() => setLabel('复制失败'));
       },
+      onSettings: () => openSettings(),
     });
     const helpButton = createElement('button', 'xns-modal-tool xns-modal-help-toggle', '?');
     helpButton.type = 'button';
@@ -3585,6 +3800,7 @@ const xnsPreviewController = createPreviewController({
   createCloseButton,
   createRefreshButton,
   createMoreMenu,
+  openSettings,
   openPreviewComposer: (...args) => openPreviewComposer(...args),
 });
 const buildPreviewContent = (...args) => xnsPreviewController.buildPreviewContent(...args);
@@ -3617,13 +3833,18 @@ function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPr
       return;
     }
     const inEditor = event.target.closest?.('textarea, input, [contenteditable="true"]');
-    if (event.key === '?' && state.modal && !inEditor) {
+    if (event.key === '?' && state.modal && !state.settingsPanel && !inEditor) {
       event.preventDefault();
       state.modal.toggleHelp?.();
       return;
     }
     if (event.key !== 'Escape') return;
     if (inEditor) return;
+    if (state.settingsPanel) {
+      event.preventDefault();
+      state.settingsPanel.close?.();
+      return;
+    }
     if (state.lightbox) {
       event.preventDefault();
       closeImageLightbox();
@@ -3676,6 +3897,9 @@ function createPostPageController({
   addRemoteNote,
   installPreviewFeatures,
   formatPageStatus,
+  openSettings,
+  updateSettings,
+  getMaxPage,
 }) {
   return class PostPageController {
     constructor(info) {
@@ -3742,6 +3966,12 @@ function createPostPageController({
       });
       toolbar.appendChild(modeSwitch);
       toolbar.appendChild(createElement('span', 'xns-toolbar-status'));
+      const settings = createElement('button', 'xns-post-settings', '设置');
+      settings.type = 'button';
+      settings.title = '打开预览设置';
+      settings.setAttribute('aria-label', '打开预览设置');
+      settings.addEventListener('click', openSettings);
+      toolbar.appendChild(settings);
       const refresh = createElement('button', 'xns-post-refresh', '刷新');
       refresh.type = 'button';
       refresh.title = '重新读取当前页和评论分页';
@@ -3830,7 +4060,7 @@ function createPostPageController({
       this.failedPages = [];
       const discovered = getPageNumbers(documentObj, this.info.postId);
       this.totalPages = discovered.size ? Math.max(...discovered, this.info.page) : this.info.page;
-      this.truncated = this.totalPages > maxPage;
+      this.truncated = this.totalPages > getMaxPage();
       this.hasRemotePages = this.totalPages > 1 || this.info.page > 1;
     }
 
@@ -3943,6 +4173,7 @@ function createPostPageController({
         else this.render();
       }
       else this.reloadPages();
+      updateSettings({ mode });
     }
 
     showLoading(text) {
@@ -4071,6 +4302,9 @@ const PostEnhancer = createPostPageController({
   addRemoteNote,
   installPreviewFeatures,
   formatPageStatus,
+  openSettings,
+  updateSettings,
+  getMaxPage,
 });
 
 
@@ -4090,6 +4324,7 @@ function installStyle() {
       .xns-post-toolbar button { padding:5px 10px; border:1px solid rgba(100,116,139,.28); border-radius:6px; color:inherit; background:transparent; cursor:pointer; font:inherit; }
       .xns-post-toolbar button:hover, .xns-post-toolbar button:focus-visible { border-color:#3b82f6; outline:none; }
       .xns-post-toolbar button[aria-pressed="true"] { color:#2563eb; border-color:#3b82f6; background:rgba(59,130,246,.1); }
+      .xns-post-settings { margin-left:0 !important; }
       .xns-post-toolbar-label { color:#64748b; font-size:12px; }
       .xns-post-mode-switch { display:inline-flex; padding:2px; border:1px solid rgba(100,116,139,.25); border-radius:6px; background:rgba(148,163,184,.08); }
       .xns-post-mode-switch button { padding:4px 8px; border:0; border-radius:4px; background:transparent; }
@@ -4160,6 +4395,27 @@ function installStyle() {
       .xns-modal-help-item { display:inline-flex; align-items:center; gap:5px; }
       .xns-modal-help kbd { padding:1px 5px; border:1px solid rgba(100,116,139,.28); border-bottom-width:2px; border-radius:4px; color:#334155; background:#fff; font:11px/1.3 ui-monospace,SFMono-Regular,Consolas,monospace; }
       .xns-modal-body { overflow:auto; padding:clamp(10px,2vw,18px); }
+      .xns-settings-overlay { position:fixed; z-index:2147483600; inset:0; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(15,23,42,.5); }
+      .xns-settings-panel { box-sizing:border-box; width:min(500px,100%); max-height:calc(100vh - 36px); overflow:auto; padding:16px; border:1px solid rgba(100,116,139,.25); border-radius:10px; color:#1f2937; background:#fff; box-shadow:0 18px 55px rgba(15,23,42,.3); font:13px/1.4 system-ui,sans-serif; }
+      .xns-settings-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+      .xns-settings-header h2 { margin:0; font-size:18px; line-height:1.3; }
+      .xns-settings-close { padding:2px 8px; border:1px solid rgba(100,116,139,.25); border-radius:6px; color:inherit; background:#f8fafc; cursor:pointer; font-size:20px; line-height:1; }
+      .xns-settings-close:hover, .xns-settings-close:focus-visible { border-color:#3b82f6; color:#2563eb; outline:none; }
+      .xns-settings-form { display:grid; gap:11px; }
+      .xns-settings-field { display:grid; grid-template-columns:minmax(110px,1fr) minmax(150px,1.5fr); align-items:center; gap:4px 12px; }
+      .xns-settings-label { color:#475569; font-weight:600; }
+      .xns-settings-field select { min-width:0; padding:5px 7px; border:1px solid rgba(100,116,139,.3); border-radius:6px; color:inherit; background:#fff; font:inherit; }
+      .xns-settings-field select:focus-visible, .xns-settings-check input:focus-visible { outline:2px solid rgba(59,130,246,.45); outline-offset:1px; }
+      .xns-settings-note { grid-column:2; color:#64748b; font-size:11px; }
+      .xns-settings-check { display:flex; align-items:center; gap:8px; color:#475569; }
+      .xns-settings-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; padding-top:12px; border-top:1px solid rgba(100,116,139,.16); }
+      .xns-settings-actions button { padding:6px 11px; border:1px solid rgba(100,116,139,.3); border-radius:6px; color:inherit; background:#fff; cursor:pointer; font:inherit; }
+      .xns-settings-actions button:hover, .xns-settings-actions button:focus-visible { border-color:#3b82f6; color:#2563eb; outline:none; }
+      .xns-settings-actions .xns-settings-primary { color:#fff; border-color:#2563eb; background:#2563eb; }
+      .xns-settings-actions .xns-settings-primary:hover, .xns-settings-actions .xns-settings-primary:focus-visible { color:#fff; background:#1d4ed8; }
+      .xns-density-compact .xns-preview-thread > .content-item { padding-top:5px; padding-bottom:4px; }
+      .xns-density-compact .xns-preview-thread .xns-comment-child { padding-top:4px !important; padding-bottom:3px !important; }
+      .xns-density-compact .xns-post-toolbar { padding:5px; }
       .xns-modal-body img { max-width:100%; height:auto; }
       .xns-preview-content { font-size:14px; line-height:1.45; }
       .xns-preview-content pre { box-sizing:border-box; max-width:100%; overflow:auto; white-space:pre; }
@@ -4258,6 +4514,10 @@ function installStyle() {
       .xns-lightbox-open { left:10px; bottom:10px; }
       .xns-lightbox-close:hover, .xns-lightbox-open:hover, .xns-lightbox-close:focus-visible, .xns-lightbox-open:focus-visible { background:rgba(15,23,42,.9); outline:none; }
       .dark-layout .xns-modal { color:#e5e7eb; background:#18202b; }
+      .dark-layout .xns-settings-panel { color:#e5e7eb; background:#18202b; border-color:rgba(148,163,184,.35); }
+      .dark-layout .xns-settings-close, .dark-layout .xns-settings-actions button, .dark-layout .xns-settings-field select { color:#e5e7eb; background:#111827; border-color:rgba(148,163,184,.35); }
+      .dark-layout .xns-settings-label, .dark-layout .xns-settings-check { color:#cbd5e1; }
+      .dark-layout .xns-settings-note { color:#9ca3af; }
       .dark-layout .xns-modal-header a, .dark-layout .xns-modal-header .xns-modal-reply, .dark-layout .xns-modal-close, .dark-layout .xns-modal-tool, .dark-layout .xns-preview-post, .dark-layout .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
       .dark-layout .xns-modal-meta { color:#9ca3af; }
       .dark-layout .xns-modal-meta-label { color:#6b7280; }

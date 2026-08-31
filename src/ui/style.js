@@ -14,6 +14,7 @@ function installStyle() {
       .xns-post-toolbar button { padding:5px 10px; border:1px solid rgba(100,116,139,.28); border-radius:6px; color:inherit; background:transparent; cursor:pointer; font:inherit; }
       .xns-post-toolbar button:hover, .xns-post-toolbar button:focus-visible { border-color:#3b82f6; outline:none; }
       .xns-post-toolbar button[aria-pressed="true"] { color:#2563eb; border-color:#3b82f6; background:rgba(59,130,246,.1); }
+      .xns-post-settings { margin-left:0 !important; }
       .xns-post-toolbar-label { color:#64748b; font-size:12px; }
       .xns-post-mode-switch { display:inline-flex; padding:2px; border:1px solid rgba(100,116,139,.25); border-radius:6px; background:rgba(148,163,184,.08); }
       .xns-post-mode-switch button { padding:4px 8px; border:0; border-radius:4px; background:transparent; }
@@ -84,6 +85,27 @@ function installStyle() {
       .xns-modal-help-item { display:inline-flex; align-items:center; gap:5px; }
       .xns-modal-help kbd { padding:1px 5px; border:1px solid rgba(100,116,139,.28); border-bottom-width:2px; border-radius:4px; color:#334155; background:#fff; font:11px/1.3 ui-monospace,SFMono-Regular,Consolas,monospace; }
       .xns-modal-body { overflow:auto; padding:clamp(10px,2vw,18px); }
+      .xns-settings-overlay { position:fixed; z-index:2147483600; inset:0; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(15,23,42,.5); }
+      .xns-settings-panel { box-sizing:border-box; width:min(500px,100%); max-height:calc(100vh - 36px); overflow:auto; padding:16px; border:1px solid rgba(100,116,139,.25); border-radius:10px; color:#1f2937; background:#fff; box-shadow:0 18px 55px rgba(15,23,42,.3); font:13px/1.4 system-ui,sans-serif; }
+      .xns-settings-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+      .xns-settings-header h2 { margin:0; font-size:18px; line-height:1.3; }
+      .xns-settings-close { padding:2px 8px; border:1px solid rgba(100,116,139,.25); border-radius:6px; color:inherit; background:#f8fafc; cursor:pointer; font-size:20px; line-height:1; }
+      .xns-settings-close:hover, .xns-settings-close:focus-visible { border-color:#3b82f6; color:#2563eb; outline:none; }
+      .xns-settings-form { display:grid; gap:11px; }
+      .xns-settings-field { display:grid; grid-template-columns:minmax(110px,1fr) minmax(150px,1.5fr); align-items:center; gap:4px 12px; }
+      .xns-settings-label { color:#475569; font-weight:600; }
+      .xns-settings-field select { min-width:0; padding:5px 7px; border:1px solid rgba(100,116,139,.3); border-radius:6px; color:inherit; background:#fff; font:inherit; }
+      .xns-settings-field select:focus-visible, .xns-settings-check input:focus-visible { outline:2px solid rgba(59,130,246,.45); outline-offset:1px; }
+      .xns-settings-note { grid-column:2; color:#64748b; font-size:11px; }
+      .xns-settings-check { display:flex; align-items:center; gap:8px; color:#475569; }
+      .xns-settings-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; padding-top:12px; border-top:1px solid rgba(100,116,139,.16); }
+      .xns-settings-actions button { padding:6px 11px; border:1px solid rgba(100,116,139,.3); border-radius:6px; color:inherit; background:#fff; cursor:pointer; font:inherit; }
+      .xns-settings-actions button:hover, .xns-settings-actions button:focus-visible { border-color:#3b82f6; color:#2563eb; outline:none; }
+      .xns-settings-actions .xns-settings-primary { color:#fff; border-color:#2563eb; background:#2563eb; }
+      .xns-settings-actions .xns-settings-primary:hover, .xns-settings-actions .xns-settings-primary:focus-visible { color:#fff; background:#1d4ed8; }
+      .xns-density-compact .xns-preview-thread > .content-item { padding-top:5px; padding-bottom:4px; }
+      .xns-density-compact .xns-preview-thread .xns-comment-child { padding-top:4px !important; padding-bottom:3px !important; }
+      .xns-density-compact .xns-post-toolbar { padding:5px; }
       .xns-modal-body img { max-width:100%; height:auto; }
       .xns-preview-content { font-size:14px; line-height:1.45; }
       .xns-preview-content pre { box-sizing:border-box; max-width:100%; overflow:auto; white-space:pre; }
@@ -182,6 +204,10 @@ function installStyle() {
       .xns-lightbox-open { left:10px; bottom:10px; }
       .xns-lightbox-close:hover, .xns-lightbox-open:hover, .xns-lightbox-close:focus-visible, .xns-lightbox-open:focus-visible { background:rgba(15,23,42,.9); outline:none; }
       .dark-layout .xns-modal { color:#e5e7eb; background:#18202b; }
+      .dark-layout .xns-settings-panel { color:#e5e7eb; background:#18202b; border-color:rgba(148,163,184,.35); }
+      .dark-layout .xns-settings-close, .dark-layout .xns-settings-actions button, .dark-layout .xns-settings-field select { color:#e5e7eb; background:#111827; border-color:rgba(148,163,184,.35); }
+      .dark-layout .xns-settings-label, .dark-layout .xns-settings-check { color:#cbd5e1; }
+      .dark-layout .xns-settings-note { color:#9ca3af; }
       .dark-layout .xns-modal-header a, .dark-layout .xns-modal-header .xns-modal-reply, .dark-layout .xns-modal-close, .dark-layout .xns-modal-tool, .dark-layout .xns-preview-post, .dark-layout .xns-preview-thread > .content-item { color:#e5e7eb; background:#111827; }
       .dark-layout .xns-modal-meta { color:#9ca3af; }
       .dark-layout .xns-modal-meta-label { color:#6b7280; }

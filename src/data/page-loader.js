@@ -1,6 +1,6 @@
 // 帖子分页读取服务。
 // 只负责“读哪些页、如何并发、如何合并”，不创建 DOM，也不决定如何展示失败。
-function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid }) {
+function createPageLoader({ windowObj, maxPage, getPageLimit, concurrency, requestGapMs, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid }) {
   function createRequestGate(gapMs) {
     const cooldownGap = Number.isFinite(Number(gapMs)) ? Math.max(0, Number(gapMs)) : 0;
     let currentGap = 0;
@@ -42,6 +42,7 @@ function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetch
   }
 
   async function fetchPostPages(info, firstDocument, options = {}) {
+    const pageLimit = Math.min(maxPage, Math.max(1, Number(options.pageLimit) || Number(getPageLimit?.()) || maxPage));
     const noStore = options.noStore !== false;
     const retainDocuments = options.retainDocuments !== false;
     const pageDocs = retainDocuments ? new Map([[info.page, firstDocument]]) : null;
@@ -50,12 +51,12 @@ function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetch
     const pages = new Set([info.page]);
     const discovered = getPageNumbers(firstDocument, info.postId);
     const totalPages = discovered.size ? Math.max(...discovered, info.page) : info.page;
-    const truncated = totalPages > maxPage;
+    const truncated = totalPages > pageLimit;
 
     discovered.forEach((page) => {
-      if (page <= maxPage) pages.add(page);
+      if (page <= pageLimit) pages.add(page);
     });
-    const maxSeed = truncated ? maxPage : Math.min(maxPage, Math.max(...pages));
+    const maxSeed = truncated ? pageLimit : Math.min(pageLimit, Math.max(...pages));
     for (let page = 1; page <= maxSeed; page += 1) pages.add(page);
     pages.delete(info.page);
     const progressState = () => ({
@@ -86,7 +87,7 @@ function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetch
           if (pageDocs) pageDocs.set(page, parsed);
           options.onPageLoaded?.(page, parsed, progressState());
           getPageNumbers(parsed, info.postId).forEach((foundPage) => {
-            if (foundPage <= maxPage && !pages.has(foundPage) && foundPage !== info.page) {
+            if (foundPage <= pageLimit && !pages.has(foundPage) && foundPage !== info.page) {
               pages.add(foundPage);
               pending.push(foundPage);
             }
@@ -149,6 +150,7 @@ function createPageLoader({ windowObj, maxPage, concurrency, requestGapMs, fetch
 const xnsPageLoader = createPageLoader({
   windowObj: window,
   maxPage: MAX_PAGE,
+  getPageLimit,
   concurrency: PAGE_CONCURRENCY,
   requestGapMs: PAGE_REQUEST_GAP,
   fetchHtml,

@@ -36,7 +36,7 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     return button;
   }
 
-  function createMoreMenu({ onHelp, onCopyLink }) {
+  function createMoreMenu({ onHelp, onCopyLink, onSettings }) {
     const wrapper = createElement('div', 'xns-modal-more');
     const toggle = createElement('button', 'xns-modal-tool xns-modal-more-toggle', '更多');
     toggle.type = 'button';
@@ -53,7 +53,10 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     const copy = createElement('button', 'xns-modal-more-item', '复制原帖链接');
     copy.type = 'button';
     copy.setAttribute('role', 'menuitem');
-    menu.append(help, copy);
+    const settings = createElement('button', 'xns-modal-more-item', '设置');
+    settings.type = 'button';
+    settings.setAttribute('role', 'menuitem');
+    menu.append(help, copy, settings);
     wrapper.append(toggle, menu);
 
     let open = false;
@@ -77,6 +80,10 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     copy.addEventListener('click', () => {
       close();
       onCopyLink?.({ setLabel: (label) => { copy.textContent = label; } });
+    });
+    settings.addEventListener('click', () => {
+      close();
+      onSettings?.();
     });
     documentObj.addEventListener('click', onDocumentClick, true);
 
