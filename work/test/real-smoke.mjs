@@ -30,7 +30,19 @@ if (!cdpUrl) {
       : { browserURL: cdpUrl };
     browser = await puppeteer.connect(connectOptions);
     const pages = await browser.pages();
-    const page = pages.find((candidate) => candidate.url().startsWith(targetOrigin));
+    const candidates = pages.filter((candidate) => candidate.url().startsWith(targetOrigin));
+    let page = null;
+    for (const candidate of candidates) {
+      try {
+        if (await candidate.evaluate(() => Boolean(document.querySelector('#xns-style')))) {
+          page = candidate;
+          break;
+        }
+      } catch {
+        // 页面可能正在导航；继续检查其他已打开的 NodeSeek 标签页。
+      }
+    }
+    page ||= candidates[0];
     if (!page) {
       throw new Error(`没有找到已打开的 NodeSeek 标签页：${targetOrigin}`);
     }
@@ -67,7 +79,12 @@ if (!cdpUrl) {
       };
     });
 
-    console.log(JSON.stringify({ mode: interactive ? 'interactive-read-only' : 'structural-read-only', baseline }, null, 2));
+    console.log(JSON.stringify({
+      mode: interactive ? 'interactive-read-only' : 'structural-read-only',
+      selectedPage: page.url(),
+      candidateCount: candidates.length,
+      baseline,
+    }, null, 2));
     if (baseline.looksLikeChallenge) throw new Error('页面仍停留在 Cloudflare/浏览器挑战页');
     if (!baseline.hasXnsStyle) throw new Error('未发现 #xns-style，当前 NodeSeek 标签页可能没有加载最新版用户脚本');
 
