@@ -572,6 +572,9 @@ const xnsPreviewController = createPreviewController({
   createRefreshButton,
   createMoreMenu,
   openSettings,
+  getSettings,
+  hasSeenPrompt,
+  markPromptSeen,
   openPreviewComposer: (...args) => openPreviewComposer(...args),
 });
 const buildPreviewContent = (...args) => xnsPreviewController.buildPreviewContent(...args);

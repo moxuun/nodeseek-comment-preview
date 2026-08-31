@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.35
+// @version      0.5.36
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -157,9 +157,9 @@ const markPromptSeen = (...args) => xnsPreferences.markPromptSeen(...args);
 
 
 // 分页状态文案与语义统一；预览页和帖子页共享同一套用户可见反馈。
-function createPageStatusFormatter({ maxPage, getPageLimit }) {
+function createPageStatusFormatter({ maxPage, getMaxPage }) {
   function format(options = {}) {
-    const configuredLimit = Number(options.pageLimit) || Number(getPageLimit?.()) || maxPage;
+    const configuredLimit = Number(options.pageLimit) || Number(getMaxPage?.()) || maxPage;
     const pageLimit = Math.min(maxPage, Math.max(1, configuredLimit));
     const totalPages = Number(options.totalPages) || 0;
     const loadedPages = Math.max(0, Number(options.loadedPages) || 0);
@@ -192,7 +192,7 @@ function createPageStatusFormatter({ maxPage, getPageLimit }) {
   return Object.freeze({ format });
 }
 
-const xnsPageStatusFormatter = createPageStatusFormatter({ maxPage: MAX_PAGE, getPageLimit });
+const xnsPageStatusFormatter = createPageStatusFormatter({ maxPage: MAX_PAGE, getMaxPage });
 const formatPageStatus = (...args) => xnsPageStatusFormatter.format(...args);
 
 
@@ -1561,7 +1561,7 @@ function createCommentVirtualizer({
 
 // 帖子分页读取服务。
 // 只负责“读哪些页、如何并发、如何合并”，不创建 DOM，也不决定如何展示失败。
-function createPageLoader({ windowObj, maxPage, getPageLimit, concurrency, requestGapMs, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid }) {
+function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, requestGapMs, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid }) {
   function createRequestGate(gapMs) {
     const cooldownGap = Number.isFinite(Number(gapMs)) ? Math.max(0, Number(gapMs)) : 0;
     let currentGap = 0;
@@ -1603,7 +1603,7 @@ function createPageLoader({ windowObj, maxPage, getPageLimit, concurrency, reque
   }
 
   async function fetchPostPages(info, firstDocument, options = {}) {
-    const pageLimit = Math.min(maxPage, Math.max(1, Number(options.pageLimit) || Number(getPageLimit?.()) || maxPage));
+    const pageLimit = Math.min(maxPage, Math.max(1, Number(options.pageLimit) || Number(getMaxPage?.()) || maxPage));
     const noStore = options.noStore !== false;
     const retainDocuments = options.retainDocuments !== false;
     const pageDocs = retainDocuments ? new Map([[info.page, firstDocument]]) : null;
@@ -1711,7 +1711,7 @@ function createPageLoader({ windowObj, maxPage, getPageLimit, concurrency, reque
 const xnsPageLoader = createPageLoader({
   windowObj: window,
   maxPage: MAX_PAGE,
-  getPageLimit,
+  getMaxPage,
   concurrency: PAGE_CONCURRENCY,
   requestGapMs: PAGE_REQUEST_GAP,
   fetchHtml,
@@ -4003,6 +4003,9 @@ const xnsPreviewController = createPreviewController({
   createRefreshButton,
   createMoreMenu,
   openSettings,
+  getSettings,
+  hasSeenPrompt,
+  markPromptSeen,
   openPreviewComposer: (...args) => openPreviewComposer(...args),
 });
 const buildPreviewContent = (...args) => xnsPreviewController.buildPreviewContent(...args);

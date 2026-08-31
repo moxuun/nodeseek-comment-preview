@@ -1,6 +1,6 @@
 // 帖子分页读取服务。
 // 只负责“读哪些页、如何并发、如何合并”，不创建 DOM，也不决定如何展示失败。
-function createPageLoader({ windowObj, maxPage, getPageLimit, concurrency, requestGapMs, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid }) {
+function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, requestGapMs, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid }) {
   function createRequestGate(gapMs) {
     const cooldownGap = Number.isFinite(Number(gapMs)) ? Math.max(0, Number(gapMs)) : 0;
     let currentGap = 0;
@@ -42,7 +42,7 @@ function createPageLoader({ windowObj, maxPage, getPageLimit, concurrency, reque
   }
 
   async function fetchPostPages(info, firstDocument, options = {}) {
-    const pageLimit = Math.min(maxPage, Math.max(1, Number(options.pageLimit) || Number(getPageLimit?.()) || maxPage));
+    const pageLimit = Math.min(maxPage, Math.max(1, Number(options.pageLimit) || Number(getMaxPage?.()) || maxPage));
     const noStore = options.noStore !== false;
     const retainDocuments = options.retainDocuments !== false;
     const pageDocs = retainDocuments ? new Map([[info.page, firstDocument]]) : null;
@@ -150,7 +150,7 @@ function createPageLoader({ windowObj, maxPage, getPageLimit, concurrency, reque
 const xnsPageLoader = createPageLoader({
   windowObj: window,
   maxPage: MAX_PAGE,
-  getPageLimit,
+  getMaxPage,
   concurrency: PAGE_CONCURRENCY,
   requestGapMs: PAGE_REQUEST_GAP,
   fetchHtml,

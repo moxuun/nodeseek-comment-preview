@@ -1,7 +1,7 @@
 // 分页状态文案与语义统一；预览页和帖子页共享同一套用户可见反馈。
-function createPageStatusFormatter({ maxPage, getPageLimit }) {
+function createPageStatusFormatter({ maxPage, getMaxPage }) {
   function format(options = {}) {
-    const configuredLimit = Number(options.pageLimit) || Number(getPageLimit?.()) || maxPage;
+    const configuredLimit = Number(options.pageLimit) || Number(getMaxPage?.()) || maxPage;
     const pageLimit = Math.min(maxPage, Math.max(1, configuredLimit));
     const totalPages = Number(options.totalPages) || 0;
     const loadedPages = Math.max(0, Number(options.loadedPages) || 0);
@@ -34,5 +34,5 @@ function createPageStatusFormatter({ maxPage, getPageLimit }) {
   return Object.freeze({ format });
 }
 
-const xnsPageStatusFormatter = createPageStatusFormatter({ maxPage: MAX_PAGE, getPageLimit });
+const xnsPageStatusFormatter = createPageStatusFormatter({ maxPage: MAX_PAGE, getMaxPage });
 const formatPageStatus = (...args) => xnsPageStatusFormatter.format(...args);
