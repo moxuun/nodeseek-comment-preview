@@ -10,9 +10,8 @@ const XNS_SETTINGS_STYLES = `
       .xns-settings-field { display:grid; grid-template-columns:minmax(110px,1fr) minmax(150px,1.5fr); align-items:center; gap:4px 12px; }
       .xns-settings-label { color:var(--xns-muted); font-weight:600; }
       .xns-settings-field select { min-width:0; padding:5px 7px; border:1px solid var(--xns-border); border-radius:6px; color:inherit; background:var(--xns-surface); font:inherit; }
-      .xns-settings-field select:focus-visible, .xns-settings-check input:focus-visible { outline:2px solid rgba(59,130,246,.45); outline-offset:1px; }
+      .xns-settings-field select:focus-visible { outline:2px solid rgba(59,130,246,.45); outline-offset:1px; }
       .xns-settings-note { grid-column:2; color:var(--xns-muted); font-size:11px; }
-      .xns-settings-check { display:flex; align-items:center; gap:8px; color:var(--xns-muted); }
       .xns-settings-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; padding-top:12px; border-top:1px solid rgba(100,116,139,.16); }
       .xns-settings-actions button { padding:6px 11px; border:1px solid var(--xns-border); border-radius:6px; color:inherit; background:var(--xns-surface); cursor:pointer; font:inherit; }
       .xns-settings-actions button:hover, .xns-settings-actions button:focus-visible { border-color:var(--xns-accent-strong); color:var(--xns-accent); outline:none; }

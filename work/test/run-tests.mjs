@@ -609,10 +609,12 @@ scenario('设置入口迁移到油猴菜单', async (ctx) => {
     const panel = await page.evaluate(() => ({
       title: document.querySelector('.xns-settings-panel h2')?.textContent?.trim() || '',
       maxPages: document.querySelectorAll('.xns-settings-panel select')[1]?.value || '',
+      hasPromptOption: document.body.textContent?.includes('显示一次性操作提示') || false,
       hasDone: !!document.querySelector('.xns-settings-primary'),
     }));
     assert(panel.title === '预览设置', `油猴菜单应打开原有设置面板，实际 ${panel.title}`);
     assert(panel.maxPages === '50', `设置面板默认页数应保持原值，实际 ${panel.maxPages}`);
+    assert(!panel.hasPromptOption, '设置面板不应保留已删除的一次性提示选项');
     assert(panel.hasDone, '原有设置面板操作按钮应保留');
 
     await page.evaluate(() => {

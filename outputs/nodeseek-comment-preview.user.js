@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.50
+// @version      0.5.51
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -58,10 +58,8 @@ function createPreferences({ windowObj, documentObj, state, storageKey, defaultM
     mode: defaultMode,
     maxPages: maxPage,
     density: 'comfortable',
-    prompts: true,
     theme: 'auto',
   });
-  const promptKey = (name) => `${storageKey}:prompt:${name}`;
   let values = { ...defaults };
   let ownsDarkClass = false;
 
@@ -71,7 +69,7 @@ function createPreferences({ windowObj, documentObj, state, storageKey, defaultM
     const maxPages = [10, 20, 30, maxPage].includes(requestedPages) ? requestedPages : maxPage;
     const density = raw.density === 'compact' ? 'compact' : 'comfortable';
     const theme = raw.theme === 'dark' ? 'dark' : 'auto';
-    return { mode, maxPages, density, prompts: raw.prompts !== false, theme };
+    return { mode, maxPages, density, theme };
   }
 
   function read() {
@@ -110,18 +108,8 @@ function createPreferences({ windowObj, documentObj, state, storageKey, defaultM
     return { ...values };
   }
 
-  function hasSeenPrompt(name) {
-    try { return windowObj.localStorage?.getItem(promptKey(name)) === '1'; } catch { return false; }
-  }
-
-  function markPromptSeen(name) {
-    try { windowObj.localStorage?.setItem(promptKey(name), '1'); } catch { /* 存储被禁用时不阻断提示。 */ }
-  }
-
   function reset() {
-    const next = update(defaults);
-    try { windowObj.localStorage?.removeItem(promptKey('preview-help')); } catch { /* ignore */ }
-    return next;
+    return update(defaults);
   }
 
   values = read();
@@ -134,8 +122,6 @@ function createPreferences({ windowObj, documentObj, state, storageKey, defaultM
     reset,
     getMaxPage: () => values.maxPages,
     apply,
-    hasSeenPrompt,
-    markPromptSeen,
   });
 }
 
@@ -152,8 +138,6 @@ const updateSettings = (...args) => xnsPreferences.update(...args);
 const resetSettings = (...args) => xnsPreferences.reset(...args);
 const getMaxPage = (...args) => xnsPreferences.getMaxPage(...args);
 const applySettings = (...args) => xnsPreferences.apply(...args);
-const hasSeenPrompt = (...args) => xnsPreferences.hasSeenPrompt(...args);
-const markPromptSeen = (...args) => xnsPreferences.markPromptSeen(...args);
 
 
 // 分页状态文案与语义统一；预览页和帖子页共享同一套用户可见反馈。
@@ -302,7 +286,7 @@ const getSafeUrlAttribute = (...args) => xnsDomTools.getSafeUrlAttribute(...args
 
 
 // 设置中心 UI；只管理界面偏好，不提供自动写操作开关。
-function createSettingsUi({ windowObj, documentObj, state, createElement, getSettings, updateSettings, resetSettings }) {
+function createSettingsUi({ documentObj, state, createElement, getSettings, updateSettings, resetSettings }) {
   function closeSettings() {
     state.settingsPanel?.overlay?.remove();
     state.settingsPanel = null;
@@ -356,17 +340,11 @@ function createSettingsUi({ windowObj, documentObj, state, createElement, getSet
     const maxPages = createSelect([['10', '10 页'], ['20', '20 页'], ['30', '30 页'], ['50', '50 页']], values.maxPages);
     const density = createSelect([['comfortable', '舒适'], ['compact', '紧凑']], values.density);
     const theme = createSelect([['auto', '跟随 NodeSeek'], ['dark', '深色']], values.theme);
-    const prompts = documentObj.createElement('input');
-    prompts.type = 'checkbox';
-    prompts.checked = values.prompts;
-    const promptField = createElement('label', 'xns-settings-check');
-    promptField.append(prompts, createElement('span', '', '显示一次性操作提示'));
     form.append(
       createField('默认评论布局', layout, '只影响帖子详情页，切换会立即生效。'),
       createField('自动读取页数', maxPages, '最多 50 页；修改后在下次刷新或打开帖子时生效。'),
       createField('评论密度', density),
       createField('主题', theme),
-      promptField,
     );
     const footer = createElement('footer', 'xns-settings-actions');
     const reset = createElement('button', '', '恢复默认');
@@ -387,12 +365,10 @@ function createSettingsUi({ windowObj, documentObj, state, createElement, getSet
         maxPages: Number(maxPages.value),
         density: density.value,
         theme: theme.value,
-        prompts: prompts.checked,
       });
       if (next.mode !== previousMode) state.post?.setMode?.(next.mode);
     };
     [layout, maxPages, density, theme].forEach((control) => control.addEventListener('change', apply));
-    prompts.addEventListener('change', apply);
     reset.addEventListener('click', () => {
       const previousMode = state.mode;
       const next = resetSettings();
@@ -400,7 +376,6 @@ function createSettingsUi({ windowObj, documentObj, state, createElement, getSet
       maxPages.value = String(next.maxPages);
       density.value = next.density;
       theme.value = next.theme;
-      prompts.checked = next.prompts;
       if (next.mode !== previousMode) state.post?.setMode?.(next.mode);
     });
     dialog.querySelector('select, input, button')?.focus();
@@ -420,7 +395,6 @@ function createSettingsUi({ windowObj, documentObj, state, createElement, getSet
 }
 
 const xnsSettingsUi = createSettingsUi({
-  windowObj: window,
   documentObj: document,
   state,
   createElement,
@@ -476,9 +450,8 @@ const XNS_SETTINGS_STYLES = `
       .xns-settings-field { display:grid; grid-template-columns:minmax(110px,1fr) minmax(150px,1.5fr); align-items:center; gap:4px 12px; }
       .xns-settings-label { color:var(--xns-muted); font-weight:600; }
       .xns-settings-field select { min-width:0; padding:5px 7px; border:1px solid var(--xns-border); border-radius:6px; color:inherit; background:var(--xns-surface); font:inherit; }
-      .xns-settings-field select:focus-visible, .xns-settings-check input:focus-visible { outline:2px solid rgba(59,130,246,.45); outline-offset:1px; }
+      .xns-settings-field select:focus-visible { outline:2px solid rgba(59,130,246,.45); outline-offset:1px; }
       .xns-settings-note { grid-column:2; color:var(--xns-muted); font-size:11px; }
-      .xns-settings-check { display:flex; align-items:center; gap:8px; color:var(--xns-muted); }
       .xns-settings-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; padding-top:12px; border-top:1px solid rgba(100,116,139,.16); }
       .xns-settings-actions button { padding:6px 11px; border:1px solid var(--xns-border); border-radius:6px; color:inherit; background:var(--xns-surface); cursor:pointer; font:inherit; }
       .xns-settings-actions button:hover, .xns-settings-actions button:focus-visible { border-color:var(--xns-accent-strong); color:var(--xns-accent); outline:none; }

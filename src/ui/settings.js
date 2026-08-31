@@ -1,5 +1,5 @@
 // 设置中心 UI；只管理界面偏好，不提供自动写操作开关。
-function createSettingsUi({ windowObj, documentObj, state, createElement, getSettings, updateSettings, resetSettings }) {
+function createSettingsUi({ documentObj, state, createElement, getSettings, updateSettings, resetSettings }) {
   function closeSettings() {
     state.settingsPanel?.overlay?.remove();
     state.settingsPanel = null;
@@ -53,17 +53,11 @@ function createSettingsUi({ windowObj, documentObj, state, createElement, getSet
     const maxPages = createSelect([['10', '10 页'], ['20', '20 页'], ['30', '30 页'], ['50', '50 页']], values.maxPages);
     const density = createSelect([['comfortable', '舒适'], ['compact', '紧凑']], values.density);
     const theme = createSelect([['auto', '跟随 NodeSeek'], ['dark', '深色']], values.theme);
-    const prompts = documentObj.createElement('input');
-    prompts.type = 'checkbox';
-    prompts.checked = values.prompts;
-    const promptField = createElement('label', 'xns-settings-check');
-    promptField.append(prompts, createElement('span', '', '显示一次性操作提示'));
     form.append(
       createField('默认评论布局', layout, '只影响帖子详情页，切换会立即生效。'),
       createField('自动读取页数', maxPages, '最多 50 页；修改后在下次刷新或打开帖子时生效。'),
       createField('评论密度', density),
       createField('主题', theme),
-      promptField,
     );
     const footer = createElement('footer', 'xns-settings-actions');
     const reset = createElement('button', '', '恢复默认');
@@ -84,12 +78,10 @@ function createSettingsUi({ windowObj, documentObj, state, createElement, getSet
         maxPages: Number(maxPages.value),
         density: density.value,
         theme: theme.value,
-        prompts: prompts.checked,
       });
       if (next.mode !== previousMode) state.post?.setMode?.(next.mode);
     };
     [layout, maxPages, density, theme].forEach((control) => control.addEventListener('change', apply));
-    prompts.addEventListener('change', apply);
     reset.addEventListener('click', () => {
       const previousMode = state.mode;
       const next = resetSettings();
@@ -97,7 +89,6 @@ function createSettingsUi({ windowObj, documentObj, state, createElement, getSet
       maxPages.value = String(next.maxPages);
       density.value = next.density;
       theme.value = next.theme;
-      prompts.checked = next.prompts;
       if (next.mode !== previousMode) state.post?.setMode?.(next.mode);
     });
     dialog.querySelector('select, input, button')?.focus();
@@ -117,7 +108,6 @@ function createSettingsUi({ windowObj, documentObj, state, createElement, getSet
 }
 
 const xnsSettingsUi = createSettingsUi({
-  windowObj: window,
   documentObj: document,
   state,
   createElement,

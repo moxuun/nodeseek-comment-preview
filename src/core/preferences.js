@@ -4,10 +4,8 @@ function createPreferences({ windowObj, documentObj, state, storageKey, defaultM
     mode: defaultMode,
     maxPages: maxPage,
     density: 'comfortable',
-    prompts: true,
     theme: 'auto',
   });
-  const promptKey = (name) => `${storageKey}:prompt:${name}`;
   let values = { ...defaults };
   let ownsDarkClass = false;
 
@@ -17,7 +15,7 @@ function createPreferences({ windowObj, documentObj, state, storageKey, defaultM
     const maxPages = [10, 20, 30, maxPage].includes(requestedPages) ? requestedPages : maxPage;
     const density = raw.density === 'compact' ? 'compact' : 'comfortable';
     const theme = raw.theme === 'dark' ? 'dark' : 'auto';
-    return { mode, maxPages, density, prompts: raw.prompts !== false, theme };
+    return { mode, maxPages, density, theme };
   }
 
   function read() {
@@ -56,18 +54,8 @@ function createPreferences({ windowObj, documentObj, state, storageKey, defaultM
     return { ...values };
   }
 
-  function hasSeenPrompt(name) {
-    try { return windowObj.localStorage?.getItem(promptKey(name)) === '1'; } catch { return false; }
-  }
-
-  function markPromptSeen(name) {
-    try { windowObj.localStorage?.setItem(promptKey(name), '1'); } catch { /* 存储被禁用时不阻断提示。 */ }
-  }
-
   function reset() {
-    const next = update(defaults);
-    try { windowObj.localStorage?.removeItem(promptKey('preview-help')); } catch { /* ignore */ }
-    return next;
+    return update(defaults);
   }
 
   values = read();
@@ -80,8 +68,6 @@ function createPreferences({ windowObj, documentObj, state, storageKey, defaultM
     reset,
     getMaxPage: () => values.maxPages,
     apply,
-    hasSeenPrompt,
-    markPromptSeen,
   });
 }
 
@@ -98,5 +84,3 @@ const updateSettings = (...args) => xnsPreferences.update(...args);
 const resetSettings = (...args) => xnsPreferences.reset(...args);
 const getMaxPage = (...args) => xnsPreferences.getMaxPage(...args);
 const applySettings = (...args) => xnsPreferences.apply(...args);
-const hasSeenPrompt = (...args) => xnsPreferences.hasSeenPrompt(...args);
-const markPromptSeen = (...args) => xnsPreferences.markPromptSeen(...args);

@@ -23,7 +23,7 @@ Ctrl/Command 点击、鼠标中键和右键菜单保持 NodeSeek 原生行为。
 2. 打开 `nodeseek-comment-preview.user.js` 并安装。
 3. 刷新 NodeSeek 页面。
 
-脚本只使用 `GM_registerMenuCommand` 注册油猴菜单中的“打开设置”入口，不加载远程模块，不执行远程代码。页面工具栏不再显示设置按钮；安装后请从 Tampermonkey/Violentmonkey 的脚本菜单打开设置。
+脚本只使用 `GM_registerMenuCommand` 注册油猴菜单中的“打开设置”入口，不加载远程模块，不执行远程代码。页面工具栏不再显示设置按钮；安装后请从 Tampermonkey/Violentmonkey 的脚本菜单打开设置。设置面板只保留布局、自动读取页数、评论密度和主题四项有效配置。
 
 ## 使用
 
