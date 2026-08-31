@@ -52,6 +52,8 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
     const onlyPages = Array.isArray(options.onlyPages) ? normalizePages(options.onlyPages) : null;
     const loadedPages = new Set([info.page, ...normalizePages(options.initialLoadedPages)]);
     const failedPages = new Set(normalizePages(options.initialFailedPages));
+    // 当前打开页即使超过读取上限也要保留，但不能计入“前 N 页”的进度。
+    const countedLoadedPages = () => Array.from(loadedPages).filter((page) => page >= 1 && page <= pageLimit).length;
     const pages = new Set([info.page]);
     const discovered = getPageNumbers(firstDocument, info.postId);
     const totalPages = discovered.size ? Math.max(...discovered, info.page) : info.page;
@@ -68,7 +70,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
     }
     pages.delete(info.page);
     const progressState = () => ({
-      loadedPages: loadedPages.size,
+      loadedPages: countedLoadedPages(),
       failedPages: [...failedPages].sort((a, b) => a - b),
       truncated,
       totalPages,
@@ -113,7 +115,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
 
     const workerCount = Math.min(concurrency, Math.max(1, pending.length));
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
-    return { pageDocs, loadedPages: loadedPages.size, failedPages: [...failedPages].sort((a, b) => a - b), truncated, totalPages, pageLimit };
+    return { pageDocs, loadedPages: countedLoadedPages(), failedPages: [...failedPages].sort((a, b) => a - b), truncated, totalPages, pageLimit };
   }
 
   async function loadPreviewRecords(info, firstDocument, options = {}) {

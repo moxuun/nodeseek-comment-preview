@@ -361,6 +361,23 @@ scenario('长帖分页截断明示（0.5.13 回归）', async (ctx) => {
   await page.close();
 });
 
+scenario('打开上限外页面时进度不计入当前页', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.goto(`${ctx.base}/post-456-52`, { waitUntil: 'networkidle0' });
+  await waitFor(page, () => {
+    const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
+    const virtualCount = Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0);
+    return /已读取 50\/50 页/.test(status) && virtualCount === 51;
+  }, 30_000, '上限外页面进度');
+  const state = await page.evaluate(() => ({
+    status: document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '',
+    virtualCount: Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0),
+  }));
+  assert(!/已读取 51\/50 页/.test(state.status), `当前页不应污染分页进度，实际 ${state.status}`);
+  assert(state.virtualCount === 51, `应保留当前第 52 页及前 50 页，实际 ${state.virtualCount}`);
+  await page.close();
+});
+
 scenario('长帖内容增强按可视远端评论执行', async (ctx) => {
   const page = await ctx.newPage();
   await installFeatureQueryCounter(page);
