@@ -559,7 +559,6 @@ function createPreviewController({
     dialog.setAttribute('aria-modal', 'true');
     const header = createElement('header', 'xns-modal-header');
     const heading = createElement('div', 'xns-modal-heading');
-    heading.appendChild(createElement('span', 'xns-modal-eyebrow', 'NodeSeek 主题预览'));
     const title = createElement('h2', 'xns-modal-title', '正在加载帖子…');
     const headerMeta = createPreviewHeaderMeta();
     heading.append(title, headerMeta.root);
@@ -587,7 +586,6 @@ function createPreviewController({
     toolbar.setAttribute('aria-label', '预览工具');
     const toolbarStatus = createElement('span', 'xns-modal-toolbar-status xns-preview-status', '准备读取…');
     toolbar.append(
-      createElement('span', 'xns-modal-mode', '楼中楼'),
       toolbarStatus,
       createRefreshButton(() => { void refreshPreviewModal(); }),
     );

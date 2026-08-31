@@ -514,8 +514,10 @@ scenario('预览弹窗操作入口统一', async (ctx) => {
     topTip: document.querySelector('.xns-to-top')?.getAttribute('data-xns-tip'),
     bottomTip: document.querySelector('.xns-to-bottom')?.getAttribute('data-xns-tip'),
     closeTitle: document.querySelector('.xns-modal-close')?.getAttribute('title'),
+    modeLabel: document.querySelector('.xns-modal-mode')?.textContent?.trim() || '',
   }));
-  assert(state.eyebrow === 'NodeSeek 主题预览', `预览应显示统一标题提示，实际 ${state.eyebrow}`);
+  assert(!state.eyebrow, `预览不应显示无效的站点提示文案，实际 ${state.eyebrow}`);
+  assert(!state.modeLabel, `预览工具栏不应显示重复的布局文案，实际 ${state.modeLabel}`);
   assert(state.original === '打开原帖', `原帖入口文案应明确，实际 ${state.original}`);
   assert(state.refreshInToolbar, '刷新应位于预览工具栏');
   assert(!state.refreshInFloatingRail, '浮动阅读导航不应重复显示刷新');
@@ -572,7 +574,7 @@ scenario('工具栏隐藏冗余上下文标签', async (ctx) => {
     refresh: Boolean(document.querySelector('.xns-modal-toolbar .xns-refresh-post')),
   }));
   assert(!previewToolbar.visibleLabel, `预览页不应显示“阅读”标签，实际 ${previewToolbar.visibleLabel}`);
-  assert(previewToolbar.mode === '楼中楼' && previewToolbar.refresh, '预览模式和刷新功能应保留');
+  assert(!previewToolbar.mode && previewToolbar.refresh, '预览不应重复显示布局文案，但刷新功能应保留');
   await previewPage.close();
 });
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.48
+// @version      0.5.49
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       Codex
 // @license      MIT
@@ -499,7 +499,6 @@ const XNS_PREVIEW_SHELL_STYLES = `
       .xns-modal { display:flex; flex-direction:column; width:min(1040px,100%); height:100vh; max-height:100vh; overflow:hidden; border-radius:0; color:var(--xns-text); background:var(--xns-surface); box-shadow:0 18px 55px rgba(15,23,42,.3); }
       .xns-modal-header { display:flex; align-items:center; gap:16px; padding:11px 16px; border-bottom:1px solid rgba(100,116,139,.2); }
       .xns-modal-heading { flex:1; min-width:0; }
-      .xns-modal-eyebrow { display:block; margin-bottom:2px; color:var(--xns-muted); font:11px/1.2 system-ui,sans-serif; letter-spacing:.02em; }
       .xns-modal-title { min-width:0; overflow:hidden; margin:0; font-size:17px; line-height:1.3; text-overflow:ellipsis; white-space:nowrap; }
       .xns-modal-meta { display:flex; align-items:center; flex-wrap:wrap; gap:2px 10px; margin-top:3px; color:var(--xns-muted); font:11px/1.25 system-ui,sans-serif; }
       .xns-modal-meta-item { display:inline-flex; align-items:center; gap:3px; min-width:0; }
@@ -512,7 +511,6 @@ const XNS_PREVIEW_SHELL_STYLES = `
       .xns-modal-header a:hover, .xns-modal-header a:focus-visible, .xns-modal-header .xns-modal-reply:hover, .xns-modal-header .xns-modal-reply:focus-visible, .xns-modal-close:hover, .xns-modal-close:focus-visible { border-color:var(--xns-accent-strong); color:var(--xns-accent); outline:none; }
       .xns-modal-close { font-size:18px; line-height:1; }
       .xns-modal-toolbar { display:flex; align-items:center; gap:8px; min-height:38px; padding:5px 16px; border-bottom:1px solid rgba(100,116,139,.16); color:var(--xns-muted); background:var(--xns-surface-muted); font:12px/1.2 system-ui,sans-serif; }
-      .xns-modal-mode { padding:4px 8px; border:1px solid rgba(59,130,246,.28); border-radius:5px; color:var(--xns-accent-strong); background:var(--xns-accent-soft); }
       .xns-modal-toolbar-status { display:inline-flex; flex:1 1 auto; align-items:center; min-width:0; gap:6px; overflow:hidden; color:var(--xns-muted); white-space:nowrap; text-overflow:ellipsis; }
       .xns-modal-toolbar-status > span { min-width:0; overflow:hidden; text-overflow:ellipsis; }
       .xns-preview-status.is-loading::before { width:8px; height:8px; flex:0 0 8px; border:2px solid rgba(37,99,235,.22); border-top-color:var(--xns-accent); border-radius:50%; content:""; animation:xns-spin .9s linear infinite; }
@@ -530,14 +528,12 @@ const XNS_PREVIEW_SHELL_STYLES = `
       .dark-layout .xns-modal-meta { color:var(--xns-muted); }
       .dark-layout .xns-modal-meta-label { color:var(--xns-subtle); }
       .dark-layout .xns-modal-toolbar { color:var(--xns-muted); background:var(--xns-surface); }
-      .dark-layout .xns-modal-eyebrow { color:var(--xns-muted); }
-      .dark-layout .xns-modal-mode { color:var(--xns-accent); border-color:var(--xns-border); background:var(--xns-accent-soft); }
       .dark-layout .xns-scroll-btn { border-color:var(--xns-border); color:var(--xns-muted); background:var(--xns-surface); }
       .dark-layout .xns-scroll-btn:hover, .dark-layout .xns-scroll-btn:focus-visible { border-color:var(--xns-accent-strong); color:var(--xns-accent); background:var(--xns-surface-muted); }
       .dark-layout .xns-scroll-btn[data-xns-tip]::after { color:var(--xns-text); background:var(--xns-surface); border-color:var(--xns-border); }
       .dark-layout .xns-inline-retry { color:var(--xns-danger); background:var(--xns-surface); border-color:var(--xns-border); }
       @media (max-width:800px) { .xns-preview-scroll-btns { right:6px; } .xns-scroll-btn { width:30px !important; min-width:30px !important; max-width:30px !important; height:30px !important; min-height:30px !important; max-height:30px !important; flex-basis:30px; } }
-      @media (max-width:640px) { .xns-overlay { padding:0; } .xns-modal { width:100%; max-height:100vh; } .xns-modal-header { gap:8px; padding:9px 10px; } .xns-modal-eyebrow { display:none; } .xns-modal-actions { gap:4px; } .xns-modal-header a, .xns-modal-header .xns-modal-reply { padding:5px 6px; } .xns-modal-toolbar { padding:5px 10px; } .xns-modal-body { padding:9px; } .xns-preview-scroll-btns { right:5px; } .xns-scroll-btn { width:28px !important; min-width:28px !important; max-width:28px !important; height:28px !important; min-height:28px !important; max-height:28px !important; flex-basis:28px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; max-width:none; margin-left:0; } }
+      @media (max-width:640px) { .xns-overlay { padding:0; } .xns-modal { width:100%; max-height:100vh; } .xns-modal-header { gap:8px; padding:9px 10px; } .xns-modal-actions { gap:4px; } .xns-modal-header a, .xns-modal-header .xns-modal-reply { padding:5px 6px; } .xns-modal-toolbar { padding:5px 10px; } .xns-modal-body { padding:9px; } .xns-preview-scroll-btns { right:5px; } .xns-scroll-btn { width:28px !important; min-width:28px !important; max-width:28px !important; height:28px !important; min-height:28px !important; max-height:28px !important; flex-basis:28px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; max-width:none; margin-left:0; } }
 `;
 
 
@@ -3990,7 +3986,6 @@ function createPreviewController({
     dialog.setAttribute('aria-modal', 'true');
     const header = createElement('header', 'xns-modal-header');
     const heading = createElement('div', 'xns-modal-heading');
-    heading.appendChild(createElement('span', 'xns-modal-eyebrow', 'NodeSeek 主题预览'));
     const title = createElement('h2', 'xns-modal-title', '正在加载帖子…');
     const headerMeta = createPreviewHeaderMeta();
     heading.append(title, headerMeta.root);
@@ -4018,7 +4013,6 @@ function createPreviewController({
     toolbar.setAttribute('aria-label', '预览工具');
     const toolbarStatus = createElement('span', 'xns-modal-toolbar-status xns-preview-status', '准备读取…');
     toolbar.append(
-      createElement('span', 'xns-modal-mode', '楼中楼'),
       toolbarStatus,
       createRefreshButton(() => { void refreshPreviewModal(); }),
     );
