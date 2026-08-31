@@ -46,6 +46,8 @@ function createPostPageController({
       this.hasRemotePages = false;
       this.virtualizer = null;
       this.generation = 0;
+      this.progressiveTimer = 0;
+      this.progressiveRendered = false;
       this.composer = null;
       this.requestController = null;
     }
@@ -126,6 +128,8 @@ function createPostPageController({
     async reloadPages(options = {}) {
       if (!this.list) return;
       const generation = ++this.generation;
+      this.clearProgressiveRender();
+      this.progressiveRendered = false;
       this.requestController?.abort();
       const requestController = windowObj.AbortController ? new windowObj.AbortController() : null;
       this.requestController = requestController;
@@ -138,6 +142,7 @@ function createPostPageController({
         if (appState.mode === 'thread') this.render({ progressive: true });
         await this.loadPages(generation, options, requestController?.signal);
         if (generation !== this.generation) return;
+        this.clearProgressiveRender();
         this.loading = false;
         if (appState.mode === 'thread') this.render();
         else this.showStatus('原版评论已刷新。');
@@ -148,6 +153,7 @@ function createPostPageController({
       } finally {
         if (this.requestController === requestController) this.requestController = null;
         if (generation === this.generation) {
+          this.clearProgressiveRender();
           this.loading = false;
           this.loadingNode?.remove();
           this.loadingNode = null;
@@ -203,15 +209,33 @@ function createPostPageController({
     async loadPages(generation, options = {}, signal) {
       this.failedPages = [];
       const remoteRecords = [];
+      const updateProgress = (progress) => {
+        if (!progress || generation !== this.generation) return;
+        this.loadedPages = progress.loadedPages;
+        this.failedPages = [...progress.failedPages];
+        this.truncated = progress.truncated;
+        this.totalPages = progress.totalPages;
+        const unique = new Map();
+        [...this.records, ...remoteRecords].forEach((record) => {
+          const previous = unique.get(record.floor);
+          if (!previous || record.current) unique.set(record.floor, record);
+        });
+        this.records = Array.from(unique.values());
+        this.scheduleProgressiveRender(generation);
+      };
       const fresh = options.noStore === true || options.refreshCurrentPage === true;
       const { loadedPages, failedPages, truncated, totalPages } = await fetchPostPages(this.info, documentObj, {
         noStore: fresh,
         allowCache: !fresh,
         retainDocuments: false,
         signal,
-        onPageLoaded: (page, root) => {
-          if (page !== this.info.page) remoteRecords.push(...this.collectRemoteRecords(root, page));
+        onPageLoaded: (page, root, progress) => {
+          if (page !== this.info.page) {
+            remoteRecords.push(...this.collectRemoteRecords(root, page));
+            updateProgress(progress);
+          }
         },
+        onPageFailed: (_page, progress) => updateProgress(progress),
         isAborted: () => generation !== this.generation,
       });
       if (generation !== this.generation) return;
@@ -227,6 +251,22 @@ function createPostPageController({
         if (!previous || record.current) unique.set(record.floor, record);
       });
       this.records = Array.from(unique.values());
+    }
+
+    scheduleProgressiveRender(generation) {
+      if (generation !== this.generation || appState.mode !== 'thread' || this.progressiveTimer) return;
+      const delay = this.progressiveRendered ? 500 : 300;
+      this.progressiveTimer = windowObj.setTimeout(() => {
+        this.progressiveTimer = 0;
+        if (generation !== this.generation || !this.loading || appState.mode !== 'thread') return;
+        this.progressiveRendered = true;
+        this.render({ progressive: true });
+      }, delay);
+    }
+
+    clearProgressiveRender() {
+      if (this.progressiveTimer) windowObj.clearTimeout(this.progressiveTimer);
+      this.progressiveTimer = 0;
     }
 
     collectRemoteRecords(root, page) {
