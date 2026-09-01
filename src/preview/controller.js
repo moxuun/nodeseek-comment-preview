@@ -10,6 +10,7 @@ function createPreviewController({
   createElement,
   clearElement,
   getPostInfo,
+  buildPostUrl,
   sanitizeImportedNode,
   parseHtml,
   fetchHtml,
@@ -51,11 +52,7 @@ function createPreviewController({
   function getCanonicalPostUrl(url) {
     const info = getPostInfo(url?.href || '');
     if (!info) return url;
-    const canonical = new URL(url.href);
-    canonical.pathname = `/post-${info.postId}-1`;
-    canonical.search = '';
-    canonical.hash = '';
-    return canonical;
+    return buildPostUrl(info.postId, 1) || url;
   }
 
   function getPreviewHeaderMeta(parsed) {
@@ -390,7 +387,7 @@ function createPreviewController({
       for (const page of pages) {
         if (state.modal !== modal) return false;
         try {
-          const response = await fetchHtml(new URL(`/post-${info.postId}-${page}`, windowObj.location.origin), {
+          const response = await fetchHtml(buildPostUrl(info.postId, page), {
             noStore: true,
             allowCache: false,
             signal: controller?.signal,
@@ -706,6 +703,7 @@ const xnsPreviewController = createPreviewController({
   createElement,
   clearElement,
   getPostInfo,
+  buildPostUrl,
   sanitizeImportedNode,
   parseHtml,
   fetchHtml,

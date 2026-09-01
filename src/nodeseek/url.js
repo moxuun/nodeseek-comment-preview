@@ -13,6 +13,18 @@ function createNodeSeekUrlService({ windowObj, URLCtor, safePositiveInt }) {
     } catch { return null; }
   }
 
+  function buildPostUrl(postId, page = 1, floor = null) {
+    const normalizedPostId = safePositiveInt(postId);
+    const normalizedPage = safePositiveInt(page);
+    if (normalizedPostId === null || normalizedPage === null) return null;
+    const url = new URLCtor(`/post-${normalizedPostId}-${normalizedPage}`, windowObj.location.origin);
+    if (floor !== null && floor !== undefined && /^\d{1,15}$/.test(String(floor))) {
+      const normalizedFloor = Number(floor);
+      if (Number.isSafeInteger(normalizedFloor)) url.hash = String(normalizedFloor);
+    }
+    return url;
+  }
+
   function parseSameOriginUrl(rawUrl, base = windowObj.location.href) {
     if (typeof rawUrl !== 'string' || rawUrl.length > 2_048) return null;
     try {
@@ -28,7 +40,7 @@ function createNodeSeekUrlService({ windowObj, URLCtor, safePositiveInt }) {
     return Boolean(info && !url.search && !url.username && !url.password);
   }
 
-  return Object.freeze({ getPostInfo, parseSameOriginUrl, isAllowedPostRequest });
+  return Object.freeze({ buildPostUrl, getPostInfo, parseSameOriginUrl, isAllowedPostRequest });
 }
 
 const xnsNodeSeekUrlService = createNodeSeekUrlService({
@@ -36,6 +48,7 @@ const xnsNodeSeekUrlService = createNodeSeekUrlService({
   URLCtor: URL,
   safePositiveInt,
 });
+const buildPostUrl = (...args) => xnsNodeSeekUrlService.buildPostUrl(...args);
 const getPostInfo = (...args) => xnsNodeSeekUrlService.getPostInfo(...args);
 const parseSameOriginUrl = (...args) => xnsNodeSeekUrlService.parseSameOriginUrl(...args);
 const isAllowedPostRequest = (...args) => xnsNodeSeekUrlService.isAllowedPostRequest(...args);

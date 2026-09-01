@@ -8,6 +8,7 @@ function createCommentActions({
   qsa,
   createElement,
   getPostInfo,
+  buildPostUrl,
   parseSameOriginUrl,
   safePositiveInt,
   getFloor,
@@ -188,9 +189,7 @@ function createCommentActions({
     if (!modalInfo) return contextUrl;
     const page = safePositiveInt(comment?.getAttribute('data-xns-source-page')) || modalInfo.page;
     const floor = getDisplayFloor(comment);
-    const url = new URL(`/post-${modalInfo.postId}-${page}`, windowObj.location.origin);
-    if (floor !== null) url.hash = String(floor);
-    return url.href;
+    return buildPostUrl(modalInfo.postId, page, floor)?.href || contextUrl;
   }
 
   function getDirectComposer(comment) {
@@ -365,6 +364,7 @@ const xnsCommentActions = createCommentActions({
   qsa,
   createElement,
   getPostInfo,
+  buildPostUrl,
   parseSameOriginUrl,
   safePositiveInt,
   getFloor,

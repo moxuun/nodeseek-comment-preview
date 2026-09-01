@@ -28,6 +28,7 @@ function createPostPageController({
   formatPageStatus,
   updateSettings,
   getMaxPage,
+  buildPostUrl,
 }) {
   const NATIVE_EDIT_REQUEST_KEY = 'xns-comment-preview-native-edit';
 
@@ -245,7 +246,7 @@ function createPostPageController({
 
     async adoptNewReplies(generation, signal) {
       try {
-        const response = await fetchHtml(new URL(`/post-${this.info.postId}-${this.info.page}`, windowObj.location.origin), { noStore: true, signal });
+        const response = await fetchHtml(buildPostUrl(this.info.postId, this.info.page), { noStore: true, signal });
         if (generation !== this.generation) return;
         const parsed = parseHtml(response.html, response.url);
         const knownFloors = new Set(this.originalChildren
@@ -523,4 +524,5 @@ const PostEnhancer = createPostPageController({
   formatPageStatus,
   updateSettings,
   getMaxPage,
+  buildPostUrl,
 });

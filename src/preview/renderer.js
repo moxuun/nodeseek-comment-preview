@@ -11,6 +11,7 @@ function createPreviewRenderer({
   createElement,
   clearElement,
   getPostInfo,
+  buildPostUrl,
   getDocState,
   getCommentId,
   getSsrCommentCounts,
@@ -55,8 +56,8 @@ function createPreviewRenderer({
       event.stopPropagation();
       const postId = record.postId || pageInfo?.postId || getPostInfo(windowObj.location.href)?.postId || '';
       const floor = record.floor;
-      const url = `/post-${postId}-${record.page || 1}${floor >= 0 ? `#${floor}` : ''}`;
-      windowObj.open(url, '_blank', 'noopener');
+      const url = buildPostUrl(postId, record.page || 1, floor >= 0 ? floor : null);
+      if (url) windowObj.open(url.href, '_blank', 'noopener');
     });
   }
 
@@ -105,8 +106,9 @@ function createPreviewRenderer({
     node.setAttribute('data-xns-target-type', 'post');
     node.setAttribute('data-xns-post-id', info.postId);
     const floorLink = qs(node, '.floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link');
-    if (floorLink) {
-      floorLink.href = `/post-${info.postId}-1#0`;
+    const floorUrl = buildPostUrl(info.postId, 1, 0);
+    if (floorLink && floorUrl) {
+      floorLink.href = floorUrl.href;
       floorLink.target = '_blank';
       floorLink.rel = 'noopener noreferrer';
       floorLink.title = '打开原帖 #0';
@@ -233,6 +235,7 @@ const xnsPreviewRenderer = createPreviewRenderer({
   createElement,
   clearElement,
   getPostInfo,
+  buildPostUrl,
   getDocState,
   getCommentId,
   getSsrCommentCounts,

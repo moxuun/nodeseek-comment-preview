@@ -1,5 +1,5 @@
 // 预览渲染辅助：只处理克隆节点的清理和跨页来源楼层链接。
-function createPreviewRenderUtils({ qs, qsa, createElement }) {
+function createPreviewRenderUtils({ qs, qsa, createElement, buildPostUrl }) {
   function stripRenderArtifacts(item) {
     if (!item?.classList) return;
     qsa(item, '.xns-reply-list, .xns-remote-floor-link').forEach((node) => node.remove());
@@ -14,7 +14,9 @@ function createPreviewRenderUtils({ qs, qsa, createElement }) {
 
   function setFloorLinkUrl(source, record, postId) {
     if (!source) return;
-    source.href = `/post-${postId}-${record.page}#${record.floor}`;
+    const url = buildPostUrl(postId, record.page, record.floor);
+    if (!url) return;
+    source.href = url.href;
     source.target = '_blank';
     source.rel = 'noopener noreferrer';
     source.title = `打开原楼层 #${record.floor}`;
@@ -56,6 +58,6 @@ function createPreviewRenderUtils({ qs, qsa, createElement }) {
   return Object.freeze({ stripRenderArtifacts, addRemoteNote });
 }
 
-const xnsPreviewRenderUtils = createPreviewRenderUtils({ qs, qsa, createElement });
+const xnsPreviewRenderUtils = createPreviewRenderUtils({ qs, qsa, createElement, buildPostUrl });
 const stripRenderArtifacts = (...args) => xnsPreviewRenderUtils.stripRenderArtifacts(...args);
 const addRemoteNote = (...args) => xnsPreviewRenderUtils.addRemoteNote(...args);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.54
+// @version      0.5.55
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       moxuun
 // @license      MIT
@@ -545,6 +545,18 @@ function createNodeSeekUrlService({ windowObj, URLCtor, safePositiveInt }) {
     } catch { return null; }
   }
 
+  function buildPostUrl(postId, page = 1, floor = null) {
+    const normalizedPostId = safePositiveInt(postId);
+    const normalizedPage = safePositiveInt(page);
+    if (normalizedPostId === null || normalizedPage === null) return null;
+    const url = new URLCtor(`/post-${normalizedPostId}-${normalizedPage}`, windowObj.location.origin);
+    if (floor !== null && floor !== undefined && /^\d{1,15}$/.test(String(floor))) {
+      const normalizedFloor = Number(floor);
+      if (Number.isSafeInteger(normalizedFloor)) url.hash = String(normalizedFloor);
+    }
+    return url;
+  }
+
   function parseSameOriginUrl(rawUrl, base = windowObj.location.href) {
     if (typeof rawUrl !== 'string' || rawUrl.length > 2_048) return null;
     try {
@@ -560,7 +572,7 @@ function createNodeSeekUrlService({ windowObj, URLCtor, safePositiveInt }) {
     return Boolean(info && !url.search && !url.username && !url.password);
   }
 
-  return Object.freeze({ getPostInfo, parseSameOriginUrl, isAllowedPostRequest });
+  return Object.freeze({ buildPostUrl, getPostInfo, parseSameOriginUrl, isAllowedPostRequest });
 }
 
 const xnsNodeSeekUrlService = createNodeSeekUrlService({
@@ -568,6 +580,7 @@ const xnsNodeSeekUrlService = createNodeSeekUrlService({
   URLCtor: URL,
   safePositiveInt,
 });
+const buildPostUrl = (...args) => xnsNodeSeekUrlService.buildPostUrl(...args);
 const getPostInfo = (...args) => xnsNodeSeekUrlService.getPostInfo(...args);
 const parseSameOriginUrl = (...args) => xnsNodeSeekUrlService.parseSameOriginUrl(...args);
 const isAllowedPostRequest = (...args) => xnsNodeSeekUrlService.isAllowedPostRequest(...args);
@@ -1548,7 +1561,7 @@ function createCommentVirtualizer({
 
 // 帖子分页读取服务。
 // 只负责“读哪些页、如何并发、如何合并”，不创建 DOM，也不决定如何展示失败。
-function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, requestGapMs, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid }) {
+function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, requestGapMs, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid, buildPostUrl }) {
   function createRequestGate(gapMs) {
     const cooldownGap = Number.isFinite(Number(gapMs)) ? Math.max(0, Number(gapMs)) : 0;
     let currentGap = cooldownGap;
@@ -1636,7 +1649,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
         const page = pending.shift();
         if (page === undefined || loadedPages.has(page)) continue;
         try {
-          const response = await fetchHtml(new URL(`/post-${info.postId}-${page}`, windowObj.location.origin), {
+          const response = await fetchHtml(buildPostUrl(info.postId, page), {
             noStore,
             allowCache: options.allowCache === true,
             signal: options.signal,
@@ -1737,6 +1750,7 @@ const xnsPageLoader = createPageLoader({
   getCommentRecord,
   getDocState,
   getCurrentUserUid,
+  buildPostUrl,
 });
 const collectPageRecords = (...args) => xnsPageLoader.collectPageRecords(...args);
 const fetchPostPages = (...args) => xnsPageLoader.fetchPostPages(...args);
@@ -1854,6 +1868,7 @@ function createCommentActions({
   qsa,
   createElement,
   getPostInfo,
+  buildPostUrl,
   parseSameOriginUrl,
   safePositiveInt,
   getFloor,
@@ -2034,9 +2049,7 @@ function createCommentActions({
     if (!modalInfo) return contextUrl;
     const page = safePositiveInt(comment?.getAttribute('data-xns-source-page')) || modalInfo.page;
     const floor = getDisplayFloor(comment);
-    const url = new URL(`/post-${modalInfo.postId}-${page}`, windowObj.location.origin);
-    if (floor !== null) url.hash = String(floor);
-    return url.href;
+    return buildPostUrl(modalInfo.postId, page, floor)?.href || contextUrl;
   }
 
   function getDirectComposer(comment) {
@@ -2211,6 +2224,7 @@ const xnsCommentActions = createCommentActions({
   qsa,
   createElement,
   getPostInfo,
+  buildPostUrl,
   parseSameOriginUrl,
   safePositiveInt,
   getFloor,
@@ -2230,7 +2244,7 @@ const runPreviewAction = (...args) => xnsCommentActions.runPreviewAction(...args
 
 
 // 预览渲染辅助：只处理克隆节点的清理和跨页来源楼层链接。
-function createPreviewRenderUtils({ qs, qsa, createElement }) {
+function createPreviewRenderUtils({ qs, qsa, createElement, buildPostUrl }) {
   function stripRenderArtifacts(item) {
     if (!item?.classList) return;
     qsa(item, '.xns-reply-list, .xns-remote-floor-link').forEach((node) => node.remove());
@@ -2245,7 +2259,9 @@ function createPreviewRenderUtils({ qs, qsa, createElement }) {
 
   function setFloorLinkUrl(source, record, postId) {
     if (!source) return;
-    source.href = `/post-${postId}-${record.page}#${record.floor}`;
+    const url = buildPostUrl(postId, record.page, record.floor);
+    if (!url) return;
+    source.href = url.href;
     source.target = '_blank';
     source.rel = 'noopener noreferrer';
     source.title = `打开原楼层 #${record.floor}`;
@@ -2287,7 +2303,7 @@ function createPreviewRenderUtils({ qs, qsa, createElement }) {
   return Object.freeze({ stripRenderArtifacts, addRemoteNote });
 }
 
-const xnsPreviewRenderUtils = createPreviewRenderUtils({ qs, qsa, createElement });
+const xnsPreviewRenderUtils = createPreviewRenderUtils({ qs, qsa, createElement, buildPostUrl });
 const stripRenderArtifacts = (...args) => xnsPreviewRenderUtils.stripRenderArtifacts(...args);
 const addRemoteNote = (...args) => xnsPreviewRenderUtils.addRemoteNote(...args);
 
@@ -2305,6 +2321,7 @@ function createPreviewRenderer({
   createElement,
   clearElement,
   getPostInfo,
+  buildPostUrl,
   getDocState,
   getCommentId,
   getSsrCommentCounts,
@@ -2349,8 +2366,8 @@ function createPreviewRenderer({
       event.stopPropagation();
       const postId = record.postId || pageInfo?.postId || getPostInfo(windowObj.location.href)?.postId || '';
       const floor = record.floor;
-      const url = `/post-${postId}-${record.page || 1}${floor >= 0 ? `#${floor}` : ''}`;
-      windowObj.open(url, '_blank', 'noopener');
+      const url = buildPostUrl(postId, record.page || 1, floor >= 0 ? floor : null);
+      if (url) windowObj.open(url.href, '_blank', 'noopener');
     });
   }
 
@@ -2399,8 +2416,9 @@ function createPreviewRenderer({
     node.setAttribute('data-xns-target-type', 'post');
     node.setAttribute('data-xns-post-id', info.postId);
     const floorLink = qs(node, '.floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link');
-    if (floorLink) {
-      floorLink.href = `/post-${info.postId}-1#0`;
+    const floorUrl = buildPostUrl(info.postId, 1, 0);
+    if (floorLink && floorUrl) {
+      floorLink.href = floorUrl.href;
       floorLink.target = '_blank';
       floorLink.rel = 'noopener noreferrer';
       floorLink.title = '打开原帖 #0';
@@ -2527,6 +2545,7 @@ const xnsPreviewRenderer = createPreviewRenderer({
   createElement,
   clearElement,
   getPostInfo,
+  buildPostUrl,
   getDocState,
   getCommentId,
   getSsrCommentCounts,
@@ -3465,6 +3484,7 @@ function createPreviewController({
   createElement,
   clearElement,
   getPostInfo,
+  buildPostUrl,
   sanitizeImportedNode,
   parseHtml,
   fetchHtml,
@@ -3506,11 +3526,7 @@ function createPreviewController({
   function getCanonicalPostUrl(url) {
     const info = getPostInfo(url?.href || '');
     if (!info) return url;
-    const canonical = new URL(url.href);
-    canonical.pathname = `/post-${info.postId}-1`;
-    canonical.search = '';
-    canonical.hash = '';
-    return canonical;
+    return buildPostUrl(info.postId, 1) || url;
   }
 
   function getPreviewHeaderMeta(parsed) {
@@ -3845,7 +3861,7 @@ function createPreviewController({
       for (const page of pages) {
         if (state.modal !== modal) return false;
         try {
-          const response = await fetchHtml(new URL(`/post-${info.postId}-${page}`, windowObj.location.origin), {
+          const response = await fetchHtml(buildPostUrl(info.postId, page), {
             noStore: true,
             allowCache: false,
             signal: controller?.signal,
@@ -4161,6 +4177,7 @@ const xnsPreviewController = createPreviewController({
   createElement,
   clearElement,
   getPostInfo,
+  buildPostUrl,
   sanitizeImportedNode,
   parseHtml,
   fetchHtml,
@@ -4280,6 +4297,7 @@ function createPostPageController({
   formatPageStatus,
   updateSettings,
   getMaxPage,
+  buildPostUrl,
 }) {
   const NATIVE_EDIT_REQUEST_KEY = 'xns-comment-preview-native-edit';
 
@@ -4497,7 +4515,7 @@ function createPostPageController({
 
     async adoptNewReplies(generation, signal) {
       try {
-        const response = await fetchHtml(new URL(`/post-${this.info.postId}-${this.info.page}`, windowObj.location.origin), { noStore: true, signal });
+        const response = await fetchHtml(buildPostUrl(this.info.postId, this.info.page), { noStore: true, signal });
         if (generation !== this.generation) return;
         const parsed = parseHtml(response.html, response.url);
         const knownFloors = new Set(this.originalChildren
@@ -4775,6 +4793,7 @@ const PostEnhancer = createPostPageController({
   formatPageStatus,
   updateSettings,
   getMaxPage,
+  buildPostUrl,
 });
 
 

@@ -1,6 +1,6 @@
 // 帖子分页读取服务。
 // 只负责“读哪些页、如何并发、如何合并”，不创建 DOM，也不决定如何展示失败。
-function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, requestGapMs, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid }) {
+function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, requestGapMs, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid, buildPostUrl }) {
   function createRequestGate(gapMs) {
     const cooldownGap = Number.isFinite(Number(gapMs)) ? Math.max(0, Number(gapMs)) : 0;
     let currentGap = cooldownGap;
@@ -88,7 +88,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
         const page = pending.shift();
         if (page === undefined || loadedPages.has(page)) continue;
         try {
-          const response = await fetchHtml(new URL(`/post-${info.postId}-${page}`, windowObj.location.origin), {
+          const response = await fetchHtml(buildPostUrl(info.postId, page), {
             noStore,
             allowCache: options.allowCache === true,
             signal: options.signal,
@@ -189,6 +189,7 @@ const xnsPageLoader = createPageLoader({
   getCommentRecord,
   getDocState,
   getCurrentUserUid,
+  buildPostUrl,
 });
 const collectPageRecords = (...args) => xnsPageLoader.collectPageRecords(...args);
 const fetchPostPages = (...args) => xnsPageLoader.fetchPostPages(...args);
