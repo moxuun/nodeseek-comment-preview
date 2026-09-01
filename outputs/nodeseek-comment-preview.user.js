@@ -512,7 +512,10 @@ const XNS_PREVIEW_SHELL_STYLES = `
       .xns-modal-tool { display:inline-flex; align-items:center; gap:5px; margin-left:auto; padding:4px 8px; border:1px solid var(--xns-border); border-radius:6px; color:var(--xns-muted); background:var(--xns-surface); cursor:pointer; font:12px/1.2 system-ui,sans-serif; }
       .xns-modal-tool:hover, .xns-modal-tool:focus-visible { border-color:var(--xns-accent-strong); color:var(--xns-accent); outline:none; }
       .xns-modal-tool svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
-      .xns-modal-body { overflow:auto; padding:clamp(10px,2vw,18px); color:var(--xns-text); }
+      .xns-modal-body { flex:1 1 auto; min-height:0; overflow:auto; padding:clamp(10px,2vw,18px); color:var(--xns-text); }
+      .xns-preview-composer-host { flex:0 0 auto; padding:0 16px; border-bottom:1px solid rgba(100,116,139,.2); background:var(--xns-surface-muted); }
+      .xns-preview-composer-host[hidden] { display:none; }
+      .xns-preview-composer-host > .xns-preview-composer { margin:0; padding:10px 0; border-top:0; }
       .xns-modal-body img { max-width:100%; height:auto; }
       .dark-layout .xns-modal { color:var(--xns-text); background:var(--xns-surface-muted); }
       .dark-layout .xns-modal-meta { color:var(--xns-muted); }
@@ -523,7 +526,7 @@ const XNS_PREVIEW_SHELL_STYLES = `
       .dark-layout .xns-scroll-btn[data-xns-tip]::after { color:var(--xns-text); background:var(--xns-surface); border-color:var(--xns-border); }
       .dark-layout .xns-inline-retry { color:var(--xns-danger); background:var(--xns-surface); border-color:var(--xns-border); }
       @media (max-width:800px) { .xns-preview-scroll-btns { right:6px; } .xns-scroll-btn { width:30px !important; min-width:30px !important; max-width:30px !important; height:30px !important; min-height:30px !important; max-height:30px !important; flex-basis:30px; } }
-      @media (max-width:640px) { .xns-overlay { padding:0; } .xns-modal { width:100%; max-height:100vh; } .xns-modal-header { gap:8px; padding:9px 10px; } .xns-modal-actions { gap:4px; } .xns-modal-header a, .xns-modal-header .xns-modal-reply { padding:5px 6px; } .xns-modal-toolbar { padding:5px 10px; } .xns-modal-body { padding:9px; } .xns-preview-scroll-btns { right:5px; } .xns-scroll-btn { width:28px !important; min-width:28px !important; max-width:28px !important; height:28px !important; min-height:28px !important; max-height:28px !important; flex-basis:28px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; max-width:none; margin-left:0; } }
+      @media (max-width:640px) { .xns-overlay { padding:0; } .xns-modal { width:100%; max-height:100vh; } .xns-modal-header { gap:8px; padding:9px 10px; } .xns-modal-actions { gap:4px; } .xns-modal-header a, .xns-modal-header .xns-modal-reply { padding:5px 6px; } .xns-modal-toolbar { padding:5px 10px; } .xns-preview-composer-host { padding:0 10px; } .xns-modal-body { padding:9px; } .xns-preview-scroll-btns { right:5px; } .xns-scroll-btn { width:28px !important; min-width:28px !important; max-width:28px !important; height:28px !important; min-height:28px !important; max-height:28px !important; flex-basis:28px; } .xns-lightbox { padding:10px; } .xns-lightbox-image { max-width:calc(100vw - 20px); max-height:calc(100vh - 20px); } .xns-toolbar-status { width:100%; max-width:none; margin-left:0; } }
 `;
 
 
@@ -1859,7 +1862,7 @@ function createCommentActions({
   getPostContent,
   findCommentList,
   postAction,
-  loadPreviewModal,
+  syncPreviewReply,
 }) {
   const PREVIEW_ACTIONS = [
     ['like', '点赞', '♡', true],
@@ -2047,9 +2050,11 @@ function createCommentActions({
       postId: modal?.postId || pageInfo?.postId || '',
       url: modal?.url || parseSameOriginUrl(windowObj.location.href),
     };
-    const host = modal?.body || (comment ? comment : findCommentList());
-    if (!host) return;
     const isPostReply = !comment || action === 'post-reply';
+    const host = isPostReply
+      ? (modal?.composerHost || modal?.body || findCommentList())
+      : (comment || findCommentList());
+    if (!host) return;
     const previousComposer = isPostReply ? (modal?.composer || state.post?.composer) : getDirectComposer(comment);
     previousComposer?.remove();
     const floor = isPostReply ? null : getDisplayFloor(comment);
@@ -2083,8 +2088,10 @@ function createCommentActions({
     const status = createElement('span', 'xns-preview-composer-status');
     actions.append(submit, original, cancel, status);
     composer.appendChild(actions);
-    if (isPostReply && modal?.body) {
-      modal.body.appendChild(composer);
+    if (isPostReply && modal?.composerHost) {
+      modal.composerHost.hidden = false;
+      modal.composerHost.classList.add('is-open');
+      modal.composerHost.appendChild(composer);
       modal.composer = composer;
     } else {
       const menu = qs(comment, '.xns-preview-menu');
@@ -2093,10 +2100,14 @@ function createCommentActions({
       if (isPostReply && state.post) state.post.composer = composer;
     }
     textarea.focus();
-    composer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (!isPostReply || !modal?.composerHost) composer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     cancel.addEventListener('click', () => {
       composer.remove();
-      if (modal?.composer === composer) modal.composer = null;
+      if (modal?.composer === composer) {
+        modal.composer = null;
+        modal.composerHost?.classList.remove('is-open');
+        if (modal.composerHost) modal.composerHost.hidden = true;
+      }
       if (!modal && state.post?.composer === composer) state.post.composer = null;
     });
     submit.addEventListener('click', async () => {
@@ -2114,10 +2125,14 @@ function createCommentActions({
         textarea.readOnly = true;
         submit.remove();
         if (actionContext.modal && state.modal === actionContext.modal) {
-          if (actionContext.modal.composer === composer) actionContext.modal.composer = null;
-          const refreshed = await loadPreviewModal(actionContext.modal, '正在更新回复…', { preserveContent: true });
-          if (refreshed) composer.remove();
-          else status.textContent = '回复已发送。帖子正在刷新中，楼中楼可能暂未包含新回复，请稍后再点刷新。';
+          const postModal = actionContext.modal;
+          if (postModal.composer === composer) {
+            postModal.composer = null;
+            postModal.composerHost?.classList.remove('is-open');
+            if (postModal.composerHost) postModal.composerHost.hidden = true;
+          }
+          composer.remove();
+          void syncPreviewReply?.(postModal);
         } else if (state.post) {
           const post = state.post;
           if (post.composer === composer) post.composer = null;
@@ -2204,7 +2219,7 @@ const xnsCommentActions = createCommentActions({
   getPostContent,
   findCommentList,
   postAction,
-  loadPreviewModal: (...args) => loadPreviewModal(...args),
+  syncPreviewReply: (...args) => syncPreviewReply(...args),
 });
 const getDirectCommentMenu = (...args) => xnsCommentActions.getDirectCommentMenu(...args);
 const getMenuActionKey = (...args) => xnsCommentActions.getMenuActionKey(...args);
@@ -3038,6 +3053,7 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
   function closeModal() {
     closeImageLightbox();
     state.modal?.requestController?.abort();
+    state.modal?.replySyncController?.abort();
     state.modal?.featureCleanup?.();
     state.modal?.refreshScrollCleanup?.();
     state.modal?.scrollCleanup?.();
@@ -3774,6 +3790,89 @@ function createPreviewController({
     }
   }
 
+  function mergePreviewRecords(existing, additions) {
+    const merged = new Map((Array.isArray(existing) ? existing : []).map((record) => [String(record.floor), record]));
+    (Array.isArray(additions) ? additions : []).forEach((record) => {
+      const previous = merged.get(String(record.floor));
+      if (!previous || record.current) merged.set(String(record.floor), record);
+    });
+    return Array.from(merged.values());
+  }
+
+  async function syncPreviewReply(modal) {
+    if (!modal || state.modal !== modal) return false;
+    if (modal.loading) {
+      modal.pendingReplySync = true;
+      return false;
+    }
+    if (modal.replySyncPromise) return modal.replySyncPromise;
+    const info = getPostInfo(modal.url?.href || '');
+    const seed = modal.previewSeed;
+    if (!info || !seed) return false;
+
+    const knownPages = getPageNumbers(seed, info.postId);
+    const discoveredLastPage = knownPages.size ? Math.max(...knownPages) : info.page;
+    const lastPage = Math.max(1, Number(modal.totalPages) || discoveredLastPage || info.page || 1);
+    const pages = Array.from(new Set([lastPage, lastPage + 1]));
+    const controller = windowObj.AbortController ? new windowObj.AbortController() : null;
+    modal.replySyncController = controller;
+    modal.replySyncing = true;
+    const promise = (async () => {
+      const additions = [];
+      let successfulReads = 0;
+      for (const page of pages) {
+        if (state.modal !== modal) return false;
+        try {
+          const response = await fetchHtml(new URL(`/post-${info.postId}-${page}`, windowObj.location.origin), {
+            noStore: true,
+            allowCache: false,
+            signal: controller?.signal,
+          });
+          const parsed = parseHtml(response.html, response.url);
+          additions.push(...collectPageRecords(info, parsed, page));
+          successfulReads += 1;
+        } catch {
+          // 新回复可能还没生成下一页；已成功发送不应因同步探测失败而变成失败。
+        }
+      }
+      if (state.modal !== modal) return false;
+      if (successfulReads === 0) return false;
+      modal.previewRecords = mergePreviewRecords(modal.previewRecords, additions);
+      const section = qs(modal.body, '.xns-preview-comments');
+      if (section) {
+        renderPreviewRecords(section, info, modal.previewRecords, {
+          loadedPages: modal.loadedPages,
+          failedPages: modal.failedPages,
+          challengePages: modal.challengePages,
+          truncated: modal.truncated,
+          totalPages: modal.totalPages,
+          pageLimit: modal.pageLimit,
+          statusNode: modal.toolbarStatus,
+          loading: false,
+          onRetry: () => {
+            if (state.modal === modal && !modal.loading) void retryPreviewPages(modal);
+          },
+          onNodeMounted: (node) => installPreviewFeatures(node),
+        });
+      }
+      updatePreviewHeaderMeta(modal, {
+        node: modal.headerMeta?.node?.value?.textContent || '',
+        author: modal.headerMeta?.author?.value?.textContent || '',
+        time: modal.headerMeta?.time?.value?.textContent || '',
+        replyCount: modal.previewRecords.length,
+      });
+      return true;
+    })().catch(() => false);
+    modal.replySyncPromise = promise;
+    try {
+      return await promise;
+    } finally {
+      if (modal.replySyncPromise === promise) modal.replySyncPromise = null;
+      if (modal.replySyncController === controller) modal.replySyncController = null;
+      modal.replySyncing = false;
+    }
+  }
+
   function getPreviewFailedPages(modal) {
     return Array.from(new Set((Array.isArray(modal?.failedPages) ? modal.failedPages : [])
       .map((page) => Number(page))
@@ -3904,6 +4003,7 @@ function createPreviewController({
     try {
       const response = await fetchHtml(modal.url, { noStore: fresh, allowCache: !fresh, signal: requestController?.signal });
       const parsed = parseHtml(response.html, response.url);
+      modal.previewSeed = parsed;
       const preview = buildPreviewContent(modal.url, parsed, {
         noStore: fresh,
         allowCache: !fresh,
@@ -3954,13 +4054,17 @@ function createPreviewController({
       modal.loading = false;
       refresh?.classList.remove('xns-action-pending');
       refresh?.removeAttribute('aria-busy');
+      if (modal.pendingReplySync && state.modal === modal) {
+        modal.pendingReplySync = false;
+        windowObj.setTimeout(() => { void syncPreviewReply(modal); }, 0);
+      }
     }
     return true;
   }
 
   function refreshPreviewModal() {
     const modal = state.modal;
-    if (!modal || modal.loading) return;
+    if (!modal || modal.loading || modal.replySyncing) return;
     void loadPreviewModal(modal, '正在刷新帖子…', { preserveContent: true });
   }
 
@@ -4006,20 +4110,22 @@ function createPreviewController({
       toolbarStatus,
       createRefreshButton(() => { void refreshPreviewModal(); }),
     );
+    const composerHost = createElement('div', 'xns-preview-composer-host');
+    composerHost.hidden = true;
     const body = createElement('div', 'xns-modal-body');
     body.appendChild(createElement('p', 'xns-loading', '正在读取帖子内容…'));
-    dialog.append(header, toolbar);
+    dialog.append(header, toolbar, composerHost);
     dialog.appendChild(body);
     const scrollCleanup = installPreviewScrollButtons(dialog, body);
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, toolbarStatus, previewSeed: null, previewRecords: [], loadedPages: 0, failedPages: [], challengePages: [], truncated: false, totalPages: null, pageLimit: maxPage };
+    state.modal = { overlay, dialog, body, composerHost, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, replySyncController: null, replySyncPromise: null, replySyncing: false, pendingReplySync: false, toolbarStatus, previewSeed: null, previewRecords: [], loadedPages: 0, failedPages: [], challengePages: [], truncated: false, totalPages: null, pageLimit: maxPage };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }
 
-  return Object.freeze({ buildPreviewContent, loadPreviewModal, refreshPreviewModal, openPreviewModal });
+  return Object.freeze({ buildPreviewContent, loadPreviewModal, refreshPreviewModal, syncPreviewReply, openPreviewModal });
 }
 
 const xnsPreviewController = createPreviewController({
@@ -4052,6 +4158,7 @@ const xnsPreviewController = createPreviewController({
 });
 const buildPreviewContent = (...args) => xnsPreviewController.buildPreviewContent(...args);
 const loadPreviewModal = (...args) => xnsPreviewController.loadPreviewModal(...args);
+const syncPreviewReply = (...args) => xnsPreviewController.syncPreviewReply(...args);
 const refreshPreviewModal = (...args) => xnsPreviewController.refreshPreviewModal(...args);
 const openPreviewModal = (...args) => xnsPreviewController.openPreviewModal(...args);
 

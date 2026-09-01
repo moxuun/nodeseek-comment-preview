@@ -1314,7 +1314,7 @@ scenario('楼层回复编辑器与帖子级回复编辑器', async (ctx) => {
       sourceUrl: floorComposer.querySelector('a')?.getAttribute('href'),
     } : null;
     document.querySelector('.xns-modal-reply').click();
-    const postComposer = document.querySelector('.xns-modal-body > .xns-preview-composer');
+    const postComposer = document.querySelector('.xns-preview-composer-host > .xns-preview-composer');
     return {
       floorInfo,
       postTitle: postComposer?.querySelector('.xns-preview-composer-title')?.textContent,
@@ -1326,6 +1326,53 @@ scenario('楼层回复编辑器与帖子级回复编辑器', async (ctx) => {
   assert(state.floorInfo?.sourceUrl === `${ctx.base}/post-123-1#3`, `楼层来源链接应为 /post-123-1#3，实际 ${state.floorInfo?.sourceUrl}`);
   assert(state.postTitle === '回复帖子', '帖子级编辑器标题应为“回复帖子”');
   assert(state.totalComposers === 2, `应同时存在楼层与帖子级编辑器，实际 ${state.totalComposers}`);
+});
+
+scenario('分页未完成时可立即打开帖子级回复编辑器', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.goto(`${ctx.base}/list-124`, { waitUntil: 'networkidle0' });
+  await page.click('a[href="/post-124-1"]');
+  await waitFor(page, () => Boolean(document.querySelector('.xns-modal .xns-modal-reply')), 5_000, '预览回复入口出现');
+  await page.click('.xns-modal-reply');
+  await page.evaluate(() => {
+    document.querySelector('.xns-preview-composer-host textarea').value = '分页加载期间的草稿';
+  });
+  const state = await page.evaluate(() => ({
+    composer: Boolean(document.querySelector('.xns-preview-composer-host > .xns-preview-composer')),
+    hostOpen: !document.querySelector('.xns-preview-composer-host')?.hidden,
+    bodyScrollTop: document.querySelector('.xns-modal-body')?.scrollTop || 0,
+  }));
+  assert(state.composer && state.hostOpen, `分页未完成时应立即打开独立回复区：${JSON.stringify(state)}`);
+  assert(state.bodyScrollTop === 0, `打开帖子级回复不应滚动评论区，实际 ${state.bodyScrollTop}`);
+  await waitFor(page, () => document.querySelector('.xns-preview-comments h3')?.textContent === '4 条回复', 5_000, '延迟分页完成');
+  const afterPagination = await page.evaluate(() => ({
+    composer: Boolean(document.querySelector('.xns-preview-composer-host > .xns-preview-composer')),
+    draft: document.querySelector('.xns-preview-composer-host textarea')?.value,
+  }));
+  assert(afterPagination.composer && afterPagination.draft === '分页加载期间的草稿', `分页重绘不应移除或清空回复草稿：${JSON.stringify(afterPagination)}`);
+  await page.close();
+});
+
+scenario('分页未完成时可立即发送帖子级回复', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.goto(`${ctx.base}/list-124`, { waitUntil: 'networkidle0' });
+  await page.click('a[href="/post-124-1"]');
+  await waitFor(page, () => Boolean(document.querySelector('.xns-modal .xns-modal-reply')), 5_000, '预览回复入口出现');
+  const startedAt = Date.now();
+  await page.click('.xns-modal-reply');
+  await page.evaluate(() => {
+    document.querySelector('.xns-preview-composer-host textarea').value = '分页未完成时发送的回复';
+  });
+  await page.click('.xns-preview-composer-host button');
+  await waitPost(page, (post) => post.url.endsWith('/api/content/new-comment'));
+  await waitFor(page, () => !document.querySelector('.xns-preview-composer-host > .xns-preview-composer'), 1_000, '回复响应完成后编辑器移除');
+  assert(Date.now() - startedAt < 1_200, '帖子级回复 POST 不应等待延迟分页返回');
+  const state = await page.evaluate(() => ({
+    composer: Boolean(document.querySelector('.xns-preview-composer-host > .xns-preview-composer')),
+    pageLoading: document.querySelector('.xns-preview-status')?.classList.contains('is-loading') || false,
+  }));
+  assert(!state.composer, `发送成功后应立即移除帖子级编辑器：${JSON.stringify(state)}`);
+  await page.close();
 });
 
 scenario('预览刷新保留滚动位置', async (ctx) => {
@@ -1345,7 +1392,7 @@ scenario('弹窗发送回复后重排', async (ctx) => {
   const page = await openPreviewModal(ctx);
   await page.evaluate(() => {
     document.querySelector('.xns-modal-reply').click();
-    const composer = document.querySelector('.xns-modal-body > .xns-preview-composer');
+    const composer = document.querySelector('.xns-preview-composer-host > .xns-preview-composer');
     composer.querySelector('textarea').value = '弹窗回归回复';
     composer.querySelector('button').click();
   });

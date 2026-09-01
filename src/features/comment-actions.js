@@ -16,7 +16,7 @@ function createCommentActions({
   getPostContent,
   findCommentList,
   postAction,
-  loadPreviewModal,
+  syncPreviewReply,
 }) {
   const PREVIEW_ACTIONS = [
     ['like', '点赞', '♡', true],
@@ -204,9 +204,11 @@ function createCommentActions({
       postId: modal?.postId || pageInfo?.postId || '',
       url: modal?.url || parseSameOriginUrl(windowObj.location.href),
     };
-    const host = modal?.body || (comment ? comment : findCommentList());
-    if (!host) return;
     const isPostReply = !comment || action === 'post-reply';
+    const host = isPostReply
+      ? (modal?.composerHost || modal?.body || findCommentList())
+      : (comment || findCommentList());
+    if (!host) return;
     const previousComposer = isPostReply ? (modal?.composer || state.post?.composer) : getDirectComposer(comment);
     previousComposer?.remove();
     const floor = isPostReply ? null : getDisplayFloor(comment);
@@ -240,8 +242,10 @@ function createCommentActions({
     const status = createElement('span', 'xns-preview-composer-status');
     actions.append(submit, original, cancel, status);
     composer.appendChild(actions);
-    if (isPostReply && modal?.body) {
-      modal.body.appendChild(composer);
+    if (isPostReply && modal?.composerHost) {
+      modal.composerHost.hidden = false;
+      modal.composerHost.classList.add('is-open');
+      modal.composerHost.appendChild(composer);
       modal.composer = composer;
     } else {
       const menu = qs(comment, '.xns-preview-menu');
@@ -250,10 +254,14 @@ function createCommentActions({
       if (isPostReply && state.post) state.post.composer = composer;
     }
     textarea.focus();
-    composer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (!isPostReply || !modal?.composerHost) composer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     cancel.addEventListener('click', () => {
       composer.remove();
-      if (modal?.composer === composer) modal.composer = null;
+      if (modal?.composer === composer) {
+        modal.composer = null;
+        modal.composerHost?.classList.remove('is-open');
+        if (modal.composerHost) modal.composerHost.hidden = true;
+      }
       if (!modal && state.post?.composer === composer) state.post.composer = null;
     });
     submit.addEventListener('click', async () => {
@@ -271,10 +279,14 @@ function createCommentActions({
         textarea.readOnly = true;
         submit.remove();
         if (actionContext.modal && state.modal === actionContext.modal) {
-          if (actionContext.modal.composer === composer) actionContext.modal.composer = null;
-          const refreshed = await loadPreviewModal(actionContext.modal, '正在更新回复…', { preserveContent: true });
-          if (refreshed) composer.remove();
-          else status.textContent = '回复已发送。帖子正在刷新中，楼中楼可能暂未包含新回复，请稍后再点刷新。';
+          const postModal = actionContext.modal;
+          if (postModal.composer === composer) {
+            postModal.composer = null;
+            postModal.composerHost?.classList.remove('is-open');
+            if (postModal.composerHost) postModal.composerHost.hidden = true;
+          }
+          composer.remove();
+          void syncPreviewReply?.(postModal);
         } else if (state.post) {
           const post = state.post;
           if (post.composer === composer) post.composer = null;
@@ -361,7 +373,7 @@ const xnsCommentActions = createCommentActions({
   getPostContent,
   findCommentList,
   postAction,
-  loadPreviewModal: (...args) => loadPreviewModal(...args),
+  syncPreviewReply: (...args) => syncPreviewReply(...args),
 });
 const getDirectCommentMenu = (...args) => xnsCommentActions.getDirectCommentMenu(...args);
 const getMenuActionKey = (...args) => xnsCommentActions.getMenuActionKey(...args);

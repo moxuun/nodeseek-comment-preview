@@ -357,6 +357,89 @@ function createPreviewController({
     }
   }
 
+  function mergePreviewRecords(existing, additions) {
+    const merged = new Map((Array.isArray(existing) ? existing : []).map((record) => [String(record.floor), record]));
+    (Array.isArray(additions) ? additions : []).forEach((record) => {
+      const previous = merged.get(String(record.floor));
+      if (!previous || record.current) merged.set(String(record.floor), record);
+    });
+    return Array.from(merged.values());
+  }
+
+  async function syncPreviewReply(modal) {
+    if (!modal || state.modal !== modal) return false;
+    if (modal.loading) {
+      modal.pendingReplySync = true;
+      return false;
+    }
+    if (modal.replySyncPromise) return modal.replySyncPromise;
+    const info = getPostInfo(modal.url?.href || '');
+    const seed = modal.previewSeed;
+    if (!info || !seed) return false;
+
+    const knownPages = getPageNumbers(seed, info.postId);
+    const discoveredLastPage = knownPages.size ? Math.max(...knownPages) : info.page;
+    const lastPage = Math.max(1, Number(modal.totalPages) || discoveredLastPage || info.page || 1);
+    const pages = Array.from(new Set([lastPage, lastPage + 1]));
+    const controller = windowObj.AbortController ? new windowObj.AbortController() : null;
+    modal.replySyncController = controller;
+    modal.replySyncing = true;
+    const promise = (async () => {
+      const additions = [];
+      let successfulReads = 0;
+      for (const page of pages) {
+        if (state.modal !== modal) return false;
+        try {
+          const response = await fetchHtml(new URL(`/post-${info.postId}-${page}`, windowObj.location.origin), {
+            noStore: true,
+            allowCache: false,
+            signal: controller?.signal,
+          });
+          const parsed = parseHtml(response.html, response.url);
+          additions.push(...collectPageRecords(info, parsed, page));
+          successfulReads += 1;
+        } catch {
+          // 新回复可能还没生成下一页；已成功发送不应因同步探测失败而变成失败。
+        }
+      }
+      if (state.modal !== modal) return false;
+      if (successfulReads === 0) return false;
+      modal.previewRecords = mergePreviewRecords(modal.previewRecords, additions);
+      const section = qs(modal.body, '.xns-preview-comments');
+      if (section) {
+        renderPreviewRecords(section, info, modal.previewRecords, {
+          loadedPages: modal.loadedPages,
+          failedPages: modal.failedPages,
+          challengePages: modal.challengePages,
+          truncated: modal.truncated,
+          totalPages: modal.totalPages,
+          pageLimit: modal.pageLimit,
+          statusNode: modal.toolbarStatus,
+          loading: false,
+          onRetry: () => {
+            if (state.modal === modal && !modal.loading) void retryPreviewPages(modal);
+          },
+          onNodeMounted: (node) => installPreviewFeatures(node),
+        });
+      }
+      updatePreviewHeaderMeta(modal, {
+        node: modal.headerMeta?.node?.value?.textContent || '',
+        author: modal.headerMeta?.author?.value?.textContent || '',
+        time: modal.headerMeta?.time?.value?.textContent || '',
+        replyCount: modal.previewRecords.length,
+      });
+      return true;
+    })().catch(() => false);
+    modal.replySyncPromise = promise;
+    try {
+      return await promise;
+    } finally {
+      if (modal.replySyncPromise === promise) modal.replySyncPromise = null;
+      if (modal.replySyncController === controller) modal.replySyncController = null;
+      modal.replySyncing = false;
+    }
+  }
+
   function getPreviewFailedPages(modal) {
     return Array.from(new Set((Array.isArray(modal?.failedPages) ? modal.failedPages : [])
       .map((page) => Number(page))
@@ -487,6 +570,7 @@ function createPreviewController({
     try {
       const response = await fetchHtml(modal.url, { noStore: fresh, allowCache: !fresh, signal: requestController?.signal });
       const parsed = parseHtml(response.html, response.url);
+      modal.previewSeed = parsed;
       const preview = buildPreviewContent(modal.url, parsed, {
         noStore: fresh,
         allowCache: !fresh,
@@ -537,13 +621,17 @@ function createPreviewController({
       modal.loading = false;
       refresh?.classList.remove('xns-action-pending');
       refresh?.removeAttribute('aria-busy');
+      if (modal.pendingReplySync && state.modal === modal) {
+        modal.pendingReplySync = false;
+        windowObj.setTimeout(() => { void syncPreviewReply(modal); }, 0);
+      }
     }
     return true;
   }
 
   function refreshPreviewModal() {
     const modal = state.modal;
-    if (!modal || modal.loading) return;
+    if (!modal || modal.loading || modal.replySyncing) return;
     void loadPreviewModal(modal, '正在刷新帖子…', { preserveContent: true });
   }
 
@@ -589,20 +677,22 @@ function createPreviewController({
       toolbarStatus,
       createRefreshButton(() => { void refreshPreviewModal(); }),
     );
+    const composerHost = createElement('div', 'xns-preview-composer-host');
+    composerHost.hidden = true;
     const body = createElement('div', 'xns-modal-body');
     body.appendChild(createElement('p', 'xns-loading', '正在读取帖子内容…'));
-    dialog.append(header, toolbar);
+    dialog.append(header, toolbar, composerHost);
     dialog.appendChild(body);
     const scrollCleanup = installPreviewScrollButtons(dialog, body);
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = { overlay, dialog, body, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, toolbarStatus, previewSeed: null, previewRecords: [], loadedPages: 0, failedPages: [], challengePages: [], truncated: false, totalPages: null, pageLimit: maxPage };
+    state.modal = { overlay, dialog, body, composerHost, title, url: fetchUrl, fallbackLink, postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null, headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null, replySyncController: null, replySyncPromise: null, replySyncing: false, pendingReplySync: false, toolbarStatus, previewSeed: null, previewRecords: [], loadedPages: 0, failedPages: [], challengePages: [], truncated: false, totalPages: null, pageLimit: maxPage };
     overlay.focus();
     void loadPreviewModal(state.modal, '正在读取帖子内容…');
   }
 
-  return Object.freeze({ buildPreviewContent, loadPreviewModal, refreshPreviewModal, openPreviewModal });
+  return Object.freeze({ buildPreviewContent, loadPreviewModal, refreshPreviewModal, syncPreviewReply, openPreviewModal });
 }
 
 const xnsPreviewController = createPreviewController({
@@ -635,5 +725,6 @@ const xnsPreviewController = createPreviewController({
 });
 const buildPreviewContent = (...args) => xnsPreviewController.buildPreviewContent(...args);
 const loadPreviewModal = (...args) => xnsPreviewController.loadPreviewModal(...args);
+const syncPreviewReply = (...args) => xnsPreviewController.syncPreviewReply(...args);
 const refreshPreviewModal = (...args) => xnsPreviewController.refreshPreviewModal(...args);
 const openPreviewModal = (...args) => xnsPreviewController.openPreviewModal(...args);
