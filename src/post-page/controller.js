@@ -282,12 +282,7 @@ function createPostPageController({
         this.challengePages = [...(progress.challengePages || [])];
         this.truncated = progress.truncated;
         this.totalPages = progress.totalPages;
-        const unique = new Map();
-        [...this.records, ...remoteRecords].forEach((record) => {
-          const previous = unique.get(record.floor);
-          if (!previous || record.current) unique.set(record.floor, record);
-        });
-        this.records = Array.from(unique.values());
+        this.records = mergeCommentRecords(this.records, remoteRecords);
         this.scheduleProgressiveRender(generation);
       };
       const fresh = options.noStore === true || options.refreshCurrentPage === true;
@@ -324,13 +319,7 @@ function createPostPageController({
       this.truncated = truncated;
       this.totalPages = totalPages;
 
-      const allRecords = [...this.records, ...remoteRecords];
-      const unique = new Map();
-      allRecords.forEach((record) => {
-        const previous = unique.get(record.floor);
-        if (!previous || record.current) unique.set(record.floor, record);
-      });
-      this.records = Array.from(unique.values());
+      this.records = mergeCommentRecords(this.records, remoteRecords);
     }
 
     scheduleProgressiveRender(generation) {

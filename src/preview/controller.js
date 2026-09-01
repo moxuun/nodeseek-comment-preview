@@ -354,15 +354,6 @@ function createPreviewController({
     }
   }
 
-  function mergePreviewRecords(existing, additions) {
-    const merged = new Map((Array.isArray(existing) ? existing : []).map((record) => [String(record.floor), record]));
-    (Array.isArray(additions) ? additions : []).forEach((record) => {
-      const previous = merged.get(String(record.floor));
-      if (!previous || record.current) merged.set(String(record.floor), record);
-    });
-    return Array.from(merged.values());
-  }
-
   async function syncPreviewReply(modal) {
     if (!modal || state.modal !== modal) return false;
     if (modal.loading) {
@@ -401,7 +392,7 @@ function createPreviewController({
       }
       if (state.modal !== modal) return false;
       if (successfulReads === 0) return false;
-      modal.previewRecords = mergePreviewRecords(modal.previewRecords, additions);
+      modal.previewRecords = mergeCommentRecords(modal.previewRecords, additions);
       const section = qs(modal.body, '.xns-preview-comments');
       if (section) {
         renderPreviewRecords(section, info, modal.previewRecords, {

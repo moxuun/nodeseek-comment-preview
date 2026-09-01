@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.55
+// @version      0.5.56
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       moxuun
 // @license      MIT
@@ -1267,6 +1267,20 @@ function flattenReplyTreeModel(records) {
 
 const flattenReplyTree = (records) => flattenReplyTreeModel(records);
 
+function mergeCommentRecords(...groups) {
+  const merged = new Map();
+  groups.forEach((records) => {
+    if (!Array.isArray(records)) return;
+    records.forEach((record) => {
+      if (!record) return;
+      const key = String(record.floor);
+      const previous = merged.get(key);
+      if (!previous || record.current) merged.set(key, record);
+    });
+  });
+  return Array.from(merged.values());
+}
+
 
 // 评论虚拟列表：保留完整评论记录，只把视口附近的楼层物化成 DOM。
 // 它不读取网络，也不改变楼层关系；帖子页和预览弹窗共用同一套窗口模型。
@@ -1694,20 +1708,15 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
 
   async function loadPreviewRecords(info, firstDocument, options = {}) {
     const initialRecords = Array.isArray(options.initialRecords) ? options.initialRecords : null;
-    const unique = new Map();
-    const mergeRecords = (records) => records.forEach((record) => {
-      const previous = unique.get(record.floor);
-      if (!previous || record.current) unique.set(record.floor, record);
-    });
-    if (initialRecords) mergeRecords(initialRecords);
+    let records = mergeCommentRecords(initialRecords);
     const { loadedPages, failedPages, challengePages, truncated, totalPages, pageLimit } = await fetchPostPages(info, firstDocument, {
       ...options,
       retainDocuments: false,
       onPageLoaded: (page, root, progress) => {
         if (initialRecords && page === info.page) return;
-        mergeRecords(collectPageRecords(info, root, page));
+        records = mergeCommentRecords(records, collectPageRecords(info, root, page));
         options.onRecordsLoaded?.({
-          records: Array.from(unique.values()),
+          records,
           ...progress,
           page,
           loading: true,
@@ -1716,7 +1725,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
       onPageFailed: (page, progress) => {
         options.onPageFailed?.(page, progress);
         options.onRecordsLoaded?.({
-          records: Array.from(unique.values()),
+          records,
           ...progress,
           page,
           loading: true,
@@ -1724,7 +1733,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
       },
     });
     return {
-      records: Array.from(unique.values()),
+      records,
       loadedPages,
       failedPages,
       challengePages,
@@ -3828,15 +3837,6 @@ function createPreviewController({
     }
   }
 
-  function mergePreviewRecords(existing, additions) {
-    const merged = new Map((Array.isArray(existing) ? existing : []).map((record) => [String(record.floor), record]));
-    (Array.isArray(additions) ? additions : []).forEach((record) => {
-      const previous = merged.get(String(record.floor));
-      if (!previous || record.current) merged.set(String(record.floor), record);
-    });
-    return Array.from(merged.values());
-  }
-
   async function syncPreviewReply(modal) {
     if (!modal || state.modal !== modal) return false;
     if (modal.loading) {
@@ -3875,7 +3875,7 @@ function createPreviewController({
       }
       if (state.modal !== modal) return false;
       if (successfulReads === 0) return false;
-      modal.previewRecords = mergePreviewRecords(modal.previewRecords, additions);
+      modal.previewRecords = mergeCommentRecords(modal.previewRecords, additions);
       const section = qs(modal.body, '.xns-preview-comments');
       if (section) {
         renderPreviewRecords(section, info, modal.previewRecords, {
@@ -4551,12 +4551,7 @@ function createPostPageController({
         this.challengePages = [...(progress.challengePages || [])];
         this.truncated = progress.truncated;
         this.totalPages = progress.totalPages;
-        const unique = new Map();
-        [...this.records, ...remoteRecords].forEach((record) => {
-          const previous = unique.get(record.floor);
-          if (!previous || record.current) unique.set(record.floor, record);
-        });
-        this.records = Array.from(unique.values());
+        this.records = mergeCommentRecords(this.records, remoteRecords);
         this.scheduleProgressiveRender(generation);
       };
       const fresh = options.noStore === true || options.refreshCurrentPage === true;
@@ -4593,13 +4588,7 @@ function createPostPageController({
       this.truncated = truncated;
       this.totalPages = totalPages;
 
-      const allRecords = [...this.records, ...remoteRecords];
-      const unique = new Map();
-      allRecords.forEach((record) => {
-        const previous = unique.get(record.floor);
-        if (!previous || record.current) unique.set(record.floor, record);
-      });
-      this.records = Array.from(unique.values());
+      this.records = mergeCommentRecords(this.records, remoteRecords);
     }
 
     scheduleProgressiveRender(generation) {

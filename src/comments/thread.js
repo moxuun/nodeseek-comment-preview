@@ -40,3 +40,17 @@ function flattenReplyTreeModel(records) {
 }
 
 const flattenReplyTree = (records) => flattenReplyTreeModel(records);
+
+function mergeCommentRecords(...groups) {
+  const merged = new Map();
+  groups.forEach((records) => {
+    if (!Array.isArray(records)) return;
+    records.forEach((record) => {
+      if (!record) return;
+      const key = String(record.floor);
+      const previous = merged.get(key);
+      if (!previous || record.current) merged.set(key, record);
+    });
+  });
+  return Array.from(merged.values());
+}

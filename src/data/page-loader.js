@@ -133,20 +133,15 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
 
   async function loadPreviewRecords(info, firstDocument, options = {}) {
     const initialRecords = Array.isArray(options.initialRecords) ? options.initialRecords : null;
-    const unique = new Map();
-    const mergeRecords = (records) => records.forEach((record) => {
-      const previous = unique.get(record.floor);
-      if (!previous || record.current) unique.set(record.floor, record);
-    });
-    if (initialRecords) mergeRecords(initialRecords);
+    let records = mergeCommentRecords(initialRecords);
     const { loadedPages, failedPages, challengePages, truncated, totalPages, pageLimit } = await fetchPostPages(info, firstDocument, {
       ...options,
       retainDocuments: false,
       onPageLoaded: (page, root, progress) => {
         if (initialRecords && page === info.page) return;
-        mergeRecords(collectPageRecords(info, root, page));
+        records = mergeCommentRecords(records, collectPageRecords(info, root, page));
         options.onRecordsLoaded?.({
-          records: Array.from(unique.values()),
+          records,
           ...progress,
           page,
           loading: true,
@@ -155,7 +150,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
       onPageFailed: (page, progress) => {
         options.onPageFailed?.(page, progress);
         options.onRecordsLoaded?.({
-          records: Array.from(unique.values()),
+          records,
           ...progress,
           page,
           loading: true,
@@ -163,7 +158,7 @@ function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, request
       },
     });
     return {
-      records: Array.from(unique.values()),
+      records,
       loadedPages,
       failedPages,
       challengePages,
