@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.56
+// @version      0.5.57
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       moxuun
 // @license      MIT
@@ -3564,6 +3564,28 @@ function createPreviewController({
     });
   }
 
+  function renderPreviewSection(section, info, records, options = {}) {
+    const onNodeMounted = options.onNodeMounted;
+    return renderPreviewRecords(section, info, records, {
+      ...options,
+      onNodeMounted: (node, record) => {
+        installPreviewFeatures(node);
+        onNodeMounted?.(node, record);
+      },
+    });
+  }
+
+  function applyPreviewResult(modal, result) {
+    if (!modal || !result) return;
+    modal.previewRecords = Array.isArray(result.records) ? result.records : [];
+    modal.loadedPages = result.loadedPages;
+    modal.failedPages = Array.isArray(result.failedPages) ? result.failedPages : [];
+    modal.challengePages = Array.isArray(result.challengePages) ? result.challengePages : [];
+    modal.truncated = Boolean(result.truncated);
+    modal.totalPages = result.totalPages;
+    modal.pageLimit = result.pageLimit;
+  }
+
   function createPreviewHeaderMeta() {
     const root = createElement('div', 'xns-modal-meta');
     const items = {};
@@ -3599,11 +3621,10 @@ function createPreviewController({
     section.appendChild(createElement('h3'));
     const thread = createElement('ul', 'xns-preview-thread');
     section.appendChild(thread);
-      renderPreviewRecords(section, info, currentRecords, {
+    renderPreviewSection(section, info, currentRecords, {
         loading: hasRemotePages,
         statusNode: options.statusNode,
         onRetry: options.onRetry,
-        onNodeMounted: (node) => installPreviewFeatures(node),
     });
     wrapper.appendChild(section);
     let progressiveTimer = 0;
@@ -3611,11 +3632,10 @@ function createPreviewController({
     let renderedProgress = false;
     const renderProgress = (progress) => {
       if (!progress || !section.isConnected) return false;
-      renderPreviewRecords(section, info, progress.records, {
+      renderPreviewSection(section, info, progress.records, {
         ...progress,
         statusNode: options.statusNode,
         onRetry: options.onRetry,
-        onNodeMounted: (node) => installPreviewFeatures(node),
       });
       return true;
     };
@@ -3643,11 +3663,10 @@ function createPreviewController({
       progressiveTimer = 0;
       pendingProgress = null;
       if (section.isConnected || options.renderDetached === true) {
-        renderPreviewRecords(section, info, preview.records, {
+        renderPreviewSection(section, info, preview.records, {
           ...preview,
           statusNode: options.statusNode,
           onRetry: options.onRetry,
-          onNodeMounted: (node) => installPreviewFeatures(node),
         });
       }
       return preview;
@@ -3878,7 +3897,7 @@ function createPreviewController({
       modal.previewRecords = mergeCommentRecords(modal.previewRecords, additions);
       const section = qs(modal.body, '.xns-preview-comments');
       if (section) {
-        renderPreviewRecords(section, info, modal.previewRecords, {
+        renderPreviewSection(section, info, modal.previewRecords, {
           loadedPages: modal.loadedPages,
           failedPages: modal.failedPages,
           challengePages: modal.challengePages,
@@ -3890,7 +3909,6 @@ function createPreviewController({
           onRetry: () => {
             if (state.modal === modal && !modal.loading) void retryPreviewPages(modal);
           },
-          onNodeMounted: (node) => installPreviewFeatures(node),
         });
       }
       updatePreviewHeaderMeta(modal, {
@@ -3957,13 +3975,12 @@ function createPreviewController({
       const currentTotal = Math.max(1, Number(modal.totalPages) || currentLimit);
       modal.loadedPages = Math.max(0, Math.min(currentLimit, currentTotal) - modal.failedPages.length);
       modal.challengePages = [...(progress.challengePages || [])];
-      renderPreviewRecords(section, info, progress.records, {
+      renderPreviewSection(section, info, progress.records, {
         ...progress,
         loadedPages: modal.loadedPages,
         statusNode: toolbarStatus,
         loading,
         onRetry: retryAgain,
-        onNodeMounted: (node) => installPreviewFeatures(node),
       });
     };
 
@@ -3983,13 +4000,7 @@ function createPreviewController({
         onRecordsLoaded: (progress) => renderProgress(progress, true),
       });
       if (state.modal !== modal) return false;
-      modal.previewRecords = preview.records;
-      modal.loadedPages = preview.loadedPages;
-      modal.failedPages = preview.failedPages;
-      modal.challengePages = preview.challengePages || [];
-      modal.truncated = preview.truncated;
-      modal.totalPages = preview.totalPages;
-      modal.pageLimit = preview.pageLimit;
+      applyPreviewResult(modal, preview);
       renderProgress({ ...preview, records: preview.records }, false);
       updatePreviewHeaderMeta(modal, {
         node: modal.headerMeta?.node?.value?.textContent || '',
@@ -4073,13 +4084,7 @@ function createPreviewController({
       });
       if (hydratedPreview) {
         modal.previewSeed = parsed;
-        modal.previewRecords = hydratedPreview.records;
-        modal.loadedPages = hydratedPreview.loadedPages;
-        modal.failedPages = hydratedPreview.failedPages;
-        modal.challengePages = hydratedPreview.challengePages || [];
-        modal.truncated = hydratedPreview.truncated;
-        modal.totalPages = hydratedPreview.totalPages;
-        modal.pageLimit = hydratedPreview.pageLimit;
+        applyPreviewResult(modal, hydratedPreview);
       }
       if (preserveContent) stabilizePreviewScroll(modal, scrollSnapshot, generation);
     } catch (error) {
