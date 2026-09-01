@@ -6,7 +6,7 @@
   <div class="nsk-post">
     <div class="content-item" id="0" data-comment-id="100">
       <h1 class="post-title">Fixture NodeSeek 帖子</h1>
-      <div class="nsk-content-meta-info"><a href="/space/0">Owner</a></div>
+      <div class="nsk-content-meta-info"><a href="/space/0">Owner</a><span class="floor-link-wrapper"><a class="floor-link" href="#0">#0</a></span></div>
       <article class="post-content"><p>这是用于测试脚本的帖子正文。</p><pre><code class="language-bash">echo "NodeSeek"
 printf "ok"</code></pre><div class="nsk-magic-tabs"><div class="nsk-magic-tab-title">💻基本信息</div><div class="nsk-magic-tab-body"><pre><code class="language-ansi"><span data-ansicode="27"></span>[1m报告标题<span data-ansicode="27"></span>[0m
  <span data-ansicode="27"></span>[32m系统正常<span data-ansicode="27"></span>[0m</code></pre></div><div class="nsk-magic-tab-title">🎬IP质量</div><div class="nsk-magic-tab-body"><p>IP 质量内容</p></div><div class="nsk-magic-tab-title">🌐网络质量</div><div class="nsk-magic-tab-body"><p>网络质量内容</p></div><div class="nsk-magic-tab-title">📍回程路由</div><div class="nsk-magic-tab-body"><p>回程路由内容</p></div></div><p><img src="/test.png" alt="测试图片"></p><a href="javascript://void(0)" data-href="nsapp://vote?id=123">nsapp://vote?id=123</a></article>

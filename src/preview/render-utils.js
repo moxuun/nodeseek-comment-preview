@@ -12,10 +12,26 @@ function createPreviewRenderUtils({ qs, qsa, createElement }) {
     item.style.removeProperty('--xns-indent');
   }
 
-  function addRemoteNote(record, postId) {
-    if (!record.node?.hasAttribute('data-xns-remote')) return;
+  function setFloorLinkUrl(source, record, postId) {
+    if (!source) return;
+    source.href = `/post-${postId}-${record.page}#${record.floor}`;
+    source.target = '_blank';
+    source.rel = 'noopener noreferrer';
+    source.title = `打开原楼层 #${record.floor}`;
+    source.setAttribute('aria-label', `打开原楼层 #${record.floor}`);
+  }
+
+  function addRemoteNote(record, postId, remote = record.node?.hasAttribute('data-xns-remote')) {
+    if (!record.node) return;
+    const floorLinks = qsa(record.node, '.floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link');
+    const existing = floorLinks.find((link) => link.closest('.floor-link-wrapper')) || floorLinks[0] || null;
+    if (!remote) {
+      // 当前页评论保留官方楼号样式，但也必须绑定到原帖页，不能继续使用裸 #N。
+      floorLinks.forEach((link) => setFloorLinkUrl(link, record, postId));
+      return;
+    }
     const meta = qs(record.node, ':scope > .nsk-content-meta-info');
-    let source = qs(record.node, '.floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link');
+    let source = existing;
     let wrapper = source?.closest('.floor-link-wrapper');
     if (!source) {
       wrapper = createElement('div', 'floor-link-wrapper');
@@ -31,11 +47,9 @@ function createPreviewRenderUtils({ qs, qsa, createElement }) {
         return created;
       })();
     }
-    source.href = `/post-${postId}-${record.page}#${record.floor}`;
-    source.target = '_blank';
-    source.rel = 'noopener noreferrer';
-    source.title = `打开原楼层 #${record.floor}`;
-    source.setAttribute('aria-label', `打开原楼层 #${record.floor}`);
+    setFloorLinkUrl(source, record, postId);
+    qsa(record.node, '.floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link')
+      .forEach((link) => setFloorLinkUrl(link, record, postId));
     wrapper?.classList.add('xns-remote-floor-link');
   }
 

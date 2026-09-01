@@ -104,6 +104,14 @@ function createPreviewRenderer({
     node.setAttribute('data-xns-floor', '0');
     node.setAttribute('data-xns-target-type', 'post');
     node.setAttribute('data-xns-post-id', info.postId);
+    const floorLink = qs(node, '.floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link');
+    if (floorLink) {
+      floorLink.href = `/post-${info.postId}-1#0`;
+      floorLink.target = '_blank';
+      floorLink.rel = 'noopener noreferrer';
+      floorLink.title = '打开原帖 #0';
+      floorLink.setAttribute('aria-label', '打开原帖 #0');
+    }
     const postState = getDocState(parsed);
     const postCommentId = getCommentId(node);
     const counts = postCommentId !== null && postState ? getSsrCommentCounts(postState, postCommentId) : null;
@@ -168,7 +176,7 @@ function createPreviewRenderer({
     if (records.length) {
       const onNodeMounted = (node, entry) => {
         const record = entry.record;
-        if (record.page !== info.page) addRemoteNote(record, info.postId);
+        addRemoteNote(record, info.postId, record.page !== info.page);
         options.onNodeMounted?.(node, record);
       };
       const onNodeUnmounted = (node, entry) => {

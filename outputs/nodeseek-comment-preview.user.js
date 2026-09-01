@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.53
+// @version      0.5.54
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       moxuun
 // @license      MIT
@@ -2243,10 +2243,26 @@ function createPreviewRenderUtils({ qs, qsa, createElement }) {
     item.style.removeProperty('--xns-indent');
   }
 
-  function addRemoteNote(record, postId) {
-    if (!record.node?.hasAttribute('data-xns-remote')) return;
+  function setFloorLinkUrl(source, record, postId) {
+    if (!source) return;
+    source.href = `/post-${postId}-${record.page}#${record.floor}`;
+    source.target = '_blank';
+    source.rel = 'noopener noreferrer';
+    source.title = `打开原楼层 #${record.floor}`;
+    source.setAttribute('aria-label', `打开原楼层 #${record.floor}`);
+  }
+
+  function addRemoteNote(record, postId, remote = record.node?.hasAttribute('data-xns-remote')) {
+    if (!record.node) return;
+    const floorLinks = qsa(record.node, '.floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link');
+    const existing = floorLinks.find((link) => link.closest('.floor-link-wrapper')) || floorLinks[0] || null;
+    if (!remote) {
+      // 当前页评论保留官方楼号样式，但也必须绑定到原帖页，不能继续使用裸 #N。
+      floorLinks.forEach((link) => setFloorLinkUrl(link, record, postId));
+      return;
+    }
     const meta = qs(record.node, ':scope > .nsk-content-meta-info');
-    let source = qs(record.node, '.floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link');
+    let source = existing;
     let wrapper = source?.closest('.floor-link-wrapper');
     if (!source) {
       wrapper = createElement('div', 'floor-link-wrapper');
@@ -2262,11 +2278,9 @@ function createPreviewRenderUtils({ qs, qsa, createElement }) {
         return created;
       })();
     }
-    source.href = `/post-${postId}-${record.page}#${record.floor}`;
-    source.target = '_blank';
-    source.rel = 'noopener noreferrer';
-    source.title = `打开原楼层 #${record.floor}`;
-    source.setAttribute('aria-label', `打开原楼层 #${record.floor}`);
+    setFloorLinkUrl(source, record, postId);
+    qsa(record.node, '.floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link')
+      .forEach((link) => setFloorLinkUrl(link, record, postId));
     wrapper?.classList.add('xns-remote-floor-link');
   }
 
@@ -2384,6 +2398,14 @@ function createPreviewRenderer({
     node.setAttribute('data-xns-floor', '0');
     node.setAttribute('data-xns-target-type', 'post');
     node.setAttribute('data-xns-post-id', info.postId);
+    const floorLink = qs(node, '.floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link');
+    if (floorLink) {
+      floorLink.href = `/post-${info.postId}-1#0`;
+      floorLink.target = '_blank';
+      floorLink.rel = 'noopener noreferrer';
+      floorLink.title = '打开原帖 #0';
+      floorLink.setAttribute('aria-label', '打开原帖 #0');
+    }
     const postState = getDocState(parsed);
     const postCommentId = getCommentId(node);
     const counts = postCommentId !== null && postState ? getSsrCommentCounts(postState, postCommentId) : null;
@@ -2448,7 +2470,7 @@ function createPreviewRenderer({
     if (records.length) {
       const onNodeMounted = (node, entry) => {
         const record = entry.record;
-        if (record.page !== info.page) addRemoteNote(record, info.postId);
+        addRemoteNote(record, info.postId, record.page !== info.page);
         options.onNodeMounted?.(node, record);
       };
       const onNodeUnmounted = (node, entry) => {

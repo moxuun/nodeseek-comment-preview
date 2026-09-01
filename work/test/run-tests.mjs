@@ -1140,6 +1140,7 @@ scenario('列表页预览弹窗结构与操作菜单', async (ctx) => {
   const state = await page.evaluate(() => {
     const modal = document.querySelector('.xns-modal');
     const post = modal.querySelector('.xns-preview-post');
+    const postFloorLink = post.querySelector('.floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link');
     const postActions = [...post.querySelector(':scope > .comment-menu').children].map((item) => item.dataset.xnsAction);
     const root = modal.querySelector('.xns-preview-thread .xns-comment-root');
     const floorActions = [...root.querySelector(':scope > .comment-menu').children].map((item) => item.dataset.xnsAction);
@@ -1147,6 +1148,7 @@ scenario('列表页预览弹窗结构与操作菜单', async (ctx) => {
     const remoteFloorLink = modal.querySelector('.xns-preview-thread .xns-remote-floor-link > .floor-link');
     return {
       title: modal.querySelector('.xns-modal-title')?.textContent,
+      postFloorHref: postFloorLink?.href || '',
       postActions,
       floorActions,
       floorHints,
@@ -1156,6 +1158,7 @@ scenario('列表页预览弹窗结构与操作菜单', async (ctx) => {
     };
   });
   assert(state.title === 'Fixture NodeSeek 帖子', `弹窗标题应为帖子标题，实际 ${state.title}`);
+  assert(state.postFloorHref === `${ctx.base}/post-123-1#0`, `主帖 #0 应指向原帖，实际 ${state.postFloorHref}`);
   assert(JSON.stringify(state.postActions) === JSON.stringify(['like', 'chicken', 'dislike', 'favorite', 'quote', 'reply']), `主帖应有 6 项操作，实际 ${JSON.stringify(state.postActions)}`);
   assert(JSON.stringify(state.floorActions.slice(0, 5)) === JSON.stringify(['like', 'chicken', 'dislike', 'quote', 'reply']), `回复楼层应有 5 项标准操作（不含收藏），实际 ${JSON.stringify(state.floorActions.slice(0, 5))}`);
   assert(state.floorActions[5] === null, `回复楼层第 6 项应为官方编辑项（null），实际 ${JSON.stringify(state.floorActions[5])}`);
@@ -1262,7 +1265,7 @@ scenario('弹窗跨页来源链接只出现在跨页评论（0.5.8 回归）', a
       floorLinks: [...document.querySelectorAll('.xns-preview-thread .floor-link-wrapper > .floor-link')]
         .map((link) => {
           const floor = link.closest('.content-item')?.getAttribute('data-xns-floor');
-          return { floor, text: link.textContent.trim(), href: link.getAttribute('href') };
+          return { floor, text: link.textContent.trim(), href: link.href };
         }),
     };
   });
@@ -1278,7 +1281,7 @@ scenario('弹窗跨页来源链接只出现在跨页评论（0.5.8 回归）', a
   });
   assert(pos && pos.position === 'absolute', `楼号 wrapper 应为 absolute 定位（官方右上角样式），实际 ${JSON.stringify(pos)}`);
   assert(currentPageLinks.every((l) => /^#\d+$/.test(l.text)), `楼号文本应为官方 #N 格式，实际 ${JSON.stringify(currentPageLinks.map((l) => l.text))}`);
-  assert(currentPageLinks.every((l) => l.href === `#${l.floor}` || l.href.endsWith(`#${l.floor}`)), `当前页楼号 href 应为官方 #N，实际 ${JSON.stringify(currentPageLinks.map((l) => l.href))}`);
+  assert(currentPageLinks.every((l) => l.href === `${ctx.base}/post-123-1#${l.floor}`), `所有当前页楼号都应指向原帖楼层，实际 ${JSON.stringify(currentPageLinks)}`);
 });
 
 scenario('弹窗点赞与收藏', async (ctx) => {
