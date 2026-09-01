@@ -400,34 +400,7 @@ function createPostPageController({
 
     render(options = {}) {
       if (!this.list || appState.mode !== 'thread') return;
-      if (!this.virtualizer) {
-        this.restoreOriginal({ releaseRemote: false });
-        // 帖子详情页复用官方的 ul.comments；补上预览线程作用域，
-        // 让根楼层蓝栏、楼号和其他预览样式与弹窗预览保持一致。
-        this.list.classList.add('xns-preview-thread');
-        this.virtualizer = createCommentVirtualizer({
-          windowObj,
-          documentObj,
-          createElement,
-          estimatedHeight: 135,
-          overscanScreens: 2,
-        }).mount(this.list, {
-          getViewport: () => windowObj,
-          renderItem: (entry) => prepareCommentRecord(entry.record, entry.depth),
-          onMount: (node, entry) => {
-            const record = entry.record;
-            if (!record.current) {
-              addRemoteNote(record, this.info.postId);
-              node.classList.add('xns-preview-content');
-              installPreviewFeatures(node);
-            }
-          },
-          onUnmount: (node, entry) => {
-            if (!entry.record.current) releaseCommentNode(entry.record);
-          },
-        });
-      }
-      this.virtualizer.setEntries(flattenReplyTree(this.records), {
+      const virtualizerOptions = {
         getViewport: () => windowObj,
         renderItem: (entry) => prepareCommentRecord(entry.record, entry.depth),
         onMount: (node, entry) => {
@@ -441,7 +414,21 @@ function createPostPageController({
         onUnmount: (node, entry) => {
           if (!entry.record.current) releaseCommentNode(entry.record);
         },
-      });
+      };
+      if (!this.virtualizer) {
+        this.restoreOriginal({ releaseRemote: false });
+        // 帖子详情页复用官方的 ul.comments；补上预览线程作用域，
+        // 让根楼层蓝栏、楼号和其他预览样式与弹窗预览保持一致。
+        this.list.classList.add('xns-preview-thread');
+        this.virtualizer = createCommentVirtualizer({
+          windowObj,
+          documentObj,
+          createElement,
+          estimatedHeight: 135,
+          overscanScreens: 2,
+        }).mount(this.list, virtualizerOptions);
+      }
+      this.virtualizer.setEntries(flattenReplyTree(this.records), virtualizerOptions);
       const loadedPages = this.loadedPages;
       const loading = this.loading || options.progressive;
       const pagination = formatPageStatus({

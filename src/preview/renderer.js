@@ -186,25 +186,21 @@ function createPreviewRenderer({
         options.onNodeUnmounted?.(node, entry.record);
       };
       const renderItem = (entry) => prepareCommentRecord(entry.record, entry.depth);
+      const virtualizerOptions = {
+        getViewport: () => thread.closest('.xns-modal-body') || windowObj,
+        renderItem,
+        onMount: onNodeMounted,
+        onUnmount: onNodeUnmounted,
+      };
       const virtualizer = section.__xnsVirtualizer || createCommentVirtualizer({
         windowObj,
         documentObj: document,
         createElement,
         estimatedHeight: 135,
         overscanScreens: 2,
-      }).mount(thread, {
-        getViewport: () => thread.closest('.xns-modal-body') || windowObj,
-        renderItem,
-        onMount: onNodeMounted,
-        onUnmount: onNodeUnmounted,
-      });
+      }).mount(thread, virtualizerOptions);
       section.__xnsVirtualizer = virtualizer;
-      virtualizer.setEntries(flattenReplyTree(records), {
-        getViewport: () => thread.closest('.xns-modal-body') || windowObj,
-        renderItem,
-        onMount: onNodeMounted,
-        onUnmount: onNodeUnmounted,
-      });
+      virtualizer.setEntries(flattenReplyTree(records), virtualizerOptions);
     } else {
       section.__xnsVirtualizer?.destroy();
       delete section.__xnsVirtualizer;
