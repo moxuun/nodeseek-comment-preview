@@ -911,6 +911,36 @@ scenario('帖子页当前页优先渲染，远端分页后台加载', async (ctx
   assert(dataOf(page).pageErrors.length === 0, `页面出现未捕获异常：${dataOf(page).pageErrors.join('; ')}`);
   await page.close();
 });
+
+scenario('渐进加载的超长楼层保持在虚拟窗口内（0.5.61 回归）', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.goto(`${ctx.base}/post-461-1`, { waitUntil: 'domcontentloaded' });
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '19 条回复', 8_000, '超长远端楼层加载完成');
+  assert(await materializeFloor(page, 13, '.comment-container > ul.comments'), '应能物化渐进加载的超长楼层 #13');
+  const measured = await waitFor(page, () => {
+    const list = document.querySelector('.comment-container > ul.comments');
+    const target = document.querySelector('.comment-container > ul.comments [data-xns-floor="13"]');
+    if (!list || !target || target.getBoundingClientRect().height <= 3_000) return null;
+    const hostTop = list.getBoundingClientRect().top + window.scrollY;
+    const targetTop = target.getBoundingClientRect().top + window.scrollY - hostTop;
+    return { hostTop, targetTop };
+  }, 5_000, '超长楼层完成测量');
+  await page.evaluate(({ hostTop, targetTop }) => {
+    window.scrollTo({ top: hostTop + targetTop - 1_000, behavior: 'auto' });
+  }, measured);
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const state = await page.evaluate(() => {
+    const target = document.querySelector('.comment-container > ul.comments [data-xns-floor="13"]');
+    return {
+      mounted: Boolean(target),
+      height: target?.getBoundingClientRect().height || 0,
+      top: target?.getBoundingClientRect().top || null,
+    };
+  });
+  assert(state.mounted && state.height > 3_000,
+    `覆盖虚拟窗口终点的超长楼层不应被替换为空白占位，实际 ${JSON.stringify(state)}`);
+  await page.close();
+});
 scenario('分页 429 按 Retry-After 重试后继续加载', async (ctx) => {
   const page = await ctx.newPage();
   dataOf(page).expectedResponses.push({ status: 429, url: '/post-125-2' });

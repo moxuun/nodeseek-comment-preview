@@ -79,6 +79,19 @@ function progressiveDeliveryPage(postId, page, pageCount = 4) {
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Fixture progressive delivery ${postId} page ${page}</title></head><body><div class="nsk-post"><div class="content-item" id="0"><h1 class="post-title">分页渐进交付测试帖</h1><article class="post-content"><p>第 2 页先返回，后续页面保持慢响应。</p></article></div></div><div class="comment-container"><div class="nsk-pager post-top-pager">${pager}</div><ul class="comments">${floors}</ul><div class="nsk-pager post-bottom-pager">${pager}</div></div><script src="/outputs/nodeseek-comment-preview.user.js"></script></body></html>`;
 }
 
+function progressiveLongReplyPage(postId, page) {
+  const pager = [1, 2].map((target) => `<a class="pager-pos${target === page ? ' pager-cur' : ''}" href="/post-${postId}-${target}">${target}</a>`).join('');
+  const firstFloor = page === 1 ? 1 : 11;
+  const lastFloor = page === 1 ? 10 : 19;
+  const floors = Array.from({ length: lastFloor - firstFloor + 1 }, (_, index) => firstFloor + index).map((floor) => {
+    const body = floor === 13
+      ? `<p><a href="/member?t=U9">@U9</a> <a href="/post-${postId}-1#9">#9</a> 超长回复</p>${Array.from({ length: 180 }, (__, line) => `<p>第 ${line + 1} 行长文，用于复现渐进加载后的虚拟窗口边界。</p>`).join('')}`
+      : `<p>第 ${floor} 楼普通回复。</p>`;
+    return `<li id="${floor}" data-comment-id="${postId}${floor}" class="content-item"><div class="nsk-content-meta-info"><a href="/space/${floor}">U${floor}</a></div><article class="post-content">${body}</article></li>`;
+  }).join('');
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Fixture progressive long reply ${postId} page ${page}</title></head><body><div class="nsk-post"><div class="content-item" id="0"><h1 class="post-title">渐进超长楼层测试帖</h1><article class="post-content"><p>第 2 页包含一条超长回复。</p></article></div></div><div class="comment-container"><div class="nsk-pager post-top-pager">${pager}</div><ul class="comments">${floors}</ul><div class="nsk-pager post-bottom-pager">${pager}</div></div><script src="/outputs/nodeseek-comment-preview.user.js"></script></body></html>`;
+}
+
 function paginationFallbackPage(postId, page) {
   const pageLinks = '<div class="page-links"><a href="/post-126-1">1</a><a href="/post-126-2">2</a></div>';
   const floor = page === 1
@@ -202,6 +215,22 @@ const server = http.createServer((req, res) => {
     };
     const delay = new Map([[1, 0], [2, 250], [3, 1_800], [4, 2_200]]).get(page) || 0;
     if (delay) setTimeout(send, delay);
+    else send();
+    return;
+  }
+  const progressiveLongReplyMatch = /^\/post-461-(\d+)$/.exec(pathname);
+  if (progressiveLongReplyMatch) {
+    const page = Number(progressiveLongReplyMatch[1]);
+    if (![1, 2].includes(page)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('not found');
+      return;
+    }
+    const send = () => {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(progressiveLongReplyPage(461, page));
+    };
+    if (page === 2) setTimeout(send, 600);
     else send();
     return;
   }

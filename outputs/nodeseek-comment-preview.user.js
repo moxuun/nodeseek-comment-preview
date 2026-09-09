@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.60
+// @version      0.5.61
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @author       moxuun
 // @license      MIT
@@ -1426,7 +1426,7 @@ function createCommentVirtualizer({
     const metrics = getViewportMetrics();
     const overscan = Math.max(metrics.height, metrics.height * Math.max(0, Number(overscanScreens) || 0));
     let start = findIndexAtOffset(metrics.start - overscan);
-    let end = findIndexAtOffset(metrics.end + overscan);
+    let end = findIndexAtOffset(metrics.end + overscan) + 1;
     if (start >= entries.length) start = Math.max(0, entries.length - 1);
     end = Math.min(entries.length, Math.max(start + 1, end));
     const pin = typeof isPinned === 'function' ? isPinned : defaultPinned;

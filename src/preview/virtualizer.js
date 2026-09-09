@@ -151,7 +151,7 @@ function createCommentVirtualizer({
     const metrics = getViewportMetrics();
     const overscan = Math.max(metrics.height, metrics.height * Math.max(0, Number(overscanScreens) || 0));
     let start = findIndexAtOffset(metrics.start - overscan);
-    let end = findIndexAtOffset(metrics.end + overscan);
+    let end = findIndexAtOffset(metrics.end + overscan) + 1;
     if (start >= entries.length) start = Math.max(0, entries.length - 1);
     end = Math.min(entries.length, Math.max(start + 1, end));
     const pin = typeof isPinned === 'function' ? isPinned : defaultPinned;
