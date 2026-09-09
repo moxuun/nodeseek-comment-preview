@@ -1,0 +1,43 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-and-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: work/test/package-lock.json
+
+      - name: Install test dependencies
+        run: npm ci --prefix work/test
+
+      - name: Build output and run browser regression
+        run: npm test --prefix work/test
+
+      - name: Check generated userscript syntax
+        run: node --check outputs/nodeseek-comment-preview.user.js
+
+      - name: Upload generated userscript
+        uses: actions/upload-artifact@v7
+        with:
+          path: outputs/nodeseek-comment-preview.user.js
+          archive: false
+          if-no-files-found: error
