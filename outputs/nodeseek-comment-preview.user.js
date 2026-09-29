@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.71
+// @version      0.5.72
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -254,8 +254,11 @@
 			});
 			return token;
 		}
+		function modalUrl() {
+			return state.modal?.url ?? null;
+		}
 		async function postAction(apiPath, payload, options = {}) {
-			const contextUrl = options.context?.url?.href || state.modal?.url?.href || windowObj.location.href;
+			const contextUrl = options.context?.url?.href || modalUrl()?.href || windowObj.location.href;
 			const endpoint = parseSameOriginUrl(apiPath, contextUrl);
 			if (!endpoint || !allowedPaths.has(endpoint.pathname)) throw new Error("操作地址不是 NodeSeek 同源接口");
 			const controller = new AbortControllerCtor();
@@ -287,9 +290,10 @@
 					data = text ? JSON.parse(text) : null;
 				} catch {}
 				const contentType = (response.headers.get("content-type") || "").toLowerCase();
-				const explicitFailure = data && typeof data === "object" && (data.success === false || data.ok === false || data.error === true || typeof data.status === "string" && /fail|error|unauthor|denied/i.test(data.status) || typeof data.code === "string" && /fail|error|unauthor|denied/i.test(data.code));
-				if (!response.ok || explicitFailure || !data && /text\/html|<html[\s>]|登录|禁止访问/i.test(`${contentType} ${text.slice(0, 500)}`)) {
-					const message = data?.message || data?.msg || text.replace(/<[^>]+>/g, " ").trim().slice(0, 120);
+				const asText = (value) => typeof value === "string" ? value : "";
+				const explicitFailure = data !== null && (data.success === false || data.ok === false || data.error === true || /fail|error|unauthor|denied/i.test(asText(data.status)) || /fail|error|unauthor|denied/i.test(asText(data.code)));
+				if (!response.ok || explicitFailure || data === null && /text\/html|<html[\s>]|登录|禁止访问/i.test(`${contentType} ${text.slice(0, 500)}`)) {
+					const message = asText(data?.message) || asText(data?.msg) || text.replace(/<[^>]+>/g, " ").trim().slice(0, 120);
 					throw new Error(message || `HTTP ${response.status}`);
 				}
 				return data;
@@ -312,12 +316,8 @@
 		fetchFn: window.fetch.bind(window),
 		AbortControllerCtor: window.AbortController
 	});
-	function dynamicSign(...args) {
-		return xnsNodeSeekActionApi.dynamicSign(...args);
-	}
-	function postAction(...args) {
-		return xnsNodeSeekActionApi.postAction(...args);
-	}
+	var dynamicSign = (method, url, body) => xnsNodeSeekActionApi.dynamicSign(method, url, body);
+	var postAction = (apiPath, payload, options) => xnsNodeSeekActionApi.postAction(apiPath, payload, options);
 	function buildReplyTree(records) {
 		const byFloor = new Map(records.map((record) => [record.floor, record]));
 		records.forEach((record) => {
@@ -449,18 +449,10 @@
 		defaultMode: DEFAULT_MODE,
 		maxPage: 50
 	});
-	function getSettings(...args) {
-		return xnsPreferences.get(...args);
-	}
-	function updateSettings(...args) {
-		return xnsPreferences.update(...args);
-	}
-	function resetSettings(...args) {
-		return xnsPreferences.reset(...args);
-	}
-	function getMaxPage(...args) {
-		return xnsPreferences.getMaxPage(...args);
-	}
+	var getSettings = () => xnsPreferences.get();
+	var updateSettings = (patch) => xnsPreferences.update(patch);
+	var resetSettings = () => xnsPreferences.reset();
+	var getMaxPage = () => xnsPreferences.getMaxPage();
 	function isRecord(value) {
 		return Boolean(value) && typeof value === "object";
 	}
@@ -4031,33 +4023,34 @@
 			source.title = `打开原楼层 #${record.floor}`;
 			source.setAttribute("aria-label", `打开原楼层 #${record.floor}`);
 		}
-		function addRemoteNote(record, postId, remote = record.node?.hasAttribute("data-xns-remote")) {
-			if (!record.node) return;
-			const floorLinks = qsa(record.node, ".floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link");
+		function addRemoteNote(record, postId, remote = record.node?.hasAttribute("data-xns-remote") === true) {
+			const node = record.node;
+			if (!node) return;
+			const floorLinks = qsa(node, ".floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link");
 			const existing = floorLinks.find((link) => link.closest(".floor-link-wrapper")) || floorLinks[0] || null;
 			if (!remote) {
 				floorLinks.forEach((link) => setFloorLinkUrl(link, record, postId));
 				return;
 			}
-			const meta = qs(record.node, ":scope > .nsk-content-meta-info");
+			const meta = qs(node, ":scope > .nsk-content-meta-info");
 			let source = existing;
-			let wrapper = source?.closest(".floor-link-wrapper");
+			let wrapper = source?.closest(".floor-link-wrapper") ?? null;
 			if (!source) {
 				wrapper = createElement("div", "floor-link-wrapper");
 				source = createElement("a", "floor-link", `#${record.floor}`);
 				wrapper.appendChild(source);
-				(meta || record.node).appendChild(wrapper);
+				(meta || node).appendChild(wrapper);
 			} else {
 				source.textContent = `#${record.floor}`;
 				wrapper = wrapper || (() => {
 					const created = createElement("div", "floor-link-wrapper");
-					source.replaceWith(created);
+					source?.replaceWith(created);
 					created.appendChild(source);
 					return created;
 				})();
 			}
 			setFloorLinkUrl(source, record, postId);
-			qsa(record.node, ".floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link").forEach((link) => setFloorLinkUrl(link, record, postId));
+			qsa(node, ".floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link").forEach((link) => setFloorLinkUrl(link, record, postId));
 			wrapper?.classList.add("xns-remote-floor-link");
 		}
 		return Object.freeze({
@@ -4071,12 +4064,8 @@
 		createElement,
 		buildPostUrl
 	});
-	function stripRenderArtifacts(...args) {
-		return xnsPreviewRenderUtils.stripRenderArtifacts(...args);
-	}
-	function addRemoteNote(...args) {
-		return xnsPreviewRenderUtils.addRemoteNote(...args);
-	}
+	var stripRenderArtifacts = (item) => xnsPreviewRenderUtils.stripRenderArtifacts(item);
+	var addRemoteNote = (record, postId, remote) => xnsPreviewRenderUtils.addRemoteNote(record, postId, remote);
 	function createCommentVirtualizer({ windowObj, documentObj, createElement, estimatedHeight = 150, overscanScreens = 2 }) {
 		let host = null;
 		let entries = [];
@@ -5877,7 +5866,7 @@
 	}
 	function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPreviewAction, closeImageLightbox, closeModal }) {
 		function handlePreviewActionClick(event) {
-			const menuItem = event.target.closest?.(".xns-preview-menu > .menu-item");
+			const menuItem = event.target?.closest?.(".xns-preview-menu > .menu-item") || null;
 			if (!menuItem) return;
 			const inPreview = Boolean(menuItem.closest(".xns-overlay .xns-preview-content"));
 			const inPost = Boolean(menuItem.closest(".comment-container"));
@@ -5898,13 +5887,14 @@
 			runPreviewAction(action, menuItem, comment, getActionContext(menuItem));
 		}
 		function handleKeydown(event) {
-			const menuItem = event.target.closest?.(".xns-preview-menu > .menu-item");
+			const eventTarget = event.target;
+			const menuItem = eventTarget?.closest?.(".xns-preview-menu > .menu-item") || null;
 			if (menuItem && (event.key === "Enter" || event.key === " ")) {
 				event.preventDefault();
 				menuItem.click();
 				return;
 			}
-			const inEditor = event.target.closest?.("textarea, input, [contenteditable=\"true\"]");
+			const inEditor = eventTarget?.closest?.("textarea, input, [contenteditable=\"true\"]");
 			if (event.key !== "Escape") return;
 			if (inEditor) return;
 			if (state.settingsPanel) {
@@ -5931,12 +5921,8 @@
 		closeImageLightbox,
 		closeModal
 	});
-	function handlePreviewActionClick(...args) {
-		return xnsAppEvents.handlePreviewActionClick(...args);
-	}
-	function handleKeydown(...args) {
-		return xnsAppEvents.handleKeydown(...args);
-	}
+	var handlePreviewActionClick = (event) => xnsAppEvents.handlePreviewActionClick(event);
+	var handleKeydown = (event) => xnsAppEvents.handleKeydown(event);
 	function createPostPageController({ documentObj, windowObj, appState, selectors, maxPage, findCommentList, createElement, qs, qsa, fetchHtml, parseHtml, getFloor, getCommentItems, sanitizeImportedNode, releaseCommentNode, getSsrState, getCurrentUserUid, getCommentRecord, fetchPostPages, flattenReplyTree, createCommentVirtualizer, prepareCommentRecord, addRemoteNote, installPreviewFeatures, formatPageStatus, updateSettings, getMaxPage, buildPostUrl }) {
 		const NATIVE_EDIT_REQUEST_KEY = "xns-comment-preview-native-edit";
 		return class PostPageController {
@@ -6461,16 +6447,17 @@
 				}
 			}
 			if (!target) return false;
-			target.scrollIntoView({
+			const element = target;
+			element.scrollIntoView({
 				behavior: "smooth",
 				block: "center"
 			});
-			target.classList.remove("xns-floor-highlight");
-			windowObj.requestAnimationFrame(() => target.classList.add("xns-floor-highlight"));
+			element.classList.remove("xns-floor-highlight");
+			windowObj.requestAnimationFrame(() => element.classList.add("xns-floor-highlight"));
 			return true;
 		}
 		function handleFloorClick(event) {
-			const link = event.target.closest?.("a[href]");
+			const link = event.target?.closest?.("a[href]") || null;
 			if (!link || !link.closest(selectors.commentContainer) || link.closest(".xns-remote-floor-link")) return;
 			const rawHref = link.getAttribute("href") || "";
 			const directMatch = /^#([1-9]\d*)$/.exec(rawHref);
@@ -6501,9 +6488,7 @@
 		getPostInfo,
 		safePositiveInt
 	});
-	function handleFloorClick(...args) {
-		return xnsFloorNavigation.handle(...args);
-	}
+	var handleFloorClick = (event) => xnsFloorNavigation.handle(event);
 	var require_react_production = __commonJSMin(((exports) => {
 		var REACT_ELEMENT_TYPE = Symbol.for("react.transitional.element");
 		var REACT_PORTAL_TYPE = Symbol.for("react.portal");

@@ -1,19 +1,28 @@
 import { DEFAULT_MODE, MAX_PAGE, state } from './config.js';
+import type { Settings } from '../ui/settings-panel';
+
+/** 偏好存储依赖；测试可注入替身。 */
+interface PreferencesDeps {
+  windowObj: { localStorage?: Storage | null };
+  documentObj: { documentElement: HTMLElement | null };
+  state: { mode: string };
+  storageKey: string;
+  defaultMode: Settings['mode'];
+  maxPage: number;
+}
 
 // 用户偏好存储；只保存界面设置，不保存帖子内容、登录信息或写操作数据。
-function createPreferences({ windowObj, documentObj, state, storageKey, defaultMode, maxPage }) {
-  /** @type {Readonly<import('../ui/settings-panel').Settings>} */
-  const defaults = Object.freeze({
+function createPreferences({ windowObj, documentObj, state, storageKey, defaultMode, maxPage }: PreferencesDeps) {
+  const defaults: Readonly<Settings> = Object.freeze({
     mode: defaultMode,
     maxPages: maxPage,
     density: 'comfortable',
     theme: 'auto',
   });
-  let values = { ...defaults };
+  let values: Settings = { ...defaults };
   let ownsDarkClass = false;
 
-  /** @returns {import('../ui/settings-panel').Settings} */
-  function normalize(raw = {}) {
+  function normalize(raw: Partial<Settings> = {}): Settings {
     const mode = raw.mode === 'original' ? 'original' : defaultMode;
     const requestedPages = Number(raw.maxPages);
     const maxPages = [10, 20, 30, maxPage].includes(requestedPages) ? requestedPages : maxPage;
@@ -22,7 +31,7 @@ function createPreferences({ windowObj, documentObj, state, storageKey, defaultM
     return { mode, maxPages, density, theme };
   }
 
-  function read() {
+  function read(): Settings {
     try {
       const raw = JSON.parse(windowObj.localStorage?.getItem(storageKey) || '{}');
       return normalize(raw);
@@ -31,7 +40,7 @@ function createPreferences({ windowObj, documentObj, state, storageKey, defaultM
     }
   }
 
-  function apply() {
+  function apply(): void {
     const root = documentObj.documentElement;
     if (!root) return;
     root.classList.toggle('xns-density-compact', values.density === 'compact');
@@ -46,11 +55,11 @@ function createPreferences({ windowObj, documentObj, state, storageKey, defaultM
     }
   }
 
-  function save() {
+  function save(): void {
     try { windowObj.localStorage?.setItem(storageKey, JSON.stringify(values)); } catch { /* 存储被禁用时仍允许本次使用。 */ }
   }
 
-  function update(patch = {}) {
+  function update(patch: Partial<Settings> = {}): Settings {
     values = normalize({ ...values, ...patch });
     state.mode = values.mode;
     save();
@@ -58,7 +67,7 @@ function createPreferences({ windowObj, documentObj, state, storageKey, defaultM
     return { ...values };
   }
 
-  function reset() {
+  function reset(): Settings {
     return update(defaults);
   }
 
@@ -67,10 +76,10 @@ function createPreferences({ windowObj, documentObj, state, storageKey, defaultM
   apply();
 
   return Object.freeze({
-    get: () => ({ ...values }),
+    get: (): Settings => ({ ...values }),
     update,
     reset,
-    getMaxPage: () => values.maxPages,
+    getMaxPage: (): number => values.maxPages,
     apply,
   });
 }
@@ -83,10 +92,10 @@ const xnsPreferences = createPreferences({
   defaultMode: DEFAULT_MODE,
   maxPage: MAX_PAGE,
 });
-function getSettings(...args) { return xnsPreferences.get(...args); }
-function updateSettings(...args) { return xnsPreferences.update(...args); }
-function resetSettings(...args) { return xnsPreferences.reset(...args); }
-function getMaxPage(...args) { return xnsPreferences.getMaxPage(...args); }
-function applySettings(...args) { return xnsPreferences.apply(...args); }
+
+const getSettings = (): Settings => xnsPreferences.get();
+const updateSettings = (patch?: Partial<Settings>): Settings => xnsPreferences.update(patch);
+const resetSettings = (): Settings => xnsPreferences.reset();
+const getMaxPage = (): number => xnsPreferences.getMaxPage();
 
 export { getMaxPage, getSettings, resetSettings, updateSettings };

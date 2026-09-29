@@ -3,11 +3,11 @@
 源码按功能拆分，使用显式 ES 模块依赖，由 Vite + vite-plugin-monkey 构建到 `outputs/`。
 `src/main.ts` 是唯一脚本入口，`vite.config.ts` 管理 userscript 元数据，版本读取根目录 `package.json`。
 设置面板由 `src/ui/settings-panel.tsx` 使用 React + TypeScript 渲染，关闭时卸载 React root。
-`src/ui/settings.js` 仅桥接现有状态、偏好保存和油猴菜单；React 不接管 NodeSeek 原生评论节点。
+`src/ui/settings.ts` 仅桥接现有状态、偏好保存和油猴菜单；React 不接管 NodeSeek 原生评论节点。
 `src/nodeseek/sanitize.ts` 使用 DOMPurify 清洗远端节点，再应用楼层 ID、评论菜单、链接和延迟图片规则；不清洗或替换当前页原生评论节点。
 `src/nodeseek/content-parser.ts` 解析评论记录并调用清洗，输出预览和帖子页共用的记录模型。
 `src/data/page-loader.ts` 负责分页读取、并发控制与记录合并。
-`src/core/config.ts`、`src/core/dom.ts`、`src/nodeseek/ssr-state.ts`、`src/nodeseek/url.ts`、`src/nodeseek/pagination.ts`、`src/nodeseek/identity.ts` 和 `src/comments/thread.ts` 是底层工具层，已全部改为 TypeScript；SSR 状态与评论记录类型由 `src/nodeseek/ssr-state.ts` 统一提供。
+`src/core/config.ts`、`src/core/dom.ts`、`src/core/preferences.ts`、`src/nodeseek/ssr-state.ts`、`src/nodeseek/url.ts`、`src/nodeseek/pagination.ts`、`src/nodeseek/identity.ts`、`src/nodeseek/action-api.ts`、`src/comments/thread.ts`、`src/preview/navigation.ts`、`src/preview/render-utils.ts` 和 `src/app/events.ts` 是底层工具层，已全部改为 TypeScript；SSR 状态与评论记录类型由 `src/nodeseek/ssr-state.ts` 统一提供。
 `src/preview/virtualizer.ts` 是评论虚拟列表：保留完整记录，只把视口附近的楼层物化成 DOM，帖子页和预览弹窗共用同一套窗口模型。
 其余业务模块仍为 JS。
 

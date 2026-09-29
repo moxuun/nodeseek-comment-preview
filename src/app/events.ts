@@ -4,21 +4,39 @@ import { getActionContext, getMenuActionKey, runPreviewAction } from '../feature
 import { closeImageLightbox } from '../preview/lightbox.js';
 import { closeModal } from '../preview/modal-ui.js';
 
+/** 全局事件边界依赖；写操作状态槽的具体类型由各自写入方决定。 */
+interface AppEventsDeps {
+  state: {
+    post: unknown;
+    modal: unknown;
+    settingsPanel: unknown;
+    lightbox: unknown;
+  };
+  qsa: typeof qsa;
+  getMenuActionKey: (menuItem: Element) => unknown;
+  getActionContext: (menuItem: Element | null) => unknown;
+  runPreviewAction: (action: string, menuItem: Element, comment: Element, context: unknown) => unknown;
+  closeImageLightbox: () => void;
+  closeModal: () => void;
+}
+
 // 全局事件边界：把站点原生点击与脚本接管的预览动作分开。
-function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPreviewAction, closeImageLightbox, closeModal }) {
-  function handlePreviewActionClick(event) {
-    const menuItem = event.target.closest?.('.xns-preview-menu > .menu-item');
+function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPreviewAction, closeImageLightbox, closeModal }: AppEventsDeps) {
+  function handlePreviewActionClick(event: Event): void {
+    const eventTarget = event.target as Partial<Element> | null;
+    const menuItem = (eventTarget?.closest?.('.xns-preview-menu > .menu-item') as HTMLElement | undefined) || null;
     if (!menuItem) return;
     const inPreview = Boolean(menuItem.closest('.xns-overlay .xns-preview-content'));
     const inPost = Boolean(menuItem.closest('.comment-container'));
     if (!inPreview && !inPost) return;
     const comment = menuItem.closest('.content-item');
-    const action = menuItem.dataset.xnsAction || getMenuActionKey(menuItem);
+    const action = menuItem.dataset.xnsAction || (getMenuActionKey(menuItem) as string | undefined);
     if (!comment) return;
     // 官方帖子页的“编辑”由 NodeSeek/Vue 处理。虚拟列表裁掉同级楼层后，
     // Vue 的事件状态可能失效；先恢复官方列表，再重新触发一次原生入口。
     if (inPost && !action && (menuItem.textContent || '').trim() === '编辑') {
-      if (state.post?.prepareNativeEdit?.(comment)) {
+      const post = state.post as { prepareNativeEdit?: (comment: Element) => boolean } | null;
+      if (post?.prepareNativeEdit?.(comment)) {
         event.preventDefault();
         event.stopImmediatePropagation();
       }
@@ -30,19 +48,21 @@ function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPr
     void runPreviewAction(action, menuItem, comment, getActionContext(menuItem));
   }
 
-  function handleKeydown(event) {
-    const menuItem = event.target.closest?.('.xns-preview-menu > .menu-item');
+  function handleKeydown(event: KeyboardEvent): void {
+    const eventTarget = event.target as Partial<Element> | null;
+    const menuItem = (eventTarget?.closest?.('.xns-preview-menu > .menu-item') as HTMLElement | undefined) || null;
     if (menuItem && (event.key === 'Enter' || event.key === ' ')) {
       event.preventDefault();
       menuItem.click();
       return;
     }
-    const inEditor = event.target.closest?.('textarea, input, [contenteditable="true"]');
+    const inEditor = eventTarget?.closest?.('textarea, input, [contenteditable="true"]');
     if (event.key !== 'Escape') return;
     if (inEditor) return;
     if (state.settingsPanel) {
       event.preventDefault();
-      state.settingsPanel.close?.();
+      const panel = state.settingsPanel as { close?: () => void };
+      panel.close?.();
       return;
     }
     if (state.lightbox) {
@@ -65,7 +85,8 @@ const xnsAppEvents = createAppEvents({
   closeImageLightbox,
   closeModal,
 });
-function handlePreviewActionClick(...args) { return xnsAppEvents.handlePreviewActionClick(...args); }
-function handleKeydown(...args) { return xnsAppEvents.handleKeydown(...args); }
+
+const handlePreviewActionClick = (event: Event): void => xnsAppEvents.handlePreviewActionClick(event);
+const handleKeydown = (event: KeyboardEvent): void => xnsAppEvents.handleKeydown(event);
 
 export { handleKeydown, handlePreviewActionClick };
