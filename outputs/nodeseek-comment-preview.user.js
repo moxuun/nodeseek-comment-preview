@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.80
+// @version      0.5.81
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -4427,7 +4427,7 @@
 			node.classList.toggle("xns-comment-child", level > 0);
 			node.classList.toggle("xns-comment-leaf", level > 0 && !record.children?.length);
 			const full = thread ? thread.full : Array.from({ length: level }, (_, index) => index);
-			node.style.setProperty("--xns-thread-columns", threadColumnImage(record.children?.length ? full.concat(level) : full));
+			node.style.setProperty("--xns-thread-columns", threadColumnImage(full));
 			const stop = thread ? thread.stop : -1;
 			node.style.setProperty("--xns-thread-stop-x", `${(stop >= 0 ? stop : 0) * THREAD_STEP + 6}px`);
 			node.style.setProperty("--xns-thread-stop-width", stop >= 0 ? `${THREAD_LINE_WIDTH}px` : "0px");
@@ -18281,22 +18281,18 @@
       .xns-preview-thread .floor-link-wrapper, .xns-preview-content .floor-link-wrapper { position:absolute; top:9px; right:10px; }
       .xns-preview-thread .floor-link-wrapper .floor-link, .xns-preview-content .floor-link-wrapper .floor-link { padding:2px 5px; border-radius:4px; color:var(--xns-subtle); background:var(--xns-accent-soft); font-size:13px; font-weight:400; line-height:19.5px; text-decoration:none; cursor:pointer; }
       .xns-preview-thread .floor-link-wrapper .floor-link:hover, .xns-preview-thread .floor-link-wrapper .floor-link:focus-visible, .xns-preview-content .floor-link-wrapper .floor-link:hover, .xns-preview-content .floor-link-wrapper .floor-link:focus-visible { color:var(--xns-accent); background:var(--xns-accent-soft); outline:none; }
-      /* 楼层关系线（linux tree 风格）：每层一条 2px 竖线 + 本层 18px 短横线接进上一层竖线。
-         - 竖线用 repeating-linear-gradient 每 18px 画一条（x = 18k + 6），再用 background-size 宽度裁到本层
-           （18d + 8px），于是 0..d 层的竖线都画在本行上：父层竖线贯穿整棵子树，不会只画一小段；
-         - 竖线上下各延伸 3px 跨过 3px 条目间隙，同层竖线在相邻条目间严丝合缝；
-         - 本层竖线只在有条目子楼层时画（否则相邻兄弟条目的竖线会首尾相接，看上去像上一条目还有后代）：
-           裁剪宽度 = 18d + 8，leaf 条目为 18(d-1) + 8（额外扣除本层 18px）；
-         - 缩进步长 18px = renderer 的 --xns-indent 步长；缩进统一用 padding-left 表达，节点盒仍占满整行，
-           竖线才能画在父层位置。 */
-      /* 楼层关系线（linux tree 风格）：逐层一条 3px 竖线（x = 18k + 6，同官方 blockquote 竖线宽度）+ 本层 18px 短横线接进父层竖线。
-         - 竖线由 JS（renderer.ts 的 applyThreadGeometry）按树结构生成背景图 --xns-thread-columns：
-           祖先里还有后续兄弟的层贯穿整行；本层有子楼层时本层竖线也贯穿整行；
-         - 竖线上下各溢出 3px 跨过 3px 条目间隙，同层竖线在相邻条目之间严丝合缝；
-         - 横线从父层竖线右边缘（18(d-1) + 9）起、长 18px，接到本层竖线右边缘，高度对准第一行（作者/时间）的垂直中心；
-         - 本条是父层最后一条子楼层时，父层竖线不贯穿本行，只用 --xns-thread-stop-* 画到横线处（否则没有后续兄弟还垂出一条长线）；
-         - 缩进步长 18px = renderer 的 THREAD_STEP；缩进统一用 padding-left 表达，节点盒仍占满整行，竖线才能画在父层位置。 */
-      .xns-comment-child { --xns-thread-elbow: 15px; margin:3px 0 0 !important; padding:7px 8px 6px calc(var(--xns-indent,0px) + 10px) !important; border:0 !important; border-radius:0 !important; background-color:transparent !important; background-image:var(--xns-thread-columns, none), linear-gradient(var(--xns-thread-line), var(--xns-thread-line)), linear-gradient(var(--xns-thread-line), var(--xns-thread-line)) !important; background-repeat:no-repeat !important; background-size:100% calc(100% + 6px), 18px 3px, var(--xns-thread-stop-width, 0px) 21px !important; background-position:0 -3px, calc(var(--xns-indent,0px) - 9px) var(--xns-thread-elbow), var(--xns-thread-stop-x, 0px) -3px !important; }
+      /* 楼中楼：每个子楼层都是一张和顶层楼层外观相同的卡片（只是没有顶层那条楼层身份边框），
+         整张卡片按层级右移 18px（margin-left = --xns-indent），层级一眼可见。
+         关系线画在卡片左侧的空白里，由 ::before 覆盖层承载：覆盖层向左越出一整段缩进（再补回卡片 1px 左边框），
+         于是它的左边缘与列表左边缘对齐，坐标仍与 JS（renderer.ts 的 applyThreadGeometry）一致：
+         - 竖线逐层一条 3px 宽（x = 18k + 6，同官方 blockquote 竖线宽度），--xns-thread-columns 由 JS 按树结构生成：
+           祖先里还有后续兄弟的层级贯穿整行（上下各溢出 3px 跨过 3px 条目间隙，同层竖线严丝合缝）；
+         - 本层竖线不画在自己的卡片里（卡片不透底，画在本行会变成卡片内部的一条装饰线），它出现在子楼层的行上；
+         - 9px 短横线从父层竖线右边缘（18(d-1) + 9）接到卡片左边缘，高度对准第一行（作者/时间）的垂直中心；
+         - 本条是父层最后一条子楼层时，父层竖线不贯穿本行，只用 --xns-thread-stop-* 画到横线处（不空垂一条长线）；
+         - content-visibility 必须回到 visible：外层卡片的 contain:paint 会把越出卡片左侧的竖线整体裁掉。 */
+      .xns-preview-thread > .content-item.xns-comment-child { --xns-thread-elbow: 15px; position:relative; content-visibility:visible; margin:3px 0 0 var(--xns-indent, 0px); }
+      .xns-preview-thread > .content-item.xns-comment-child::before { content:''; position:absolute; left:calc(-1 * var(--xns-indent, 0px) - 1px); top:-3px; width:calc(100% + var(--xns-indent, 0px) + 1px); height:calc(100% + 6px); pointer-events:none; background-image:var(--xns-thread-columns, none), linear-gradient(var(--xns-thread-line), var(--xns-thread-line)), linear-gradient(var(--xns-thread-line), var(--xns-thread-line)); background-repeat:no-repeat; background-size:100% 100%, 9px 3px, var(--xns-thread-stop-width, 0px) 21px; background-position:0 0, calc(var(--xns-indent, 0px) - 9px) var(--xns-thread-elbow), var(--xns-thread-stop-x, 0px) 0; }
       .xns-reply-list { margin:6px 0 0 !important; padding:0 !important; list-style:none !important; }
       .xns-floor-highlight { animation:xns-floor-highlight 1.8s ease both; }
       @keyframes xns-floor-highlight { 0%,100%{box-shadow:none} 20%{box-shadow:0 0 0 4px rgba(46,163,79,.3)} }
@@ -18341,7 +18337,7 @@
       .xns-preview-thread { margin:0; padding:0; list-style:none; }
       .xns-virtual-list > .xns-virtual-spacer { display:block !important; height:0; margin:0 !important; padding:0 !important; border:0 !important; list-style:none !important; pointer-events:none; }
       .xns-preview-thread > .content-item { margin:4px 0; padding:8px 10px 7px; border:1px solid var(--xns-border); border-radius:7px; background:var(--xns-surface-muted); content-visibility:auto; contain-intrinsic-size:150px; }
-      .xns-preview-thread > .content-item[data-xns-floor] { border-left:3px solid var(--xns-accent-strong); }
+      .xns-preview-thread > .content-item.xns-comment-root[data-xns-floor] { border-left:3px solid var(--xns-accent-strong); }
       .xns-preview-thread .nsk-content-meta-info { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; margin:0 0 3px; color:#64748b; font-size:12px; line-height:1.25; }
       .xns-preview-content .nsk-content-meta-info .content-info, .xns-preview-content .nsk-content-meta-info .date-created { display:inline-flex; align-items:center; flex-wrap:wrap; gap:5px; margin:0 !important; line-height:1.25; }
       .xns-preview-content .nsk-content-meta-info .date-created time { display:inline; white-space:nowrap; }

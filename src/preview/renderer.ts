@@ -166,9 +166,11 @@ function createPreviewRenderer({
     // 没有子楼层的嵌套条目只画“本层分支”的短横线；若也画本层竖线，相邻兄弟条目的
     // 竖线会首尾相接，看上去像上一条目还有后代。
     node.classList.toggle('xns-comment-leaf', level > 0 && !record.children?.length);
-    // 竖线分层：祖先里还有后续兄弟的层级贯穿整行，本层有子楼层时本层竖线也贯穿整行。
+    // 竖线分层：只画祖先层里“后面还有兄弟”的层级（每层代表那一层祖先的子女流）。
+    // 本层的竖线不画在自己的行里：卡片是不透底的，画在本行会变成卡片内部的一条装饰线；
+    // 它出现在子楼层的行上（子楼层不是父层最后一条时会把父层标进自己的 full，见 comments/thread.ts）。
     const full = thread ? thread.full : Array.from({ length: level }, (_, index) => index);
-    node.style.setProperty('--xns-thread-columns', threadColumnImage(record.children?.length ? full.concat(level) : full));
+    node.style.setProperty('--xns-thread-columns', threadColumnImage(full));
     // 本条是父层最后一条子楼层：父层竖线不贯穿本行，只在横线处收口，否则没有后续兄弟也会垂出一条长线。
     const stop = thread ? thread.stop : -1;
     node.style.setProperty('--xns-thread-stop-x', `${(stop >= 0 ? stop : 0) * THREAD_STEP + 6}px`);
