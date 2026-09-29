@@ -1,0 +1,21 @@
+{
+  "name": "nodeseek-comment-preview",
+  "version": "0.5.61",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "node work/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm test --prefix work/test"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.1",
+    "vite-plugin-monkey": "^8.1.1"
+  },
+  "engines": {
+    "node": "^22.12.0 || >=24.0.0"
+  }
+}

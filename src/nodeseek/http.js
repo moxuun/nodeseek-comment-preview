@@ -1,3 +1,7 @@
+import { HTML_CACHE_ITEM_MAX_BYTES, HTML_CACHE_MAX_BYTES, HTML_CACHE_MAX_ENTRIES, HTML_CACHE_TTL, MAX_RESPONSE_BYTES, REQUEST_TIMEOUT } from '../core/config.js';
+import { extractSsrState } from './ssr-state.js';
+import { isAllowedPostRequest, parseSameOriginUrl } from './url.js';
+
 // NodeSeek 同源帖子读取与 HTML -> Document 转换。
 function createHttpClient({
   windowObj,
@@ -196,5 +200,7 @@ const xnsHttpClient = createHttpClient({
   parseSameOriginUrl,
   extractSsrState,
 });
-const fetchHtml = (...args) => xnsHttpClient.fetchHtml(...args);
-const parseHtml = (...args) => xnsHttpClient.parseHtml(...args);
+function fetchHtml(...args) { return xnsHttpClient.fetchHtml(...args); }
+function parseHtml(...args) { return xnsHttpClient.parseHtml(...args); }
+
+export { fetchHtml, parseHtml };

@@ -1,3 +1,6 @@
+import { state } from '../core/config.js';
+import { createElement, getSafeUrlAttribute, qs, qsa } from '../core/dom.js';
+
 // 预览图片灯箱：只负责图片交互，不负责帖子弹窗或内容渲染。
 function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createElement, getSafeUrlAttribute }) {
   function getPreviewImageSource(image) {
@@ -171,6 +174,8 @@ const xnsPreviewLightbox = createPreviewLightbox({
   createElement,
   getSafeUrlAttribute,
 });
-const closeImageLightbox = (...args) => xnsPreviewLightbox.closeImageLightbox(...args);
-const openImageLightbox = (...args) => xnsPreviewLightbox.openImageLightbox(...args);
-const installPreviewImageFallback = (...args) => xnsPreviewLightbox.installPreviewImageFallback(...args);
+function closeImageLightbox(...args) { return xnsPreviewLightbox.closeImageLightbox(...args); }
+function openImageLightbox(...args) { return xnsPreviewLightbox.openImageLightbox(...args); }
+function installPreviewImageFallback(...args) { return xnsPreviewLightbox.installPreviewImageFallback(...args); }
+
+export { closeImageLightbox, installPreviewImageFallback };

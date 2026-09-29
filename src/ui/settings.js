@@ -1,3 +1,7 @@
+import { state } from '../core/config.js';
+import { createElement } from '../core/dom.js';
+import { getSettings, resetSettings, updateSettings } from '../core/preferences.js';
+
 // 设置中心 UI；只管理界面偏好，不提供自动写操作开关。
 function createSettingsUi({ documentObj, state, createElement, getSettings, updateSettings, resetSettings }) {
   function closeSettings() {
@@ -115,6 +119,8 @@ const xnsSettingsUi = createSettingsUi({
   updateSettings,
   resetSettings,
 });
-const openSettings = (...args) => xnsSettingsUi.openSettings(...args);
-const closeSettings = (...args) => xnsSettingsUi.closeSettings(...args);
-const registerSettingsMenu = (...args) => xnsSettingsUi.registerSettingsMenu(...args);
+function openSettings(...args) { return xnsSettingsUi.openSettings(...args); }
+function closeSettings(...args) { return xnsSettingsUi.closeSettings(...args); }
+function registerSettingsMenu(...args) { return xnsSettingsUi.registerSettingsMenu(...args); }
+
+export { registerSettingsMenu };

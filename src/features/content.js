@@ -1,3 +1,7 @@
+import { clearElement, createElement, qs, qsa } from '../core/dom.js';
+import { installPreviewVotePanels } from './vote.js';
+import { installPreviewImageFallback } from '../preview/lightbox.js';
+
 // 预览内容增强：ANSI、官方魔法标签页、Markdown 标签页、图片和代码复制。
 function createContentFeatures({
   windowObj,
@@ -336,5 +340,7 @@ const xnsContentFeatures = createContentFeatures({
   installPreviewImageFallback,
   installPreviewVotePanels,
 });
-const installPreviewFeatures = (...args) => xnsContentFeatures.installPreviewFeatures(...args);
-const installPreviewCodeBlocks = (...args) => xnsContentFeatures.installPreviewCodeBlocks(...args);
+function installPreviewFeatures(...args) { return xnsContentFeatures.installPreviewFeatures(...args); }
+function installPreviewCodeBlocks(...args) { return xnsContentFeatures.installPreviewCodeBlocks(...args); }
+
+export { installPreviewFeatures };

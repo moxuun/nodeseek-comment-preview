@@ -1,3 +1,6 @@
+import { createElement, qs, qsa } from '../core/dom.js';
+import { buildPostUrl } from '../nodeseek/url.js';
+
 // 预览渲染辅助：只处理克隆节点的清理和跨页来源楼层链接。
 function createPreviewRenderUtils({ qs, qsa, createElement, buildPostUrl }) {
   function stripRenderArtifacts(item) {
@@ -59,5 +62,7 @@ function createPreviewRenderUtils({ qs, qsa, createElement, buildPostUrl }) {
 }
 
 const xnsPreviewRenderUtils = createPreviewRenderUtils({ qs, qsa, createElement, buildPostUrl });
-const stripRenderArtifacts = (...args) => xnsPreviewRenderUtils.stripRenderArtifacts(...args);
-const addRemoteNote = (...args) => xnsPreviewRenderUtils.addRemoteNote(...args);
+function stripRenderArtifacts(...args) { return xnsPreviewRenderUtils.stripRenderArtifacts(...args); }
+function addRemoteNote(...args) { return xnsPreviewRenderUtils.addRemoteNote(...args); }
+
+export { addRemoteNote, stripRenderArtifacts };

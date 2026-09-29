@@ -43,3 +43,5 @@ function createFloorNavigationController({ enabled, handleFloorClick }) {
 
   return Object.freeze({ handle });
 }
+
+export { createFloorNavigationController, createPreviewEntryController };

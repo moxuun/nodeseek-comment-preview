@@ -1,3 +1,5 @@
+import { extractSsrState } from './ssr-state.js';
+
 // 当前用户身份读取服务。
 // 只读取页面已经提供的 SSR 状态或用户菜单，不读取 Cookie、Storage 或浏览器会话。
 function createIdentityService({ documentObj, extractSsrState }) {
@@ -49,4 +51,6 @@ const xnsIdentityService = createIdentityService({
   documentObj: document,
   extractSsrState,
 });
-const getCurrentUserUid = () => xnsIdentityService.currentUserUid();
+function getCurrentUserUid() { return xnsIdentityService.currentUserUid(); }
+
+export { getCurrentUserUid };

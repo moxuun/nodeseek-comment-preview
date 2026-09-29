@@ -1,3 +1,6 @@
+import { qsa } from '../core/dom.js';
+import { getPostInfo, parseSameOriginUrl } from './url.js';
+
 // 从页面链接发现同一帖子的分页。
 function createPaginationService({ windowObj, qsa, parseSameOriginUrl, getPostInfo }) {
   function getPaginationLinks(root) {
@@ -25,4 +28,6 @@ const xnsPaginationService = createPaginationService({
   parseSameOriginUrl,
   getPostInfo,
 });
-const getPageNumbers = (...args) => xnsPaginationService.getPageNumbers(...args);
+function getPageNumbers(...args) { return xnsPaginationService.getPageNumbers(...args); }
+
+export { getPageNumbers };

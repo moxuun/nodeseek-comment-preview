@@ -1,3 +1,17 @@
+import { mergeCommentRecords } from '../comments/thread.js';
+import { MAX_PAGE, SELECTORS, state } from '../core/config.js';
+import { clearElement, createElement, qs, qsa } from '../core/dom.js';
+import { collectPageRecords, loadPreviewRecords } from '../data/page-loader.js';
+import { openPreviewComposer } from '../features/comment-actions.js';
+import { installPreviewFeatures } from '../features/content.js';
+import { sanitizeImportedNode } from '../nodeseek/content-parser.js';
+import { fetchHtml, parseHtml } from '../nodeseek/http.js';
+import { getPageNumbers } from '../nodeseek/pagination.js';
+import { buildPostUrl, getPostInfo } from '../nodeseek/url.js';
+import { closeImageLightbox } from './lightbox.js';
+import { closeModal, createCloseButton, createRefreshButton, createShareButton, installPreviewScrollButtons } from './modal-ui.js';
+import { buildPreviewPostNode, renderPreviewRecords } from './renderer.js';
+
 // 预览控制器：负责弹窗生命周期、刷新和滚动位置恢复。
 function createPreviewController({
   windowObj,
@@ -717,8 +731,10 @@ const xnsPreviewController = createPreviewController({
   createShareButton,
   openPreviewComposer: (...args) => openPreviewComposer(...args),
 });
-const buildPreviewContent = (...args) => xnsPreviewController.buildPreviewContent(...args);
-const loadPreviewModal = (...args) => xnsPreviewController.loadPreviewModal(...args);
-const syncPreviewReply = (...args) => xnsPreviewController.syncPreviewReply(...args);
-const refreshPreviewModal = (...args) => xnsPreviewController.refreshPreviewModal(...args);
-const openPreviewModal = (...args) => xnsPreviewController.openPreviewModal(...args);
+function buildPreviewContent(...args) { return xnsPreviewController.buildPreviewContent(...args); }
+function loadPreviewModal(...args) { return xnsPreviewController.loadPreviewModal(...args); }
+function syncPreviewReply(...args) { return xnsPreviewController.syncPreviewReply(...args); }
+function refreshPreviewModal(...args) { return xnsPreviewController.refreshPreviewModal(...args); }
+function openPreviewModal(...args) { return xnsPreviewController.openPreviewModal(...args); }
+
+export { openPreviewModal, syncPreviewReply };

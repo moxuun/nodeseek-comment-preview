@@ -2,11 +2,15 @@
 
 ## 本地夹具回归
 
+在仓库根目录运行（需要 Node.js 22.12+（22.x）或 24+）：
+
 ```powershell
+npm ci
+npm ci --prefix work/test
 npm test
 ```
 
-测试会先执行 `node ../build.mjs`，因此测试的是当前 `src/` 构建出来的安装产物，而不是工作区里手工残留的旧输出文件。
+测试会先执行兼容入口 `node work/build.mjs`，运行类型检查和 Vite 构建，因此测试的是当前 `src/` 构建出来的安装产物，而不是工作区里手工残留的旧输出文件。在 `work/test/` 目录内仍可执行 `npm test`。
 
 这组测试使用 `work/xns-fixture/` 和本地 HTTP 服务器，只能证明脚本在已知夹具契约下工作。测试现在会统一记录并报告：
 
@@ -16,6 +20,8 @@ npm test
 - HTTP 400 及以上响应。
 
 ## 真实环境只读冒烟
+
+以下命令在 `work/test/` 目录运行。
 
 `test:live` 不启动新的登录环境，也不读取 Cookie、Storage 或账号信息。它要求用户明确提供一个已经打开 NodeSeek 的 Chrome CDP 地址：
 

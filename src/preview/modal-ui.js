@@ -1,3 +1,7 @@
+import { state } from '../core/config.js';
+import { createElement } from '../core/dom.js';
+import { closeImageLightbox } from './lightbox.js';
+
 // 预览弹窗 UI 基础设施：锁定页面、滚动控制、关闭操作。
 function createPreviewModalUi({ windowObj, documentObj, state, createElement, closeImageLightbox }) {
   function removeBodyLock() {
@@ -143,9 +147,11 @@ const xnsPreviewModalUi = createPreviewModalUi({
   createElement,
   closeImageLightbox,
 });
-const removeBodyLock = (...args) => xnsPreviewModalUi.removeBodyLock(...args);
-const installPreviewScrollButtons = (...args) => xnsPreviewModalUi.installPreviewScrollButtons(...args);
-const closeModal = (...args) => xnsPreviewModalUi.closeModal(...args);
-const createCloseButton = (...args) => xnsPreviewModalUi.createCloseButton(...args);
-const createRefreshButton = (...args) => xnsPreviewModalUi.createRefreshButton(...args);
-const createShareButton = (...args) => xnsPreviewModalUi.createShareButton(...args);
+function removeBodyLock(...args) { return xnsPreviewModalUi.removeBodyLock(...args); }
+function installPreviewScrollButtons(...args) { return xnsPreviewModalUi.installPreviewScrollButtons(...args); }
+function closeModal(...args) { return xnsPreviewModalUi.closeModal(...args); }
+function createCloseButton(...args) { return xnsPreviewModalUi.createCloseButton(...args); }
+function createRefreshButton(...args) { return xnsPreviewModalUi.createRefreshButton(...args); }
+function createShareButton(...args) { return xnsPreviewModalUi.createShareButton(...args); }
+
+export { closeModal, createCloseButton, createRefreshButton, createShareButton, installPreviewScrollButtons };

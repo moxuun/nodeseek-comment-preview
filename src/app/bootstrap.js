@@ -1,3 +1,15 @@
+import { handleKeydown, handlePreviewActionClick } from './events.js';
+import { state } from '../core/config.js';
+import { pageInfo } from '../core/runtime.js';
+import { handleVoteClick } from '../features/vote.js';
+import { getPostInfo, parseSameOriginUrl } from '../nodeseek/url.js';
+import { PostEnhancer } from '../post-page/controller.js';
+import { openPreviewModal } from '../preview/controller.js';
+import { createFloorNavigationController, createPreviewEntryController } from '../preview/entry.js';
+import { handleFloorClick } from '../preview/navigation.js';
+import { registerSettingsMenu } from '../ui/settings.js';
+import { installStyle } from '../ui/style.js';
+
 // 应用启动：集中注册事件并在 DOM ready 后初始化帖子页增强。
 function createAppBootstrap({
   documentObj,

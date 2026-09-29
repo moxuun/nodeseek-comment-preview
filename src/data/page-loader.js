@@ -1,3 +1,14 @@
+import { mergeCommentRecords } from '../comments/thread.js';
+import { MAX_PAGE, PAGE_CONCURRENCY, PAGE_REQUEST_GAP } from '../core/config.js';
+import { getCommentItems } from '../core/dom.js';
+import { getMaxPage } from '../core/preferences.js';
+import { getCommentRecord } from '../nodeseek/content-parser.js';
+import { fetchHtml, parseHtml } from '../nodeseek/http.js';
+import { getCurrentUserUid } from '../nodeseek/identity.js';
+import { getPageNumbers } from '../nodeseek/pagination.js';
+import { getDocState } from '../nodeseek/ssr-state.js';
+import { buildPostUrl } from '../nodeseek/url.js';
+
 // 帖子分页读取服务。
 // 只负责“读哪些页、如何并发、如何合并”，不创建 DOM，也不决定如何展示失败。
 function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, requestGapMs, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid, buildPostUrl }) {
@@ -186,6 +197,8 @@ const xnsPageLoader = createPageLoader({
   getCurrentUserUid,
   buildPostUrl,
 });
-const collectPageRecords = (...args) => xnsPageLoader.collectPageRecords(...args);
-const fetchPostPages = (...args) => xnsPageLoader.fetchPostPages(...args);
-const loadPreviewRecords = (...args) => xnsPageLoader.loadPreviewRecords(...args);
+function collectPageRecords(...args) { return xnsPageLoader.collectPageRecords(...args); }
+function fetchPostPages(...args) { return xnsPageLoader.fetchPostPages(...args); }
+function loadPreviewRecords(...args) { return xnsPageLoader.loadPreviewRecords(...args); }
+
+export { collectPageRecords, fetchPostPages, loadPreviewRecords };

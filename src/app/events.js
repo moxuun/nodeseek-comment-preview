@@ -1,3 +1,9 @@
+import { state } from '../core/config.js';
+import { qsa } from '../core/dom.js';
+import { getActionContext, getMenuActionKey, runPreviewAction } from '../features/comment-actions.js';
+import { closeImageLightbox } from '../preview/lightbox.js';
+import { closeModal } from '../preview/modal-ui.js';
+
 // 全局事件边界：把站点原生点击与脚本接管的预览动作分开。
 function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPreviewAction, closeImageLightbox, closeModal }) {
   function handlePreviewActionClick(event) {
@@ -59,5 +65,7 @@ const xnsAppEvents = createAppEvents({
   closeImageLightbox,
   closeModal,
 });
-const handlePreviewActionClick = (...args) => xnsAppEvents.handlePreviewActionClick(...args);
-const handleKeydown = (...args) => xnsAppEvents.handleKeydown(...args);
+function handlePreviewActionClick(...args) { return xnsAppEvents.handlePreviewActionClick(...args); }
+function handleKeydown(...args) { return xnsAppEvents.handleKeydown(...args); }
+
+export { handleKeydown, handlePreviewActionClick };

@@ -1,3 +1,6 @@
+import { MAX_PAGE } from '../core/config.js';
+import { getMaxPage } from '../core/preferences.js';
+
 // 分页状态文案与语义统一；预览页和帖子页共享同一套用户可见反馈。
 function createPageStatusFormatter({ maxPage, getMaxPage }) {
   function format(options = {}) {
@@ -39,4 +42,6 @@ function createPageStatusFormatter({ maxPage, getMaxPage }) {
 }
 
 const xnsPageStatusFormatter = createPageStatusFormatter({ maxPage: MAX_PAGE, getMaxPage });
-const formatPageStatus = (...args) => xnsPageStatusFormatter.format(...args);
+function formatPageStatus(...args) { return xnsPageStatusFormatter.format(...args); }
+
+export { formatPageStatus };

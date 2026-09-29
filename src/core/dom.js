@@ -1,3 +1,5 @@
+import { SELECTORS } from './config.js';
+
 // 通用 DOM 与输入安全工具；不包含 NodeSeek 业务规则。
 function createDomTools({ documentObj, windowObj, selectors, URLCtor }) {
   function safePositiveInt(value) {
@@ -84,16 +86,18 @@ const xnsDomTools = createDomTools({
   selectors: SELECTORS,
   URLCtor: URL,
 });
-const safePositiveInt = (...args) => xnsDomTools.safePositiveInt(...args);
-const safeCount = (...args) => xnsDomTools.safeCount(...args);
-const qs = (...args) => xnsDomTools.qs(...args);
-const qsa = (...args) => xnsDomTools.qsa(...args);
-const createElement = (...args) => xnsDomTools.createElement(...args);
-const clearElement = (...args) => xnsDomTools.clearElement(...args);
-const findCommentList = (...args) => xnsDomTools.findCommentList(...args);
-const getCommentItems = (...args) => xnsDomTools.getCommentItems(...args);
-const getFloor = (...args) => xnsDomTools.getFloor(...args);
-const getCommentId = (...args) => xnsDomTools.getCommentId(...args);
-const getAuthorName = (...args) => xnsDomTools.getAuthorName(...args);
-const getPostContent = (...args) => xnsDomTools.getPostContent(...args);
-const getSafeUrlAttribute = (...args) => xnsDomTools.getSafeUrlAttribute(...args);
+function safePositiveInt(...args) { return xnsDomTools.safePositiveInt(...args); }
+function safeCount(...args) { return xnsDomTools.safeCount(...args); }
+function qs(...args) { return xnsDomTools.qs(...args); }
+function qsa(...args) { return xnsDomTools.qsa(...args); }
+function createElement(...args) { return xnsDomTools.createElement(...args); }
+function clearElement(...args) { return xnsDomTools.clearElement(...args); }
+function findCommentList(...args) { return xnsDomTools.findCommentList(...args); }
+function getCommentItems(...args) { return xnsDomTools.getCommentItems(...args); }
+function getFloor(...args) { return xnsDomTools.getFloor(...args); }
+function getCommentId(...args) { return xnsDomTools.getCommentId(...args); }
+function getAuthorName(...args) { return xnsDomTools.getAuthorName(...args); }
+function getPostContent(...args) { return xnsDomTools.getPostContent(...args); }
+function getSafeUrlAttribute(...args) { return xnsDomTools.getSafeUrlAttribute(...args); }
+
+export { clearElement, createElement, findCommentList, getAuthorName, getCommentId, getCommentItems, getFloor, getPostContent, getSafeUrlAttribute, qs, qsa, safeCount, safePositiveInt };

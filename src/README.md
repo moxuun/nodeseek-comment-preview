@@ -1,6 +1,8 @@
 # 源码说明
 
-源码按功能拆分，构建产物位于 `outputs/`：
+源码按功能拆分，使用显式 ES 模块依赖，由 Vite + vite-plugin-monkey 构建到 `outputs/`。
+`src/main.ts` 是唯一脚本入口，`vite.config.ts` 管理 userscript 元数据，版本读取根目录 `package.json`。
+当前仅迁移构建和 TS 入口；业务模块仍为 JS，React、虚拟列表库与 DOMPurify 将分别迁移。
 
 | 目录职责 | 说明 |
 | --- | --- |
@@ -18,8 +20,14 @@
 在仓库根目录运行：
 
 ```powershell
-node work/build.mjs
+npm ci
+npm run build
 ```
+
+需要 Node.js 22.12+（22.x）或 24+，CI 使用 Node.js 24。
+`node work/build.mjs` 仍兼容旧命令，内部执行 TypeScript 检查、Vite 构建和 Greasy Fork 描述同步，不再拼接源码。
+`npm run typecheck` 检查 TS 文件（现有 JS 暂不做类型检查）；`npm run dev` 启动本地 Vite 开发服务，按终端提示安装开发脚本。
+发布产物是单个可读的 `.user.js`，依赖内联，不增加远程 `@require`。
 
 安装和发布使用 `outputs/nodeseek-comment-preview.user.js`，不要直接编辑构建产物。
 

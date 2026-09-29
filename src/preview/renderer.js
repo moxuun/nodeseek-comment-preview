@@ -1,3 +1,15 @@
+import { buildReplyTree, flattenReplyTree } from '../comments/thread.js';
+import { MAX_PAGE, SELECTORS } from '../core/config.js';
+import { clearElement, createElement, getCommentId, qs, qsa, safeCount } from '../core/dom.js';
+import { pageInfo } from '../core/runtime.js';
+import { ensurePreviewMenu, getDirectCommentMenu } from '../features/comment-actions.js';
+import { getSsrCommentCounts, materializeCommentNode, sanitizeImportedNode } from '../nodeseek/content-parser.js';
+import { getDocState } from '../nodeseek/ssr-state.js';
+import { buildPostUrl, getPostInfo } from '../nodeseek/url.js';
+import { addRemoteNote, stripRenderArtifacts } from './render-utils.js';
+import { createCommentVirtualizer } from './virtualizer.js';
+import { formatPageStatus } from '../ui/status.js';
+
 // 预览内容渲染服务。
 // 这里仅负责把已加载的帖子记录转换成官方风格的楼层节点；网络读取由 page-loader 负责。
 function createPreviewRenderer({
@@ -248,9 +260,11 @@ const xnsPreviewRenderer = createPreviewRenderer({
   formatPageStatus,
 });
 
-const ensurePreviewEditOption = (...args) => xnsPreviewRenderer.ensurePreviewEditOption(...args);
-const prepareCommentRecord = (...args) => xnsPreviewRenderer.prepareCommentRecord(...args);
-const appendNestedRecord = (...args) => xnsPreviewRenderer.appendNestedRecord(...args);
-const buildPreviewPostNode = (...args) => xnsPreviewRenderer.buildPreviewPostNode(...args);
-const renderPreviewStatus = (...args) => xnsPreviewRenderer.renderPreviewStatus(...args);
-const renderPreviewRecords = (...args) => xnsPreviewRenderer.renderPreviewRecords(...args);
+function ensurePreviewEditOption(...args) { return xnsPreviewRenderer.ensurePreviewEditOption(...args); }
+function prepareCommentRecord(...args) { return xnsPreviewRenderer.prepareCommentRecord(...args); }
+function appendNestedRecord(...args) { return xnsPreviewRenderer.appendNestedRecord(...args); }
+function buildPreviewPostNode(...args) { return xnsPreviewRenderer.buildPreviewPostNode(...args); }
+function renderPreviewStatus(...args) { return xnsPreviewRenderer.renderPreviewStatus(...args); }
+function renderPreviewRecords(...args) { return xnsPreviewRenderer.renderPreviewRecords(...args); }
+
+export { buildPreviewPostNode, prepareCommentRecord, renderPreviewRecords };

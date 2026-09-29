@@ -1,3 +1,8 @@
+import { ANSI_BG_HEX, ANSI_BRIGHT_HEX, ANSI_COLORS, ANSI_FG_HEX, STYLE_ID } from '../core/config.js';
+import { XNS_PREVIEW_SHELL_STYLES } from './preview-shell-style.js';
+import { XNS_SETTINGS_STYLES } from './settings-style.js';
+import { XNS_STYLE_TOKENS } from './tokens.js';
+
 // 全局样式注入。样式是构建期静态资源，运行时只负责一次性安装。
 function createStyleInstaller({ documentObj, styleId, ansiColors, ansiFgHex, ansiBgHex, ansiBrightHex, styleTokens, settingsStyles, previewShellStyles }) {
 function ansiRulesFor(prefix, property, hexes) {
@@ -176,5 +181,7 @@ const xnsStyleInstaller = createStyleInstaller({
   settingsStyles: XNS_SETTINGS_STYLES,
   previewShellStyles: XNS_PREVIEW_SHELL_STYLES,
 });
-const ansiRulesFor = (...args) => xnsStyleInstaller.ansiRulesFor(...args);
-const installStyle = (...args) => xnsStyleInstaller.installStyle(...args);
+function ansiRulesFor(...args) { return xnsStyleInstaller.ansiRulesFor(...args); }
+function installStyle(...args) { return xnsStyleInstaller.installStyle(...args); }
+
+export { installStyle };

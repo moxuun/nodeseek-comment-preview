@@ -1,3 +1,6 @@
+import { REQUEST_TIMEOUT, state } from '../core/config.js';
+import { parseSameOriginUrl } from './url.js';
+
 // NodeSeek 写接口适配器。
 // 这里不决定按钮如何渲染，只负责同源校验、签名、CSRF 和响应错误归一化。
 function createNodeSeekActionApi({ windowObj, navigatorObj, state, requestTimeout, parseSameOriginUrl, fetchFn, AbortControllerCtor }) {
@@ -89,6 +92,8 @@ const xnsNodeSeekActionApi = createNodeSeekActionApi({
   fetchFn: window.fetch.bind(window),
   AbortControllerCtor: window.AbortController,
 });
-const dynamicSign = (...args) => xnsNodeSeekActionApi.dynamicSign(...args);
-const randomCsrfToken = (...args) => xnsNodeSeekActionApi.randomCsrfToken(...args);
-const postAction = (...args) => xnsNodeSeekActionApi.postAction(...args);
+function dynamicSign(...args) { return xnsNodeSeekActionApi.dynamicSign(...args); }
+function randomCsrfToken(...args) { return xnsNodeSeekActionApi.randomCsrfToken(...args); }
+function postAction(...args) { return xnsNodeSeekActionApi.postAction(...args); }
+
+export { dynamicSign, postAction };

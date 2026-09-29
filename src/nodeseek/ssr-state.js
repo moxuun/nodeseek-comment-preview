@@ -1,3 +1,5 @@
+import { qs } from '../core/dom.js';
+
 // NodeSeek SSR 状态读取。只负责读取页面已经提供的 JSON，不访问会话存储。
 function createSsrStateService({ documentObj, qs }) {
   function extractSsrState(doc) {
@@ -22,5 +24,7 @@ function createSsrStateService({ documentObj, qs }) {
 }
 
 const xnsSsrStateService = createSsrStateService({ documentObj: document, qs });
-const extractSsrState = (...args) => xnsSsrStateService.extractSsrState(...args);
-const getDocState = (...args) => xnsSsrStateService.getDocState(...args);
+function extractSsrState(...args) { return xnsSsrStateService.extractSsrState(...args); }
+function getDocState(...args) { return xnsSsrStateService.getDocState(...args); }
+
+export { extractSsrState, getDocState };

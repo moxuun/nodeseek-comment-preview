@@ -28,3 +28,5 @@ const XNS_SETTINGS_STYLES = `
         .xns-settings-note { grid-column:1; }
       }
 `;
+
+export { XNS_SETTINGS_STYLES };

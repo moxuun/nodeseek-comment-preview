@@ -1,3 +1,8 @@
+import { SELECTORS } from '../core/config.js';
+import { safePositiveInt } from '../core/dom.js';
+import { pageInfo } from '../core/runtime.js';
+import { getPostInfo, parseSameOriginUrl } from '../nodeseek/url.js';
+
 // 楼层导航：只拦截当前帖子的楼层链接，并负责滚动与高亮。
 function createFloorNavigation({ windowObj, documentObj, selectors, enabled, parseSameOriginUrl, getPostInfo, safePositiveInt }) {
   function scrollToFloor(floor) {
@@ -49,4 +54,6 @@ const xnsFloorNavigation = createFloorNavigationFeature({
   getPostInfo,
   safePositiveInt,
 });
-const handleFloorClick = (...args) => xnsFloorNavigation.handle(...args);
+function handleFloorClick(...args) { return xnsFloorNavigation.handle(...args); }
+
+export { handleFloorClick };

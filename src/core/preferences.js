@@ -1,3 +1,5 @@
+import { DEFAULT_MODE, MAX_PAGE, state } from './config.js';
+
 // 用户偏好存储；只保存界面设置，不保存帖子内容、登录信息或写操作数据。
 function createPreferences({ windowObj, documentObj, state, storageKey, defaultMode, maxPage }) {
   const defaults = Object.freeze({
@@ -79,8 +81,10 @@ const xnsPreferences = createPreferences({
   defaultMode: DEFAULT_MODE,
   maxPage: MAX_PAGE,
 });
-const getSettings = (...args) => xnsPreferences.get(...args);
-const updateSettings = (...args) => xnsPreferences.update(...args);
-const resetSettings = (...args) => xnsPreferences.reset(...args);
-const getMaxPage = (...args) => xnsPreferences.getMaxPage(...args);
-const applySettings = (...args) => xnsPreferences.apply(...args);
+function getSettings(...args) { return xnsPreferences.get(...args); }
+function updateSettings(...args) { return xnsPreferences.update(...args); }
+function resetSettings(...args) { return xnsPreferences.reset(...args); }
+function getMaxPage(...args) { return xnsPreferences.getMaxPage(...args); }
+function applySettings(...args) { return xnsPreferences.apply(...args); }
+
+export { getMaxPage, getSettings, resetSettings, updateSettings };

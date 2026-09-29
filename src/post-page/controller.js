@@ -1,3 +1,20 @@
+import { flattenReplyTree, mergeCommentRecords } from '../comments/thread.js';
+import { MAX_PAGE, SELECTORS, state } from '../core/config.js';
+import { createElement, findCommentList, getCommentItems, getFloor, qs, qsa } from '../core/dom.js';
+import { getMaxPage, updateSettings } from '../core/preferences.js';
+import { fetchPostPages } from '../data/page-loader.js';
+import { installPreviewFeatures } from '../features/content.js';
+import { getCommentRecord, releaseCommentNode, sanitizeImportedNode } from '../nodeseek/content-parser.js';
+import { fetchHtml, parseHtml } from '../nodeseek/http.js';
+import { getCurrentUserUid } from '../nodeseek/identity.js';
+import { getPageNumbers } from '../nodeseek/pagination.js';
+import { getDocState } from '../nodeseek/ssr-state.js';
+import { buildPostUrl } from '../nodeseek/url.js';
+import { addRemoteNote, stripRenderArtifacts } from '../preview/render-utils.js';
+import { prepareCommentRecord } from '../preview/renderer.js';
+import { createCommentVirtualizer } from '../preview/virtualizer.js';
+import { formatPageStatus } from '../ui/status.js';
+
 // 帖子详情页控制器。
 // 它只管理原始楼层快照、评论布局模式和分页生命周期；预览入口由 preview/entry.js 管理。
 function createPostPageController({
@@ -502,3 +519,5 @@ const PostEnhancer = createPostPageController({
   getMaxPage,
   buildPostUrl,
 });
+
+export { PostEnhancer };

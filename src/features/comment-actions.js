@@ -1,3 +1,10 @@
+import { state } from '../core/config.js';
+import { createElement, findCommentList, getAuthorName, getCommentId, getFloor, getPostContent, qs, qsa, safePositiveInt } from '../core/dom.js';
+import { pageInfo } from '../core/runtime.js';
+import { postAction } from '../nodeseek/action-api.js';
+import { buildPostUrl, getPostInfo, parseSameOriginUrl } from '../nodeseek/url.js';
+import { syncPreviewReply } from '../preview/controller.js';
+
 // 评论动作功能：菜单、点赞/鸡腿/反对/收藏，以及预览中的回复/引用编辑器。
 function createCommentActions({
   windowObj,
@@ -375,9 +382,11 @@ const xnsCommentActions = createCommentActions({
   postAction,
   syncPreviewReply: (...args) => syncPreviewReply(...args),
 });
-const getDirectCommentMenu = (...args) => xnsCommentActions.getDirectCommentMenu(...args);
-const getMenuActionKey = (...args) => xnsCommentActions.getMenuActionKey(...args);
-const ensurePreviewMenu = (...args) => xnsCommentActions.ensurePreviewMenu(...args);
-const getActionContext = (...args) => xnsCommentActions.getActionContext(...args);
-const openPreviewComposer = (...args) => xnsCommentActions.openPreviewComposer(...args);
-const runPreviewAction = (...args) => xnsCommentActions.runPreviewAction(...args);
+function getDirectCommentMenu(...args) { return xnsCommentActions.getDirectCommentMenu(...args); }
+function getMenuActionKey(...args) { return xnsCommentActions.getMenuActionKey(...args); }
+function ensurePreviewMenu(...args) { return xnsCommentActions.ensurePreviewMenu(...args); }
+function getActionContext(...args) { return xnsCommentActions.getActionContext(...args); }
+function openPreviewComposer(...args) { return xnsCommentActions.openPreviewComposer(...args); }
+function runPreviewAction(...args) { return xnsCommentActions.runPreviewAction(...args); }
+
+export { ensurePreviewMenu, getActionContext, getDirectCommentMenu, getMenuActionKey, openPreviewComposer, runPreviewAction };

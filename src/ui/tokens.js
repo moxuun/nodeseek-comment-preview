@@ -27,3 +27,5 @@ const XNS_STYLE_TOKENS = `
         --xns-success: #4ade80;
       }
 `;
+
+export { XNS_STYLE_TOKENS };

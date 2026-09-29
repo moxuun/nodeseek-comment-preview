@@ -1,3 +1,5 @@
+import { safePositiveInt } from '../core/dom.js';
+
 // NodeSeek 帖子 URL 规则与同源请求边界。
 function createNodeSeekUrlService({ windowObj, URLCtor, safePositiveInt }) {
   function getPostInfo(rawUrl) {
@@ -48,7 +50,9 @@ const xnsNodeSeekUrlService = createNodeSeekUrlService({
   URLCtor: URL,
   safePositiveInt,
 });
-const buildPostUrl = (...args) => xnsNodeSeekUrlService.buildPostUrl(...args);
-const getPostInfo = (...args) => xnsNodeSeekUrlService.getPostInfo(...args);
-const parseSameOriginUrl = (...args) => xnsNodeSeekUrlService.parseSameOriginUrl(...args);
-const isAllowedPostRequest = (...args) => xnsNodeSeekUrlService.isAllowedPostRequest(...args);
+function buildPostUrl(...args) { return xnsNodeSeekUrlService.buildPostUrl(...args); }
+function getPostInfo(...args) { return xnsNodeSeekUrlService.getPostInfo(...args); }
+function parseSameOriginUrl(...args) { return xnsNodeSeekUrlService.parseSameOriginUrl(...args); }
+function isAllowedPostRequest(...args) { return xnsNodeSeekUrlService.isAllowedPostRequest(...args); }
+
+export { buildPostUrl, getPostInfo, isAllowedPostRequest, parseSameOriginUrl };

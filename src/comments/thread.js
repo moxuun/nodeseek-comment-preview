@@ -45,3 +45,5 @@ function mergeCommentRecords(...groups) {
   });
   return Array.from(merged.values());
 }
+
+export { buildReplyTree, flattenReplyTree, mergeCommentRecords };

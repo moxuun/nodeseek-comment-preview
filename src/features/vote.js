@@ -1,3 +1,8 @@
+import { createElement, qs, qsa, safePositiveInt } from '../core/dom.js';
+import { getActionContext } from './comment-actions.js';
+import { dynamicSign, postAction } from '../nodeseek/action-api.js';
+import { parseSameOriginUrl } from '../nodeseek/url.js';
+
 // 投票功能模块。
 // 投票的读取、选择态、结果态和提交由这里管理；普通评论 reaction 不与它共享 UI 状态。
 function createVoteFeature({
@@ -222,6 +227,8 @@ const xnsVoteFeature = createVoteFeature({
   getActionContext,
   fetchFn: window.fetch.bind(window),
 });
-const installPreviewVotePanels = (...args) => xnsVoteFeature.installPreviewVotePanels(...args);
-const handleVoteClick = (...args) => xnsVoteFeature.handleVoteClick(...args);
-const fetchVoteInfo = (...args) => xnsVoteFeature.fetchVoteInfo(...args);
+function installPreviewVotePanels(...args) { return xnsVoteFeature.installPreviewVotePanels(...args); }
+function handleVoteClick(...args) { return xnsVoteFeature.handleVoteClick(...args); }
+function fetchVoteInfo(...args) { return xnsVoteFeature.fetchVoteInfo(...args); }
+
+export { handleVoteClick, installPreviewVotePanels };

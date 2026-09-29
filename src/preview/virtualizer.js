@@ -287,3 +287,5 @@ function createCommentVirtualizer({
   const api = Object.freeze({ mount, setEntries, scrollToIndex, scrollToFloor, destroy });
   return api;
 }
+
+export { createCommentVirtualizer };

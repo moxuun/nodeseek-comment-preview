@@ -1,3 +1,7 @@
+import { getAuthorName, getCommentId, getFloor, getPostContent, getSafeUrlAttribute, qs, qsa, safeCount, safePositiveInt } from '../core/dom.js';
+import { getCurrentUserUid } from './identity.js';
+import { getPostInfo, parseSameOriginUrl } from './url.js';
+
 // NodeSeek 页面内容解析与安全克隆；输出供预览和帖子页共用的评论记录。
 function createContentParser({
   documentObj,
@@ -210,13 +214,15 @@ const xnsContentParser = createContentParser({
   getPostContent,
   getCurrentUserUid,
 });
-const sanitizeImportedNode = (...args) => xnsContentParser.sanitizeImportedNode(...args);
-const extractReplyMetadata = (...args) => xnsContentParser.extractReplyMetadata(...args);
-const isPinnedComment = (...args) => xnsContentParser.isPinnedComment(...args);
-const hasOwnEditOption = (...args) => xnsContentParser.hasOwnEditOption(...args);
-const getCommentAuthorUid = (...args) => xnsContentParser.getCommentAuthorUid(...args);
-const getCommentRecord = (...args) => xnsContentParser.getCommentRecord(...args);
-const materializeCommentNode = (...args) => xnsContentParser.materializeCommentNode(...args);
-const releaseCommentNode = (...args) => xnsContentParser.releaseCommentNode(...args);
-const releaseCommentHtml = (...args) => xnsContentParser.releaseCommentHtml(...args);
-const getSsrCommentCounts = (...args) => xnsContentParser.getSsrCommentCounts(...args);
+function sanitizeImportedNode(...args) { return xnsContentParser.sanitizeImportedNode(...args); }
+function extractReplyMetadata(...args) { return xnsContentParser.extractReplyMetadata(...args); }
+function isPinnedComment(...args) { return xnsContentParser.isPinnedComment(...args); }
+function hasOwnEditOption(...args) { return xnsContentParser.hasOwnEditOption(...args); }
+function getCommentAuthorUid(...args) { return xnsContentParser.getCommentAuthorUid(...args); }
+function getCommentRecord(...args) { return xnsContentParser.getCommentRecord(...args); }
+function materializeCommentNode(...args) { return xnsContentParser.materializeCommentNode(...args); }
+function releaseCommentNode(...args) { return xnsContentParser.releaseCommentNode(...args); }
+function releaseCommentHtml(...args) { return xnsContentParser.releaseCommentHtml(...args); }
+function getSsrCommentCounts(...args) { return xnsContentParser.getSsrCommentCounts(...args); }
+
+export { getCommentRecord, getSsrCommentCounts, materializeCommentNode, releaseCommentNode, sanitizeImportedNode };
