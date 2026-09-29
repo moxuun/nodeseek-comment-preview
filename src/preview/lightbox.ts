@@ -1,16 +1,30 @@
 import { state } from '../core/config.js';
-import { createElement, getSafeUrlAttribute, qs, qsa } from '../core/dom.js';
+import { createElement, getSafeUrlAttribute, qsa } from '../core/dom.js';
+
+/** 灯箱实例；写入 state.lightbox，供 ESC 与全局事件关闭。 */
+interface ImageLightbox {
+  overlay?: HTMLElement | null;
+  cleanup?: () => void;
+}
+
+interface PreviewLightboxDeps {
+  documentObj: Document;
+  state: { lightbox: unknown };
+  qsa: typeof qsa;
+  createElement: typeof createElement;
+  getSafeUrlAttribute: typeof getSafeUrlAttribute;
+}
 
 // 预览图片灯箱：只负责图片交互，不负责帖子弹窗或内容渲染。
-function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createElement, getSafeUrlAttribute }) {
-  function getPreviewImageSource(image) {
-    const link = image?.closest?.('a[href]');
+function createPreviewLightbox({ documentObj, state, qsa, createElement, getSafeUrlAttribute }: PreviewLightboxDeps) {
+  function getPreviewImageSource(image: HTMLImageElement | null | undefined): string | null {
+    const link = image?.closest('a[href]');
     const candidates = [
       image?.currentSrc,
-      image?.getAttribute?.('src'),
-      image?.getAttribute?.('data-src'),
-      image?.getAttribute?.('data-original'),
-      link?.getAttribute?.('href'),
+      image?.getAttribute('src'),
+      image?.getAttribute('data-src'),
+      image?.getAttribute('data-original'),
+      link?.getAttribute('href'),
     ];
     for (const candidate of candidates) {
       const safe = getSafeUrlAttribute('src', candidate);
@@ -19,15 +33,15 @@ function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createE
     return null;
   }
 
-  function closeImageLightbox() {
-    const lightbox = state.lightbox;
+  function closeImageLightbox(): void {
+    const lightbox = state.lightbox as ImageLightbox | null;
     if (!lightbox) return;
     lightbox.cleanup?.();
     lightbox.overlay?.remove();
     state.lightbox = null;
   }
 
-  function openImageLightbox(image) {
+  function openImageLightbox(image: HTMLImageElement): void {
     const source = getPreviewImageSource(image);
     if (!source) return;
     closeImageLightbox();
@@ -44,10 +58,10 @@ function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createE
     preview.alt = image.getAttribute('alt') || '图片预览';
     preview.setAttribute('referrerpolicy', 'origin');
     preview.setAttribute('draggable', 'false');
-    const close = createElement('button', 'xns-lightbox-close', '×');
+    const close = createElement('button', 'xns-lightbox-close', '×') as HTMLButtonElement;
     close.type = 'button';
     close.setAttribute('aria-label', '关闭图片预览');
-    const original = createElement('a', 'xns-lightbox-open', '打开原图');
+    const original = createElement('a', 'xns-lightbox-open', '打开原图') as HTMLAnchorElement;
     original.href = source;
     original.target = '_blank';
     original.rel = 'noopener noreferrer';
@@ -58,15 +72,15 @@ function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createE
     let offsetX = 0;
     let offsetY = 0;
     let dragging = false;
-    let pointerId = null;
+    let pointerId: number | null = null;
     let startX = 0;
     let startY = 0;
     let startOffsetX = 0;
     let startOffsetY = 0;
-    const render = () => {
+    const render = (): void => {
       preview.style.transform = `translate3d(${offsetX}px, ${offsetY}px, 0) scale(${scale})`;
     };
-    const onWheel = (event) => {
+    const onWheel = (event: WheelEvent): void => {
       event.preventDefault();
       scale = Math.min(4, Math.max(0.5, scale * (event.deltaY < 0 ? 1.12 : 0.89)));
       if (scale <= 1) {
@@ -76,7 +90,7 @@ function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createE
       }
       render();
     };
-    const onPointerDown = (event) => {
+    const onPointerDown = (event: PointerEvent): void => {
       if (event.button !== 0) return;
       dragging = true;
       pointerId = event.pointerId;
@@ -88,20 +102,20 @@ function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createE
       stage.setPointerCapture?.(event.pointerId);
       event.preventDefault();
     };
-    const onPointerMove = (event) => {
+    const onPointerMove = (event: PointerEvent): void => {
       if (!dragging || event.pointerId !== pointerId) return;
       offsetX = startOffsetX + event.clientX - startX;
       offsetY = startOffsetY + event.clientY - startY;
       render();
     };
-    const onPointerUp = (event) => {
+    const onPointerUp = (event: PointerEvent): void => {
       if (event.pointerId !== pointerId) return;
       dragging = false;
       pointerId = null;
       stage.classList.remove('xns-dragging');
       stage.releasePointerCapture?.(event.pointerId);
     };
-    const cleanup = () => {
+    const cleanup = (): void => {
       stage.removeEventListener('wheel', onWheel);
       stage.removeEventListener('pointerdown', onPointerDown);
       stage.removeEventListener('pointermove', onPointerMove);
@@ -123,16 +137,16 @@ function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createE
     overlay.focus();
   }
 
-  function installPreviewImageFallback(root, options = {}) {
-    const isPreviewRoot = root?.matches?.('.xns-preview-content') || root?.closest?.('.xns-preview-content');
+  function installPreviewImageFallback(root: Element | null | undefined, options: { skipRemote?: boolean } = {}): void {
+    const isPreviewRoot = Boolean(root?.matches('.xns-preview-content') || root?.closest('.xns-preview-content'));
     const selector = isPreviewRoot ? 'img' : '.xns-preview-content img';
-    const images = [];
-    if (root?.matches?.('.xns-preview-content img')) images.push(root);
-    const owner = root?.matches?.('.content-item') ? root : null;
-    images.push(...qsa(root, selector));
+    const images: HTMLImageElement[] = [];
+    if (root && root.matches('.xns-preview-content img')) images.push(root as HTMLImageElement);
+    const owner = root?.matches('.content-item') ? root : null;
+    images.push(...qsa<HTMLImageElement>(root, selector));
     images.filter((image) => {
-      if (owner && image.closest?.('.content-item') !== owner) return false;
-      if (options.skipRemote && (image.matches?.('[data-xns-remote]') || image.closest?.('[data-xns-remote]'))) return false;
+      if (owner && image.closest('.content-item') !== owner) return false;
+      if (options.skipRemote && (image.matches('[data-xns-remote]') || image.closest('[data-xns-remote]'))) return false;
       return true;
     }).forEach((image) => {
       const deferredSource = image.getAttribute('data-xns-deferred-src');
@@ -145,7 +159,7 @@ function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createE
       image.setAttribute('tabindex', '0');
       image.setAttribute('role', 'button');
       image.setAttribute('title', '点击放大图片');
-      const open = (event) => {
+      const open = (event: Event): void => {
         event.preventDefault();
         event.stopPropagation();
         openImageLightbox(image);
@@ -166,16 +180,14 @@ function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createE
 }
 
 const xnsPreviewLightbox = createPreviewLightbox({
-  windowObj: window,
   documentObj: document,
   state,
-  qs,
   qsa,
   createElement,
   getSafeUrlAttribute,
 });
-function closeImageLightbox(...args) { return xnsPreviewLightbox.closeImageLightbox(...args); }
-function openImageLightbox(...args) { return xnsPreviewLightbox.openImageLightbox(...args); }
-function installPreviewImageFallback(...args) { return xnsPreviewLightbox.installPreviewImageFallback(...args); }
+const closeImageLightbox = (): void => xnsPreviewLightbox.closeImageLightbox();
+const installPreviewImageFallback = (root: Element | null | undefined, options?: { skipRemote?: boolean }): void => xnsPreviewLightbox.installPreviewImageFallback(root, options);
 
 export { closeImageLightbox, installPreviewImageFallback };
+export type { ImageLightbox };

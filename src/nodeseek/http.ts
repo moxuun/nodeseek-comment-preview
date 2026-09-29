@@ -1,6 +1,46 @@
 import { HTML_CACHE_ITEM_MAX_BYTES, HTML_CACHE_MAX_BYTES, HTML_CACHE_MAX_ENTRIES, HTML_CACHE_TTL, MAX_RESPONSE_BYTES, REQUEST_TIMEOUT } from '../core/config.js';
 import { extractSsrState } from './ssr-state.js';
+import type { SsrState } from './ssr-state.js';
 import { isAllowedPostRequest, parseSameOriginUrl } from './url.js';
+
+/** fetchHtml 可选参数。 */
+interface FetchHtmlOptions {
+  noStore?: boolean;
+  allowCache?: boolean;
+  signal?: AbortSignal;
+  beforeRequest?: () => unknown;
+  onResponse?: (status: number) => void;
+}
+
+/** 带错误码与 HTTP 状态的请求错误。 */
+interface HttpError extends Error {
+  code?: string;
+  status?: number;
+}
+
+interface HtmlCacheEntry {
+  html: string;
+  url: string;
+  postId: string;
+  createdAt: number;
+  bytes: number;
+}
+
+interface HttpClientDeps {
+  windowObj: Window;
+  fetchFn: typeof fetch;
+  AbortControllerCtor: typeof AbortController;
+  DOMParserCtor: typeof DOMParser;
+  requestTimeout: number;
+  maxResponseBytes: number;
+  isAllowedPostRequest: typeof isAllowedPostRequest;
+  parseSameOriginUrl: typeof parseSameOriginUrl;
+  extractSsrState: typeof extractSsrState;
+  cacheTtl: number;
+  cacheMaxEntries: number;
+  cacheMaxBytes: number;
+  cacheItemMaxBytes: number;
+}
 
 // NodeSeek 同源帖子读取与 HTML -> Document 转换。
 function createHttpClient({
@@ -17,22 +57,22 @@ function createHttpClient({
   cacheMaxEntries,
   cacheMaxBytes,
   cacheItemMaxBytes,
-}) {
-  const htmlCache = new Map();
+}: HttpClientDeps) {
+  const htmlCache = new Map<string, HtmlCacheEntry>();
   let htmlCacheBytes = 0;
 
-  function removeCacheEntry(key) {
+  function removeCacheEntry(key: string): void {
     const entry = htmlCache.get(key);
     if (!entry) return;
     htmlCacheBytes -= entry.bytes;
     htmlCache.delete(key);
   }
 
-  function postIdFromUrl(url) {
+  function postIdFromUrl(url: URL): string {
     return /^\/post-(\d+)-\d+(?:\/)?$/.exec(url.pathname)?.[1] || '';
   }
 
-  function invalidatePostCache(url) {
+  function invalidatePostCache(url: URL): void {
     const postId = postIdFromUrl(url);
     if (!postId) {
       removeCacheEntry(url.href);
@@ -43,7 +83,7 @@ function createHttpClient({
     });
   }
 
-  function readCachedHtml(url) {
+  function readCachedHtml(url: URL): { html: string; url: URL | null } | null {
     const entry = htmlCache.get(url.href);
     if (!entry) return null;
     if (Date.now() - entry.createdAt > cacheTtl) {
@@ -55,7 +95,7 @@ function createHttpClient({
     return { html: entry.html, url: parseSameOriginUrl(entry.url) };
   }
 
-  function writeCachedHtml(url, html) {
+  function writeCachedHtml(url: URL, html: string): void {
     const bytes = html.length;
     if (bytes > cacheItemMaxBytes) return;
     removeCacheEntry(url.href);
@@ -71,7 +111,7 @@ function createHttpClient({
     htmlCacheBytes += bytes;
   }
 
-  function getRetryDelay(response, fallback) {
+  function getRetryDelay(response: Response, fallback: number): number {
     const value = response.headers?.get?.('retry-after')?.trim() || '';
     if (!value) return fallback;
     const seconds = Number(value);
@@ -81,26 +121,26 @@ function createHttpClient({
     return fallback;
   }
 
-  function isCloudflareChallenge(response) {
+  function isCloudflareChallenge(response: Response): boolean {
     return response.headers?.get?.('cf-mitigated')?.trim().toLowerCase() === 'challenge';
   }
 
-  function createHttpError(message, code, status) {
-    const error = new Error(message);
+  function createHttpError(message: string, code: string, status?: number): HttpError {
+    const error: HttpError = new Error(message);
     error.code = code;
     if (Number.isFinite(status)) error.status = status;
     return error;
   }
 
-  function abortError() {
+  function abortError(): Error {
     const error = new Error('请求已取消');
     error.name = 'AbortError';
     return error;
   }
 
-  function wait(delay, signal) {
+  function wait(delay: number, signal?: AbortSignal | null): Promise<void> {
     if (signal?.aborted) return Promise.reject(abortError());
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
       const timer = windowObj.setTimeout(() => {
         signal?.removeEventListener('abort', cancel);
         resolve();
@@ -114,12 +154,12 @@ function createHttpClient({
     });
   }
 
-  function throwIfAborted(signal) {
+  function throwIfAborted(signal?: AbortSignal | null): void {
     if (signal?.aborted) throw abortError();
   }
 
-  async function fetchHtml(url, options = {}) {
-    if (!isAllowedPostRequest(url)) throw new Error('只允许读取同一站点的帖子页面');
+  async function fetchHtml(url: URL | null, options: FetchHtmlOptions = {}): Promise<{ html: string; url: URL | null }> {
+    if (!url || !isAllowedPostRequest(url)) throw new Error('只允许读取同一站点的帖子页面');
     const noStore = options.noStore === true;
     const allowCache = options.allowCache === true && !noStore;
     if (noStore) invalidatePostCache(url);
@@ -162,12 +202,13 @@ function createHttpClient({
         if (allowCache) writeCachedHtml(responseUrl, html);
         return { html, url: responseUrl };
       } catch (error) {
-        if (error?.code === 'CLOUDFLARE_CHALLENGE') throw error;
-        if (attempt < 3 && error?.name !== 'AbortError') {
+        const failure = error as HttpError;
+        if (failure.code === 'CLOUDFLARE_CHALLENGE') throw failure;
+        if (attempt < 3 && failure.name !== 'AbortError') {
           await new Promise((resolve) => windowObj.setTimeout(resolve, 600 * attempt));
           continue;
         }
-        throw error;
+        throw failure;
       } finally {
         windowObj.clearTimeout(timer);
         options.signal?.removeEventListener('abort', abortExternal);
@@ -176,9 +217,9 @@ function createHttpClient({
     throw new Error('抓取失败');
   }
 
-  function parseHtml(html) {
+  function parseHtml(html: string): Document {
     const doc = new DOMParserCtor().parseFromString(html, 'text/html');
-    doc.__xnsState = extractSsrState(doc);
+    (doc as Document & { __xnsState?: SsrState | null }).__xnsState = extractSsrState(doc);
     return doc;
   }
 
@@ -200,7 +241,8 @@ const xnsHttpClient = createHttpClient({
   parseSameOriginUrl,
   extractSsrState,
 });
-function fetchHtml(...args) { return xnsHttpClient.fetchHtml(...args); }
-function parseHtml(...args) { return xnsHttpClient.parseHtml(...args); }
+const fetchHtml = (url: URL | null, options?: FetchHtmlOptions): Promise<{ html: string; url: URL | null }> => xnsHttpClient.fetchHtml(url, options);
+const parseHtml = (html: string): Document => xnsHttpClient.parseHtml(html);
 
 export { fetchHtml, parseHtml };
+export type { FetchHtmlOptions, HttpError };

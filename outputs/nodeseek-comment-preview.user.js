@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.72
+// @version      0.5.73
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -2821,7 +2821,7 @@
 			if (signal?.aborted) throw abortError();
 		}
 		async function fetchHtml(url, options = {}) {
-			if (!isAllowedPostRequest(url)) throw new Error("只允许读取同一站点的帖子页面");
+			if (!url || !isAllowedPostRequest(url)) throw new Error("只允许读取同一站点的帖子页面");
 			const noStore = options.noStore === true;
 			const allowCache = options.allowCache === true && !noStore;
 			if (noStore) invalidatePostCache(url);
@@ -2870,12 +2870,13 @@
 						url: responseUrl
 					};
 				} catch (error) {
-					if (error?.code === "CLOUDFLARE_CHALLENGE") throw error;
-					if (attempt < 3 && error?.name !== "AbortError") {
+					const failure = error;
+					if (failure.code === "CLOUDFLARE_CHALLENGE") throw failure;
+					if (attempt < 3 && failure.name !== "AbortError") {
 						await new Promise((resolve) => windowObj.setTimeout(resolve, 600 * attempt));
 						continue;
 					}
-					throw error;
+					throw failure;
 				} finally {
 					windowObj.clearTimeout(timer);
 					options.signal?.removeEventListener("abort", abortExternal);
@@ -2908,12 +2909,8 @@
 		parseSameOriginUrl,
 		extractSsrState
 	});
-	function fetchHtml(...args) {
-		return xnsHttpClient.fetchHtml(...args);
-	}
-	function parseHtml(...args) {
-		return xnsHttpClient.parseHtml(...args);
-	}
+	var fetchHtml = (url, options) => xnsHttpClient.fetchHtml(url, options);
+	var parseHtml = (html) => xnsHttpClient.parseHtml(html);
 	function createPaginationService({ windowObj, qsa, parseSameOriginUrl, getPostInfo }) {
 		function getPaginationLinks(root) {
 			const preferred = qsa(root, ".nsk-pager a[href], a.pager-pos[href]");
@@ -3326,15 +3323,15 @@
 	function handleVoteClick(...args) {
 		return xnsVoteFeature.handleVoteClick(...args);
 	}
-	function createPreviewLightbox({ windowObj, documentObj, state, qs, qsa, createElement, getSafeUrlAttribute }) {
+	function createPreviewLightbox({ documentObj, state, qsa, createElement, getSafeUrlAttribute }) {
 		function getPreviewImageSource(image) {
-			const link = image?.closest?.("a[href]");
+			const link = image?.closest("a[href]");
 			const candidates = [
 				image?.currentSrc,
-				image?.getAttribute?.("src"),
-				image?.getAttribute?.("data-src"),
-				image?.getAttribute?.("data-original"),
-				link?.getAttribute?.("href")
+				image?.getAttribute("src"),
+				image?.getAttribute("data-src"),
+				image?.getAttribute("data-original"),
+				link?.getAttribute("href")
 			];
 			for (const candidate of candidates) {
 				const safe = getSafeUrlAttribute("src", candidate);
@@ -3450,14 +3447,14 @@
 			overlay.focus();
 		}
 		function installPreviewImageFallback(root, options = {}) {
-			const selector = root?.matches?.(".xns-preview-content") || root?.closest?.(".xns-preview-content") ? "img" : ".xns-preview-content img";
+			const selector = Boolean(root?.matches(".xns-preview-content") || root?.closest(".xns-preview-content")) ? "img" : ".xns-preview-content img";
 			const images = [];
-			if (root?.matches?.(".xns-preview-content img")) images.push(root);
-			const owner = root?.matches?.(".content-item") ? root : null;
+			if (root && root.matches(".xns-preview-content img")) images.push(root);
+			const owner = root?.matches(".content-item") ? root : null;
 			images.push(...qsa(root, selector));
 			images.filter((image) => {
-				if (owner && image.closest?.(".content-item") !== owner) return false;
-				if (options.skipRemote && (image.matches?.("[data-xns-remote]") || image.closest?.("[data-xns-remote]"))) return false;
+				if (owner && image.closest(".content-item") !== owner) return false;
+				if (options.skipRemote && (image.matches("[data-xns-remote]") || image.closest("[data-xns-remote]"))) return false;
 				return true;
 			}).forEach((image) => {
 				const deferredSource = image.getAttribute("data-xns-deferred-src");
@@ -3493,20 +3490,14 @@
 		});
 	}
 	var xnsPreviewLightbox = createPreviewLightbox({
-		windowObj: window,
 		documentObj: document,
 		state,
-		qs,
 		qsa,
 		createElement,
 		getSafeUrlAttribute
 	});
-	function closeImageLightbox(...args) {
-		return xnsPreviewLightbox.closeImageLightbox(...args);
-	}
-	function installPreviewImageFallback(...args) {
-		return xnsPreviewLightbox.installPreviewImageFallback(...args);
-	}
+	var closeImageLightbox = () => xnsPreviewLightbox.closeImageLightbox();
+	var installPreviewImageFallback = (root, options) => xnsPreviewLightbox.installPreviewImageFallback(root, options);
 	function createContentFeatures({ windowObj, documentObj, navigatorObj, qs, qsa, createElement, clearElement, installPreviewImageFallback, installPreviewVotePanels }) {
 		const ANSI_COLORS = [
 			"black",
@@ -3953,12 +3944,13 @@
 		}
 		function closeModal() {
 			closeImageLightbox();
-			state.modal?.requestController?.abort();
-			state.modal?.replySyncController?.abort();
-			state.modal?.featureCleanup?.();
-			state.modal?.refreshScrollCleanup?.();
-			state.modal?.scrollCleanup?.();
-			state.modal?.overlay?.remove();
+			const modal = state.modal;
+			modal?.requestController?.abort();
+			modal?.replySyncController?.abort();
+			modal?.featureCleanup?.();
+			modal?.refreshScrollCleanup?.();
+			modal?.scrollCleanup?.();
+			modal?.overlay?.remove();
 			state.modal = null;
 			removeBodyLock();
 		}
@@ -3986,21 +3978,11 @@
 		createElement,
 		closeImageLightbox
 	});
-	function installPreviewScrollButtons(...args) {
-		return xnsPreviewModalUi.installPreviewScrollButtons(...args);
-	}
-	function closeModal(...args) {
-		return xnsPreviewModalUi.closeModal(...args);
-	}
-	function createCloseButton(...args) {
-		return xnsPreviewModalUi.createCloseButton(...args);
-	}
-	function createRefreshButton(...args) {
-		return xnsPreviewModalUi.createRefreshButton(...args);
-	}
-	function createShareButton(...args) {
-		return xnsPreviewModalUi.createShareButton(...args);
-	}
+	var closeModal = () => xnsPreviewModalUi.closeModal();
+	var createCloseButton = (onClick) => xnsPreviewModalUi.createCloseButton(onClick);
+	var createRefreshButton = (onClick) => xnsPreviewModalUi.createRefreshButton(onClick);
+	var createShareButton = (onClick) => xnsPreviewModalUi.createShareButton(onClick);
+	var installPreviewScrollButtons = (dialog, body) => xnsPreviewModalUi.installPreviewScrollButtons(dialog, body);
 	function createPreviewRenderUtils({ qs, qsa, createElement, buildPostUrl }) {
 		function stripRenderArtifacts(item) {
 			if (!item?.classList) return;
