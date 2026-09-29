@@ -31,6 +31,8 @@ export interface CommentRecord {
   author: string;
   reply: ReplyMetadata | null;
   counts: SsrCommentCounts | null;
+  /** SSR 里保存的原始 markdown，供脚本内联编辑回填。 */
+  markdown: string | null;
   node: Element | null;
   html: string | null;
   parent: CommentRecord | null;
@@ -128,6 +130,7 @@ function getCommentRecord(item: Element, postId: string, page: number, index: nu
     author: getAuthorName(item),
     reply: extractReplyMetadata(item, postId),
     counts: commentId !== null && options.state ? getSsrCommentCounts(options.state, commentId) : null,
+    markdown: commentId !== null && options.state ? getSsrCommentMarkdown(options.state, commentId) : null,
     // 跨页评论在原版布局下不会展示；虚拟楼层流只保留经过清洗的 HTML，
     // 需要进入活动窗口时再物化成节点。
     node: current ? node : null,
@@ -167,7 +170,7 @@ function releaseCommentHtml(record: CommentRecord | null | undefined): void {
   if (record && !record.current && record.node) record.html = null;
 }
 
-function getSsrCommentCounts(stateValue: SsrState | null | undefined, commentId: number): SsrCommentCounts | null {
+function getSsrCommentEntry(stateValue: SsrState | null | undefined, commentId: number): SsrCommentEntry | null {
   if (!stateValue || typeof stateValue !== 'object') return null;
   let index = ssrCommentIndexes.get(stateValue);
   if (!index) {
@@ -183,12 +186,21 @@ function getSsrCommentCounts(stateValue: SsrState | null | undefined, commentId:
     index = built;
     ssrCommentIndexes.set(stateValue, index);
   }
-  const comment = index.get(String(commentId));
+  return index.get(String(commentId)) || null;
+}
+
+function getSsrCommentCounts(stateValue: SsrState | null | undefined, commentId: number): SsrCommentCounts | null {
+  const comment = getSsrCommentEntry(stateValue, commentId);
   if (!comment) return null;
   return {
     like: safeCount(comment.upvoteCount), chicken: safeCount(comment.likeCount), dislike: safeCount(comment.dislikeCount),
     liked: Boolean(comment.upvoted), chickened: Boolean(comment.liked), disliked: Boolean(comment.disliked),
   };
+}
+
+function getSsrCommentMarkdown(stateValue: SsrState | null | undefined, commentId: number): string | null {
+  const comment = getSsrCommentEntry(stateValue, commentId);
+  return typeof comment?.markdown === 'string' ? comment.markdown : null;
 }
 
   return Object.freeze({

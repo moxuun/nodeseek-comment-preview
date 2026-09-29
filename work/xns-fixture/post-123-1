@@ -26,18 +26,34 @@ printf "ok"</code></pre><div class="nsk-magic-tabs"><div class="nsk-magic-tab-ti
     <div class="nsk-pager post-bottom-pager"><a class="pager-pos pager-cur" href="/post-123-1">1</a><a class="pager-pos" href="/post-123-2">2</a></div>
   </div>
   <script src="/outputs/nodeseek-comment-preview.user.js"></script>
-  <script id="temp-script" type="application/json">eyJwYWdlVHlwZSI6InBvc3QiLCJ1c2VyIjpudWxsLCJhbGxDYXRlZ29yeSI6W10sInBvc3REYXRhIjp7InBvc3RJZCI6MTIzLCJwb3N0UGFnZSI6MSwidGl0bGUiOiJGaXh0dXJlIE5vZGVTZWVrIOW4luWtkCIsImNvbGxlY3Rpb25Db3VudCI6NywiY29sbGVjdGVkIjpmYWxzZSwiY29tbWVudHMiOlt7ImNvbW1lbnRJZCI6MTAwLCJmbG9vckluZGV4IjowLCJsaWtlZCI6ZmFsc2UsImRpc2xpa2VkIjpmYWxzZSwidXB2b3RlZCI6ZmFsc2UsImxpa2VDb3VudCI6MywiZGlzbGlrZUNvdW50IjoxLCJ1cHZvdGVDb3VudCI6NX0seyJjb21tZW50SWQiOjEwMSwiZmxvb3JJbmRleCI6MSwibGlrZWQiOmZhbHNlLCJkaXNsaWtlZCI6ZmFsc2UsInVwdm90ZWQiOmZhbHNlLCJsaWtlQ291bnQiOjIsImRpc2xpa2VDb3VudCI6MCwidXB2b3RlQ291bnQiOjJ9LHsiY29tbWVudElkIjoxMDIsImZsb29ySW5kZXgiOjIsImxpa2VkIjpmYWxzZSwiZGlzbGlrZWQiOmZhbHNlLCJ1cHZvdGVkIjpmYWxzZSwibGlrZUNvdW50IjowLCJkaXNsaWtlQ291bnQiOjAsInVwdm90ZUNvdW50IjowfSx7ImNvbW1lbnRJZCI6MTA2LCJmbG9vckluZGV4IjozLCJsaWtlZCI6ZmFsc2UsImRpc2xpa2VkIjpmYWxzZSwidXB2b3RlZCI6ZmFsc2UsImxpa2VDb3VudCI6MCwiZGlzbGlrZUNvdW50IjowLCJ1cHZvdGVDb3VudCI6MH0seyJjb21tZW50SWQiOjEwNywiZmxvb3JJbmRleCI6NCwibGlrZWQiOmZhbHNlLCJkaXNsaWtlZCI6ZmFsc2UsInVwdm90ZWQiOmZhbHNlLCJsaWtlQ291bnQiOjAsImRpc2xpa2VDb3VudCI6MCwidXB2b3RlQ291bnQiOjB9LHsiY29tbWVudElkIjoxMDgsImZsb29ySW5kZXgiOjUsImxpa2VkIjpmYWxzZSwiZGlzbGlrZWQiOmZhbHNlLCJ1cHZvdGVkIjpmYWxzZSwibGlrZUNvdW50IjowLCJkaXNsaWtlQ291bnQiOjAsInVwdm90ZUNvdW50IjowfSx7ImNvbW1lbnRJZCI6MTA5LCJmbG9vckluZGV4Ijo2LCJsaWtlZCI6ZmFsc2UsImRpc2xpa2VkIjpmYWxzZSwidXB2b3RlZCI6ZmFsc2UsImxpa2VDb3VudCI6MCwiZGlzbGlrZUNvdW50IjowLCJ1cHZvdGVDb3VudCI6MH0seyJjb21tZW50SWQiOjEwMywiZmxvb3JJbmRleCI6NywibGlrZWQiOmZhbHNlLCJkaXNsaWtlZCI6ZmFsc2UsInVwdm90ZWQiOmZhbHNlLCJsaWtlQ291bnQiOjQsImRpc2xpa2VDb3VudCI6MSwidXB2b3RlQ291bnQiOjF9XX19</script>
+  <script id="temp-script" type="application/json">eyJwYWdlVHlwZSI6InBvc3QiLCJ1c2VyIjpudWxsLCJhbGxDYXRlZ29yeSI6W10sInBvc3REYXRhIjp7InBvc3RJZCI6MTIzLCJwb3N0UGFnZSI6MSwidGl0bGUiOiJGaXh0dXJlIE5vZGVTZWVrIOW4luWtkCIsImNvbGxlY3Rpb25Db3VudCI6NywiY29sbGVjdGVkIjpmYWxzZSwiY29tbWVudHMiOlt7ImNvbW1lbnRJZCI6MTAwLCJmbG9vckluZGV4IjowLCJsaWtlZCI6ZmFsc2UsImRpc2xpa2VkIjpmYWxzZSwidXB2b3RlZCI6ZmFsc2UsImxpa2VDb3VudCI6MywiZGlzbGlrZUNvdW50IjoxLCJ1cHZvdGVDb3VudCI6NX0seyJjb21tZW50SWQiOjEwMSwiZmxvb3JJbmRleCI6MSwibWFya2Rvd24iOiLnrKzkuIDlsYLor4TorroiLCJsaWtlZCI6ZmFsc2UsImRpc2xpa2VkIjpmYWxzZSwidXB2b3RlZCI6ZmFsc2UsImxpa2VDb3VudCI6MiwiZGlzbGlrZUNvdW50IjowLCJ1cHZvdGVDb3VudCI6Mn0seyJjb21tZW50SWQiOjEwMiwiZmxvb3JJbmRleCI6MiwibGlrZWQiOmZhbHNlLCJkaXNsaWtlZCI6ZmFsc2UsInVwdm90ZWQiOmZhbHNlLCJsaWtlQ291bnQiOjAsImRpc2xpa2VDb3VudCI6MCwidXB2b3RlQ291bnQiOjB9LHsiY29tbWVudElkIjoxMDYsImZsb29ySW5kZXgiOjMsImxpa2VkIjpmYWxzZSwiZGlzbGlrZWQiOmZhbHNlLCJ1cHZvdGVkIjpmYWxzZSwibGlrZUNvdW50IjowLCJkaXNsaWtlQ291bnQiOjAsInVwdm90ZUNvdW50IjowfSx7ImNvbW1lbnRJZCI6MTA3LCJmbG9vckluZGV4Ijo0LCJsaWtlZCI6ZmFsc2UsImRpc2xpa2VkIjpmYWxzZSwidXB2b3RlZCI6ZmFsc2UsImxpa2VDb3VudCI6MCwiZGlzbGlrZUNvdW50IjowLCJ1cHZvdGVDb3VudCI6MH0seyJjb21tZW50SWQiOjEwOCwiZmxvb3JJbmRleCI6NSwibGlrZWQiOmZhbHNlLCJkaXNsaWtlZCI6ZmFsc2UsInVwdm90ZWQiOmZhbHNlLCJsaWtlQ291bnQiOjAsImRpc2xpa2VDb3VudCI6MCwidXB2b3RlQ291bnQiOjB9LHsiY29tbWVudElkIjoxMDksImZsb29ySW5kZXgiOjYsImxpa2VkIjpmYWxzZSwiZGlzbGlrZWQiOmZhbHNlLCJ1cHZvdGVkIjpmYWxzZSwibGlrZUNvdW50IjowLCJkaXNsaWtlQ291bnQiOjAsInVwdm90ZUNvdW50IjowfSx7ImNvbW1lbnRJZCI6MTAzLCJmbG9vckluZGV4Ijo3LCJtYXJrZG93biI6IuaZrumAmuivhOiuuiIsImxpa2VkIjpmYWxzZSwiZGlzbGlrZWQiOmZhbHNlLCJ1cHZvdGVkIjpmYWxzZSwibGlrZUNvdW50Ijo0LCJkaXNsaWtlQ291bnQiOjEsInVwdm90ZUNvdW50IjoxfV19fQ==</script>
   <script>
-    document.addEventListener('click', (event) => {
-      const item = event.target.closest?.('.comment-menu > .menu-item');
-      if (!item || (item.textContent || '').trim() !== '编辑') return;
-      event.preventDefault();
-      const comment = item.closest('.content-item');
+    // 模拟官方运行时：真实页面把 #temp-script 的 JSON 解成 window.__config__，
+    // 官方 editor.edit(index) 再用它把下标映射回评论。
+    const ssrBytes = Uint8Array.from(atob((document.getElementById('temp-script')?.textContent || '').trim()), (char) => char.charCodeAt(0));
+    window.__config__ = JSON.parse(new TextDecoder().decode(ssrBytes));
+    // 模拟官方编辑器：官方 Vue 的编辑菜单项最终会调 editor.edit(评论在 SSR 数组里的下标)。
+    const mountOfficialEditor = (comment) => {
       if (!comment || comment.querySelector('.official-edit-composer')) return;
       const editor = document.createElement('textarea');
       editor.className = 'official-edit-composer';
       editor.value = '官方编辑器';
       comment.appendChild(editor);
+    };
+    window.editor = {
+      edit(index) {
+        const commentId = window.__config__?.postData?.comments?.[index]?.commentId;
+        const comment = document.querySelector(`.comment-container > ul.comments .content-item[data-comment-id="${commentId}"]`);
+        if (!comment) return;
+        comment.dataset.officialEditIndex = String(index);
+        mountOfficialEditor(comment);
+      },
+    };
+    document.addEventListener('click', (event) => {
+      const item = event.target.closest?.('.comment-menu > .menu-item');
+      if (!item || (item.textContent || '').trim() !== '编辑') return;
+      event.preventDefault();
+      mountOfficialEditor(item.closest('.content-item'));
     });
   </script>
 </body>

@@ -1421,25 +1421,70 @@ scenario('弹窗跨页来源链接只出现在跨页评论（0.5.8 回归）', a
   assert(currentPageLinks.every((l) => l.href === `${ctx.base}/post-123-1#${l.floor}`), `所有当前页楼号都应指向原帖楼层，实际 ${JSON.stringify(currentPageLinks)}`);
 });
 
+// 菜单项的计数在官方菜单里是纯文本 span，在脚本自建菜单里是 .xns-action-count，按数字文本统一读取。
+const readMenuItem = (page, selector) => page.evaluate((target) => {
+  const item = document.querySelector(target);
+  if (!item) return null;
+  const count = [...item.querySelectorAll(':scope > span')]
+    .map((node) => (node.textContent || '').trim())
+    .find((text) => /^\d+$/.test(text)) || null;
+  return { done: item.classList.contains('xns-action-done'), count, state: item.querySelector(':scope > .xns-action-state')?.textContent || '' };
+}, selector);
+
+async function waitMenuItem(page, selector, predicate, timeout = 5_000, label = '') {
+  const started = Date.now();
+  for (;;) {
+    const item = await readMenuItem(page, selector);
+    if (item && predicate(item)) return item;
+    if (Date.now() - started > timeout) throw new Error(`等待超时：${label}；当前菜单项 ${JSON.stringify(item)}`);
+    await sleep(100);
+  }
+}
+
+const clickMenuItem = (page, selector) => page.evaluate((target) => { document.querySelector(target).click(); }, selector);
+
 scenario('弹窗点赞与收藏', async (ctx) => {
   const page = await openPreviewModal(ctx);
-  await page.evaluate(() => {
-    const root = document.querySelector('.xns-preview-thread .xns-comment-root');
-    [...root.querySelector(':scope > .comment-menu').children].find((item) => item.dataset.xnsAction === 'like').click();
-  });
-  await waitPost(page, (post) => post.url.endsWith('/api/statistics/upvote'));
-  await page.evaluate(() => {
-    const menu = document.querySelector('.xns-preview-post > .comment-menu');
-    [...menu.children].find((item) => item.dataset.xnsAction === 'favorite').click();
-  });
+  const likeItem = '.xns-preview-thread .xns-comment-root > .comment-menu > .menu-item[data-xns-action="like"]';
+  const favoriteItem = '.xns-preview-post > .comment-menu > .menu-item[data-xns-action="favorite"]';
+  const collectionPosts = () => dataOf(page).posts.filter((post) => post.url.endsWith('/api/statistics/collection'));
+  const waitCollectionPost = async (index) => {
+    const started = Date.now();
+    for (;;) {
+      const posts = collectionPosts();
+      if (posts[index]) return posts[index];
+      if (Date.now() - started > 5_000) throw new Error(`等待第 ${index + 1} 次收藏请求超时`);
+      await sleep(100);
+    }
+  };
+  // 点赞：官方接口只有 action=add，成功后要自己记住“已操作”，重复点击不能再发请求。
+  const likeBefore = await readMenuItem(page, likeItem);
+  await clickMenuItem(page, likeItem);
+  const like = await waitPost(page, (post) => post.url.endsWith('/api/statistics/upvote'));
+  assert(JSON.parse(like.body).action === 'add', `点赞应发送 action=add，实际 ${like.body}`);
+  const liked = await waitMenuItem(page, likeItem, (item) => item.done, 5_000, '点赞已操作状态');
+  assert(liked.count === String(Number(likeBefore.count) + 1), `点赞计数应从 ${likeBefore.count} 递增，实际 ${liked.count}`);
+  await clickMenuItem(page, likeItem);
+  await sleep(800);
+  const upvotes = dataOf(page).posts.filter((post) => post.url.endsWith('/api/statistics/upvote'));
+  assert(upvotes.length === 1, `已点赞后重复点击不应再发请求，实际 ${upvotes.length} 次`);
+  const likeAfterRepeat = await readMenuItem(page, likeItem);
+  assert(likeAfterRepeat.done, '重复点击后应保持已操作状态');
+
+  // 收藏：未收藏发 add、已收藏发 remove（旧实现用 del，服务端会回 Wrong Action）。
+  const favoriteBefore = await readMenuItem(page, favoriteItem);
+  await clickMenuItem(page, favoriteItem);
   const collection = await waitPost(page, (post) => post.url.endsWith('/api/statistics/collection'));
-  assert(JSON.parse(collection.body).postId === 123, '收藏应携带 postId 123');
-  const favorite = await waitFor(page, () => {
-    const item = [...document.querySelectorAll('.xns-preview-post > .comment-menu .menu-item')].find((node) => node.dataset.xnsAction === 'favorite');
-    if (item?.dataset.xnsFavoriteState !== 'added') return null;
-    return { state: item.dataset.xnsFavoriteState, count: item.querySelector('.xns-action-count')?.textContent };
-  }, 5_000, '收藏状态');
-  assert(favorite.state === 'added' && favorite.count === '8', `收藏应从 SSR 基数 7 递增到 8，实际 ${JSON.stringify(favorite)}`);
+  const favoritePayload = JSON.parse(collection.body);
+  assert(favoritePayload.postId === 123, '收藏应携带 postId 123');
+  assert(favoritePayload.action === 'add', `首次收藏应发送 action=add，实际 ${collection.body}`);
+  const favorited = await waitMenuItem(page, favoriteItem, (item) => item.done, 5_000, '收藏已操作状态');
+  assert(favorited.count === String(Number(favoriteBefore.count) + 1), `收藏计数应从 ${favoriteBefore.count} 递增，实际 ${favorited.count}`);
+  await clickMenuItem(page, favoriteItem);
+  const removal = await waitCollectionPost(1);
+  assert(JSON.parse(removal.body).action === 'remove', `取消收藏应发送 action=remove，实际 ${removal.body}`);
+  const removed = await waitMenuItem(page, favoriteItem, (item) => !item.done, 5_000, '取消收藏状态');
+  assert(removed.count === favoriteBefore.count, `取消收藏应回到 SSR 基数 ${favoriteBefore.count}，实际 ${removed.count}`);
 });
 
 scenario('楼层回复编辑器与帖子级回复编辑器', async (ctx) => {
@@ -1557,9 +1602,9 @@ scenario('弹窗发送回复后重排', async (ctx) => {
   assert(state.statusText === null, `回复成功后状态提示应消失，实际残留 “${state.statusText}”`);
 });
 
-scenario('楼中楼显示自己的评论编辑入口并保留官方编辑器（0.5.19 回归）', async (ctx) => {
-  // 自己的评论：官方只在 isMine 渲染“编辑”菜单项；楼中楼重排后仍应保留
-  // 这个原生入口，点击后由官方在楼层下方展开编辑器，不能被脚本改成跳转。
+scenario('楼中楼显示自己的评论编辑入口并就地调用官方编辑器（0.5.19 回归）', async (ctx) => {
+  // 自己的评论：官方只在 isMine 渲染“编辑”菜单项；楼中楼重排后仍应保留这个原生入口，
+  // 点击后直接把 SSR 下标交给官方 editor.edit()，就地展开官方编辑器，不再整页刷新切回原版。
   const page = await openPostPage(ctx);
   await waitFor(page, () => {
     const menu = document.querySelector('.comment-container > ul.comments .content-item[data-xns-floor="1"] > .comment-menu');
@@ -1574,23 +1619,19 @@ scenario('楼中楼显示自己的评论编辑入口并保留官方编辑器（0
     spacer.style.height = '900px';
     list.replaceChildren(spacer, comment);
   });
-  await Promise.all([
-    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15_000 }),
-    page.click('.comment-container > ul.comments > li[id="1"] .menu-item[aria-label="编辑"]'),
-  ]);
-  await waitFor(page, () => Boolean(document.querySelector('.content-item[id="1"] .official-edit-composer')), 15_000, '刷新后打开官方楼层编辑器');
+  await page.click('.comment-container > ul.comments > li[id="1"] .menu-item[aria-label="编辑"]');
+  await waitFor(page, () => Boolean(document.querySelector('.content-item[id="1"] .official-edit-composer')), 5_000, '点击编辑后就地打开官方编辑器');
   const state = await page.evaluate(() => ({
     href: location.href,
-    hasEditor: !!document.querySelector('.content-item[id="1"] .official-edit-composer'),
-    originalMode: document.querySelector('.xns-post-toolbar [data-mode="original"]')?.getAttribute('aria-pressed') === 'true',
-    status: document.querySelector('.xns-toolbar-status')?.textContent || '',
+    index: document.querySelector('.content-item[id="1"]').dataset.officialEditIndex || '',
+    threadMode: document.querySelector('.xns-post-toolbar [data-mode="thread"]')?.getAttribute('aria-pressed'),
+    originalMode: document.querySelector('.xns-post-toolbar [data-mode="original"]')?.getAttribute('aria-pressed'),
     pendingRequest: sessionStorage.getItem('xns-comment-preview-native-edit'),
   }));
-  assert(state.href === `${ctx.base}/post-123-1`, `帖子页编辑不应改变 URL，实际 ${state.href}`);
-  assert(state.hasEditor, '点击帖子页编辑应保留官方楼层下方编辑器');
-  assert(state.originalMode, '官方编辑兜底页应保持原版评论布局');
-  assert(state.status === '原版评论已恢复。', `官方编辑兜底页状态应明确，实际 “${state.status}”`);
-  assert(state.pendingRequest === null, '官方编辑请求消费后不应残留 sessionStorage 标记');
+  assert(state.href === `${ctx.base}/post-123-1`, `就地编辑不应改变 URL，实际 ${state.href}`);
+  assert(state.index === '1', `应把该评论在 SSR 数组里的下标交给官方编辑器，实际 “${state.index}”`);
+  assert(state.threadMode === 'true' && state.originalMode === 'false', `官方编辑不应切回原版布局，实际 ${JSON.stringify(state)}`);
+  assert(state.pendingRequest === null, '就地编辑不应再写 sessionStorage 标记');
 });
 11
 
@@ -1623,6 +1664,29 @@ scenario('弹窗预览自己的评论出现编辑入口（0.5.20 回归）', asy
   });
   assert(state.hasEdit, '预览弹窗里自己的评论应显示编辑入口');
   assert(state.count === 6, `预览编辑菜单应有 6 项（5 标准 + 编辑），实际 ${state.count}`);
+  // 点击编辑应就地展开脚本编辑框（不再新标签打开原帖），内容取 SSR 的 markdown。
+  await page.evaluate(() => {
+    const item = Array.from(document.querySelectorAll('.xns-modal .xns-preview-thread .xns-comment-root > .comment-menu > .menu-item')).find((node) => (node.textContent || '').trim() === '编辑');
+    item.click();
+  });
+  await waitFor(page, () => Boolean(document.querySelector('.xns-modal .xns-preview-editor textarea')), 5_000, '弹窗内联编辑框');
+  const editor = await page.evaluate(() => ({
+    title: document.querySelector('.xns-modal .xns-preview-editor .xns-preview-composer-title')?.textContent || '',
+    value: document.querySelector('.xns-modal .xns-preview-editor textarea')?.value ?? null,
+    buttons: [...document.querySelectorAll('.xns-modal .xns-preview-editor .xns-preview-composer-actions button')].map((node) => node.textContent),
+  }));
+  assert(editor.value === '第一层评论', `内联编辑框应预填 SSR markdown，实际 “${editor.value}”`);
+  assert(JSON.stringify(editor.buttons) === JSON.stringify(['保存修改', '取消']), `内联编辑框应有保存/取消，实际 ${JSON.stringify(editor.buttons)}`);
+  const pagesBefore = ctx.pages.length;
+  await page.evaluate(() => {
+    document.querySelector('.xns-modal .xns-preview-editor textarea').value = '改过的第一层评论';
+    [...document.querySelectorAll('.xns-modal .xns-preview-editor .xns-preview-composer-actions button')].find((node) => node.textContent === '保存修改').click();
+  });
+  const editPost = await waitPost(page, (post) => post.url.endsWith('/api/content/edit-comment'));
+  const editPayload = JSON.parse(editPost.body);
+  assert(editPayload.commentId === 101, `编辑应携带 commentId 101，实际 ${editPost.body}`);
+  assert(editPayload.content === '改过的第一层评论', `编辑应携带新内容，实际 ${editPost.body}`);
+  assert(ctx.pages.length === pagesBefore, '弹窗编辑不应新开标签页');
 });
 
 scenario('帖子页回复后新楼层出现在楼中楼（0.5.14 回归）', async (ctx) => {

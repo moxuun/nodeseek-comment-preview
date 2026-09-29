@@ -1,6 +1,6 @@
 import { flattenReplyTree, mergeCommentRecords } from '../comments/thread.js';
 import { MAX_PAGE, SELECTORS, state } from '../core/config.js';
-import { createElement, findCommentList, getCommentItems, getFloor, qs, qsa } from '../core/dom.js';
+import { createElement, findCommentList, getCommentId, getCommentItems, getFloor, qs, qsa } from '../core/dom.js';
 import { getMaxPage, updateSettings } from '../core/preferences.js';
 import { fetchPostPages } from '../data/page-loader.js';
 import { installPreviewFeatures } from '../features/content.js';
@@ -8,7 +8,7 @@ import { getCommentRecord, releaseCommentNode, sanitizeImportedNode } from '../n
 import { fetchHtml, parseHtml } from '../nodeseek/http.js';
 import { getCurrentUserUid } from '../nodeseek/identity.js';
 import { getPageNumbers } from '../nodeseek/pagination.js';
-import { getDocState } from '../nodeseek/ssr-state.js';
+import { getSsrState } from '../nodeseek/ssr-state.js';
 import { buildPostUrl } from '../nodeseek/url.js';
 import { addRemoteNote, stripRenderArtifacts } from '../preview/render-utils.js';
 import { prepareCommentRecord } from '../preview/renderer.js';
@@ -33,7 +33,7 @@ function createPostPageController({
   getCommentItems,
   sanitizeImportedNode,
   releaseCommentNode,
-  getDocState,
+  getSsrState,
   getCurrentUserUid,
   getCommentRecord,
   fetchPostPages,
@@ -90,6 +90,7 @@ function createPostPageController({
     }
 
     openNativeEditAfterReload(floor) {
+      if (this.applyNativeEdit(this.getSsrCommentIndex(null, floor))) return;
       const started = Date.now();
       const findEdit = () => {
         const comment = Array.from(this.list?.children || [])
@@ -108,6 +109,40 @@ function createPostPageController({
       check();
     }
 
+    rememberNativeEditRequest(floor) {
+      try {
+        windowObj.sessionStorage?.setItem(NATIVE_EDIT_REQUEST_KEY, JSON.stringify({
+          postId: this.info.postId,
+          floor: String(floor),
+        }));
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    // 官方编辑器只接受 __config__.postData.comments 的下标，先用 commentId 定位，
+    // 拿不到 commentId 时退回楼层号。
+    getSsrCommentIndex(commentId, floor) {
+      const comments = getSsrState(documentObj)?.postData?.comments;
+      if (!Array.isArray(comments)) return -1;
+      if (commentId !== null && commentId !== undefined) {
+        const byCommentId = comments.findIndex((item) => String(item?.commentId) === String(commentId));
+        if (byCommentId >= 0) return byCommentId;
+      }
+      if (floor === null || floor === undefined) return -1;
+      return comments.findIndex((item) => String(item?.floorIndex) === String(floor));
+    }
+
+    // 直接调用官方编辑器入口：就地展开编辑器，不再整页刷新、不再退回原版列表。
+    applyNativeEdit(index) {
+      if (!Number.isInteger(index) || index < 0) return false;
+      const editor = windowObj.editor;
+      if (typeof editor?.edit !== 'function') return false;
+      editor.edit(index);
+      return true;
+    }
+
     async init() {
       this.list = await this.waitForCommentList();
       if (!this.list) return;
@@ -115,8 +150,7 @@ function createPostPageController({
       this.createToolbar();
       const nativeEditFloor = this.consumeNativeEditRequest();
       if (nativeEditFloor) {
-        appState.mode = 'original';
-        this.showStatus('原版评论已恢复。');
+        await this.reloadPages();
         this.openNativeEditAfterReload(nativeEditFloor);
         return;
       }
@@ -240,7 +274,7 @@ function createPostPageController({
     }
 
     loadCurrentPage() {
-      const state = getDocState(documentObj);
+      const state = getSsrState(documentObj);
       const records = [];
       this.originalChildren.forEach((item, index) => {
         if (item.nodeType !== 1) return;
@@ -356,7 +390,7 @@ function createPostPageController({
     }
 
     collectRemoteRecords(root, page) {
-      const state = getDocState(root);
+      const state = getSsrState(root);
       return getCommentItems(root)
         .map((item, index) => getCommentRecord(item, this.info.postId, page, index, false, {
           keepCommentMenu: true,
@@ -383,17 +417,23 @@ function createPostPageController({
 
     prepareNativeEdit(comment) {
       if (!this.virtualizer || !this.originalChildren.includes(comment)) return false;
-      const floor = comment.getAttribute('data-xns-floor') || comment.id || '';
-      if (!/^\d{1,15}$/.test(String(floor))) return false;
-      try {
-        windowObj.sessionStorage?.setItem(NATIVE_EDIT_REQUEST_KEY, JSON.stringify({
-          postId: this.info.postId,
-          floor: String(floor),
-        }));
-      } catch {
-        return false;
-      }
+      const floor = Number(comment.getAttribute('data-xns-floor') ?? comment.id);
+      const index = this.getSsrCommentIndex(getCommentId(comment), Number.isInteger(floor) ? floor : null);
+      if (this.applyNativeEdit(index)) return true;
+      // 兜底：SSR 数据里还没有这条评论（例如刚发出、还没重载的回复）。
+      if (!Number.isInteger(floor) || floor < 0 || !this.rememberNativeEditRequest(floor)) return false;
       windowObj.location.reload();
+      return true;
+    }
+
+    // 跨页楼层：记录请求并跳到它所在的页面，重载后由 openNativeEditAfterReload 接手。
+    requestNativeEdit(record) {
+      const floor = Number(record?.floor);
+      const page = Number(record?.page) || 1;
+      if (!Number.isInteger(floor) || floor < 0 || !this.rememberNativeEditRequest(floor)) return false;
+      const url = buildPostUrl(this.info.postId, page, floor);
+      if (!url) return false;
+      windowObj.location.assign(url.href);
       return true;
     }
 
@@ -505,7 +545,7 @@ const PostEnhancer = createPostPageController({
   getCommentItems,
   sanitizeImportedNode,
   releaseCommentNode,
-  getDocState,
+  getSsrState,
   getCurrentUserUid,
   getCommentRecord,
   fetchPostPages,

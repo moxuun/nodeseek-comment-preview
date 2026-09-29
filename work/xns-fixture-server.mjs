@@ -147,7 +147,7 @@ function delayedPostList(postId) {
 
 const server = http.createServer((req, res) => {
   const pathname = new URL(req.url, `http://${req.headers.host}`).pathname;
-  if (req.method === 'POST' && ['/aics/upvote', '/api/statistics/upvote', '/api/statistics/like', '/api/statistics/dislike', '/api/statistics/collection', '/api/content/new-comment', '/api/vote/voteforitem'].includes(pathname)) {
+  if (req.method === 'POST' && ['/aics/upvote', '/api/statistics/upvote', '/api/statistics/like', '/api/statistics/dislike', '/api/statistics/collection', '/api/content/new-comment', '/api/content/edit-comment', '/api/vote/voteforitem'].includes(pathname)) {
     let body = '';
     req.on('data', (chunk) => { body += chunk; });
     req.on('end', () => {

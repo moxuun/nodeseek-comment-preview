@@ -1,8 +1,8 @@
 import { buildReplyTree, flattenReplyTree } from '../comments/thread.js';
-import { MAX_PAGE, SELECTORS } from '../core/config.js';
+import { MAX_PAGE, SELECTORS, state } from '../core/config.js';
 import { clearElement, createElement, getCommentId, qs, qsa, safeCount } from '../core/dom.js';
 import { pageInfo } from '../core/runtime.js';
-import { ensurePreviewMenu, getDirectCommentMenu } from '../features/comment-actions.js';
+import { ensurePreviewMenu, getDirectCommentMenu, openPreviewEditor } from '../features/comment-actions.js';
 import { getSsrCommentCounts, materializeCommentNode, sanitizeImportedNode } from '../nodeseek/content-parser.js';
 import { getDocState } from '../nodeseek/ssr-state.js';
 import { buildPostUrl, getPostInfo } from '../nodeseek/url.js';
@@ -15,6 +15,7 @@ import { formatPageStatus } from '../ui/status.js';
 function createPreviewRenderer({
   document,
   windowObj,
+  state,
   pageInfo,
   selectors,
   maxPage,
@@ -38,6 +39,7 @@ function createPreviewRenderer({
   createCommentVirtualizer,
   addRemoteNote,
   formatPageStatus,
+  openPreviewEditor,
 }) {
   function ensurePreviewEditOption(node, record) {
     if (!node || !record?.isMine) return;
@@ -66,6 +68,13 @@ function createPreviewRenderer({
     item.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
+      // 弹窗里的楼层来自跨页读取，没有官方编辑器可接管：就地展开脚本的编辑框。
+      if (node.closest('.xns-overlay')) {
+        openPreviewEditor(node, record);
+        return;
+      }
+      // 帖子页沿用官方编辑器：能直接定位就就地展开，否则先跳到该评论所在的页。
+      if (state.post?.requestNativeEdit?.(record)) return;
       const postId = record.postId || pageInfo?.postId || getPostInfo(windowObj.location.href)?.postId || '';
       const floor = record.floor;
       const url = buildPostUrl(postId, record.page || 1, floor >= 0 ? floor : null);
@@ -235,6 +244,7 @@ function createPreviewRenderer({
 const xnsPreviewRenderer = createPreviewRenderer({
   document,
   windowObj: window,
+  state,
   pageInfo,
   selectors: SELECTORS,
   maxPage: MAX_PAGE,
@@ -258,6 +268,7 @@ const xnsPreviewRenderer = createPreviewRenderer({
   createCommentVirtualizer,
   addRemoteNote,
   formatPageStatus,
+  openPreviewEditor,
 });
 
 function ensurePreviewEditOption(...args) { return xnsPreviewRenderer.ensurePreviewEditOption(...args); }

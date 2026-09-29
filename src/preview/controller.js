@@ -737,4 +737,4 @@ function syncPreviewReply(...args) { return xnsPreviewController.syncPreviewRepl
 function refreshPreviewModal(...args) { return xnsPreviewController.refreshPreviewModal(...args); }
 function openPreviewModal(...args) { return xnsPreviewController.openPreviewModal(...args); }
 
-export { openPreviewModal, syncPreviewReply };
+export { openPreviewModal, refreshPreviewModal, syncPreviewReply };

@@ -1,9 +1,9 @@
 import { state } from '../core/config.js';
-import { createElement, findCommentList, getAuthorName, getCommentId, getFloor, getPostContent, qs, qsa, safePositiveInt } from '../core/dom.js';
+import { createElement, findCommentList, getAuthorName, getCommentId, getFloor, getPostContent, qs, qsa, safeCount, safePositiveInt } from '../core/dom.js';
 import { pageInfo } from '../core/runtime.js';
 import { postAction } from '../nodeseek/action-api.js';
 import { buildPostUrl, getPostInfo, parseSameOriginUrl } from '../nodeseek/url.js';
-import { syncPreviewReply } from '../preview/controller.js';
+import { syncPreviewReply, refreshPreviewModal } from '../preview/controller.js';
 
 // 评论动作功能：菜单、点赞/鸡腿/反对/收藏，以及预览中的回复/引用编辑器。
 function createCommentActions({
@@ -17,6 +17,7 @@ function createCommentActions({
   getPostInfo,
   buildPostUrl,
   parseSameOriginUrl,
+  safeCount,
   safePositiveInt,
   getFloor,
   getCommentId,
@@ -25,6 +26,7 @@ function createCommentActions({
   findCommentList,
   postAction,
   syncPreviewReply,
+  refreshPreviewModal,
 }) {
   const PREVIEW_ACTIONS = [
     ['like', '点赞', '♡', true],
@@ -35,6 +37,53 @@ function createCommentActions({
     ['reply', '回复', '↩', false],
   ];
   const MENU_ITEMS_SELECTOR = ':scope > .menu-item';
+  // 互动结果不能只存在 DOM 上：虚拟列表会重建楼层节点，状态会随节点一起丢失。
+  // 这里按评论/帖子维度记账，节点重建后重新套用到菜单上。
+  const ACTION_FLAGS = { like: 'liked', chicken: 'chickened', dislike: 'disliked', favorite: 'collected' };
+  const ACTION_COUNTS = { like: 'like', chicken: 'chicken', dislike: 'dislike', favorite: 'favorite' };
+  const interactionStates = new Map();
+
+  function getInteractionKey(action, comment) {
+    if (action === 'favorite') {
+      const postId = safePositiveInt(comment?.getAttribute?.('data-xns-post-id') || '')
+        || safePositiveInt(state.modal?.postId || '')
+        || safePositiveInt(pageInfo?.postId || '');
+      return postId === null ? null : `post:${postId}`;
+    }
+    const commentId = comment ? getCommentId(comment) : null;
+    return commentId === null ? null : `comment:${commentId}:${action}`;
+  }
+
+  // 首次遇到某个目标时用 SSR 数据播种（官方就是用 SSR 里的 upvoted/liked/disliked/collected 高亮）；
+  // 之后一律以操作结果为准，避免 SSR 的旧快照把已经操作过的状态盖回去。
+  function getInteractionState(action, comment, counts = null) {
+    const key = getInteractionKey(action, comment);
+    if (!key) return null;
+    let entry = interactionStates.get(key);
+    if (!entry) {
+      entry = {
+        done: Boolean(counts?.[ACTION_FLAGS[action]]),
+        count: safeCount(counts ? counts[ACTION_COUNTS[action]] : null),
+      };
+      interactionStates.set(key, entry);
+    }
+    return entry;
+  }
+
+  function updateInteractionState(action, comment, patch = {}) {
+    const entry = getInteractionState(action, comment);
+    if (!entry) return null;
+    if (typeof patch.done === 'boolean') entry.done = patch.done;
+    const nextCount = safeCount(patch.count);
+    if (nextCount !== null) entry.count = nextCount;
+    return entry;
+  }
+
+  function applyInteractionState(menuItem, entry) {
+    menuItem.classList.toggle('xns-action-done', Boolean(entry?.done));
+    const countNode = qs(menuItem, ':scope > .xns-action-count') || getMenuCountElement(menuItem);
+    if (countNode && Number.isFinite(entry?.count) && entry.count >= 0) countNode.textContent = String(entry.count);
+  }
 
   function getDirectCommentMenu(comment) {
     return Array.from(comment?.children || []).find((child) => child.matches?.('.comment-menu, .comment-actions')) || null;
@@ -117,21 +166,16 @@ function createCommentActions({
         item.dataset.xnsAction = action;
         const actionMeta = PREVIEW_ACTIONS.find(([key]) => key === action);
         if (!item.hasAttribute('aria-label')) item.setAttribute('aria-label', actionMeta?.[1] || action);
-        if (action === 'favorite' && /已收藏|取消收藏/.test(`${item.title} ${item.textContent}`)) item.dataset.xnsFavoriteState = 'added';
       }
       if (!item.hasAttribute('role')) item.setAttribute('role', 'button');
       if (!item.hasAttribute('tabindex')) item.tabIndex = 0;
     });
     const counts = options.counts || null;
-    if (counts) {
-      menuItems.forEach((item) => {
-        const action = getMenuActionKey(item);
-        const value = counts[action];
-        const countNode = qs(item, ':scope > .xns-action-count') || getMenuCountElement(item);
-        if (countNode && Number.isFinite(value) && value >= 0) countNode.textContent = String(value);
-        if (action === 'favorite' && counts.collected && item.dataset.xnsFavoriteState !== 'removed') item.dataset.xnsFavoriteState = 'added';
-      });
-    }
+    menuItems.forEach((item) => {
+      const action = getMenuActionKey(item);
+      if (!action || !ACTION_FLAGS[action]) return;
+      applyInteractionState(item, getInteractionState(action, comment, counts));
+    });
     return menu;
   }
 
@@ -171,13 +215,6 @@ function createCommentActions({
     stateNode.textContent = text;
   }
 
-  function bumpMenuCount(menuItem, delta) {
-    const count = getMenuCountElement(menuItem);
-    if (!count) return;
-    const value = Number(count.textContent || 0);
-    count.textContent = String(Math.max(0, value + delta));
-  }
-
   function getPreviewCommentText(comment) {
     const content = getPostContent(comment);
     if (!content) return '';
@@ -201,6 +238,66 @@ function createCommentActions({
 
   function getDirectComposer(comment) {
     return Array.from(comment?.children || []).find((child) => child.matches?.(':scope.xns-preview-composer')) || null;
+  }
+
+  // 弹窗里的评论来自跨页读取，拿不到官方编辑器，所以就地展开一个编辑框，
+  // 保存后走官方的 /api/content/edit-comment 并刷新弹窗内容。
+  function openPreviewEditor(comment, record, context = null) {
+    if (!comment || !record) return;
+    const commentId = getCommentId(comment);
+    if (commentId === null) return;
+    const actionContext = context || {
+      modal: state.modal,
+      postId: state.modal?.postId || pageInfo?.postId || '',
+      url: state.modal?.url,
+    };
+    getDirectComposer(comment)?.remove();
+    const composer = createElement('section', 'xns-preview-composer xns-preview-editor');
+    composer.appendChild(createElement('h3', 'xns-preview-composer-title', `编辑 #${getDisplayFloor(comment)} · ${getAuthorName(comment)}`));
+    const textarea = documentObj.createElement('textarea');
+    textarea.setAttribute('aria-label', '编辑评论内容');
+    textarea.value = typeof record.markdown === 'string' ? record.markdown : '';
+    composer.appendChild(textarea);
+    const actions = createElement('div', 'xns-preview-composer-actions');
+    const submit = createElement('button', '', '保存修改');
+    submit.type = 'button';
+    const cancel = createElement('button', '', '取消');
+    cancel.type = 'button';
+    const status = createElement('span', 'xns-preview-composer-status');
+    actions.append(submit, cancel, status);
+    composer.appendChild(actions);
+    const menu = qs(comment, ':scope > .xns-preview-menu') || getDirectCommentMenu(comment);
+    if (menu) menu.insertAdjacentElement('afterend', composer);
+    else comment.appendChild(composer);
+    textarea.focus();
+    composer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    cancel.addEventListener('click', () => composer.remove());
+    submit.addEventListener('click', async () => {
+      const content = textarea.value.trim();
+      if (!content) {
+        status.textContent = '请输入内容。';
+        textarea.focus();
+        return;
+      }
+      if (content === (record.markdown || '').trim()) {
+        status.textContent = '内容没有变化。';
+        return;
+      }
+      submit.disabled = true;
+      status.textContent = '正在保存…';
+      try {
+        await postAction('/api/content/edit-comment', { content, commentId }, { context: actionContext });
+        record.markdown = content;
+        status.textContent = '已保存，正在刷新…';
+        textarea.readOnly = true;
+        submit.remove();
+        if (actionContext.modal && state.modal === actionContext.modal) refreshPreviewModal?.();
+        else composer.remove();
+      } catch (error) {
+        status.textContent = `保存失败：${error.message || '网络错误'}`;
+        submit.disabled = false;
+      }
+    });
   }
 
   function openPreviewComposer(action, comment, context = null) {
@@ -318,29 +415,35 @@ function createCommentActions({
       setActionState(menuItem, action === 'favorite' ? '缺少帖子ID' : '缺少目标ID', true);
       return;
     }
-    if (action !== 'favorite' && menuItem.dataset.xnsActionDone === 'true') {
+    // 官方语义：点赞重复点会重复提交，鸡腿/反对在已操作时只提示，收藏是唯一可逆的 add/remove。
+    const stateEntry = getInteractionState(action, comment);
+    if (action !== 'favorite' && stateEntry?.done) {
       setActionState(menuItem, '已操作');
       return;
     }
     if (menuItem.classList.contains('xns-action-pending')) return;
     if (action === 'chicken' && !windowObj.confirm('确认给这条评论加鸡腿？NodeSeek 可能会消耗鸡腿。')) return;
     if (action === 'dislike' && !windowObj.confirm('确认反对这条评论？NodeSeek 可能会消耗两个鸡腿。')) return;
-    const isFavoriteRemoval = action === 'favorite' && menuItem.dataset.xnsFavoriteState === 'added';
+    const isFavoriteRemoval = action === 'favorite' && Boolean(stateEntry?.done);
     menuItem.classList.add('xns-action-pending');
     menuItem.classList.remove('xns-action-failed');
     setActionState(menuItem, '处理中…');
     try {
-      if (action === 'like') await postAction('/api/statistics/upvote', { commentId: targetId, action: 'add' }, { context: actionContext });
-      else if (action === 'chicken') await postAction('/api/statistics/like', { commentId: targetId, action: 'add' }, { context: actionContext });
-      else if (action === 'dislike') await postAction('/api/statistics/dislike', { commentId: targetId, action: 'add' }, { context: actionContext });
-      else if (action === 'favorite') await postAction('/api/statistics/collection', { action: isFavoriteRemoval ? 'del' : 'add', postId }, { context: actionContext });
-      if (action === 'favorite') {
-        menuItem.dataset.xnsFavoriteState = isFavoriteRemoval ? 'removed' : 'added';
-        bumpMenuCount(menuItem, isFavoriteRemoval ? -1 : 1);
-      } else {
-        menuItem.dataset.xnsActionDone = 'true';
-        bumpMenuCount(menuItem, 1);
-      }
+      let response = null;
+      if (action === 'like') response = await postAction('/api/statistics/upvote', { commentId: targetId, action: 'add' }, { context: actionContext });
+      else if (action === 'chicken') response = await postAction('/api/statistics/like', { commentId: targetId, action: 'add' }, { context: actionContext });
+      else if (action === 'dislike') response = await postAction('/api/statistics/dislike', { commentId: targetId, action: 'add' }, { context: actionContext });
+      // 取消收藏的官方参数是 action: 'remove'（不是 'del'）。
+      else if (action === 'favorite') response = await postAction('/api/statistics/collection', { postId, action: isFavoriteRemoval ? 'remove' : 'add' }, { context: actionContext });
+      const fallbackCount = Number.isFinite(stateEntry?.count)
+        ? stateEntry.count + (isFavoriteRemoval ? -1 : 1)
+        : null;
+      const responseCount = safeCount(action === 'favorite' ? response?.postCollectionCount : response?.current);
+      updateInteractionState(action, comment, {
+        done: !isFavoriteRemoval,
+        count: responseCount === null ? fallbackCount : responseCount,
+      });
+      applyInteractionState(menuItem, getInteractionState(action, comment));
       setActionState(menuItem, '✓');
       windowObj.setTimeout(() => {
         if (menuItem.isConnected && !menuItem.classList.contains('xns-action-failed')) qs(menuItem, ':scope > .xns-action-state')?.remove();
@@ -358,6 +461,7 @@ function createCommentActions({
     ensurePreviewMenu,
     getActionContext,
     openPreviewComposer,
+    openPreviewEditor,
     runPreviewAction,
   });
 }
@@ -373,6 +477,7 @@ const xnsCommentActions = createCommentActions({
   getPostInfo,
   buildPostUrl,
   parseSameOriginUrl,
+  safeCount,
   safePositiveInt,
   getFloor,
   getCommentId,
@@ -381,12 +486,14 @@ const xnsCommentActions = createCommentActions({
   findCommentList,
   postAction,
   syncPreviewReply: (...args) => syncPreviewReply(...args),
+  refreshPreviewModal: (...args) => refreshPreviewModal(...args),
 });
 function getDirectCommentMenu(...args) { return xnsCommentActions.getDirectCommentMenu(...args); }
 function getMenuActionKey(...args) { return xnsCommentActions.getMenuActionKey(...args); }
 function ensurePreviewMenu(...args) { return xnsCommentActions.ensurePreviewMenu(...args); }
 function getActionContext(...args) { return xnsCommentActions.getActionContext(...args); }
 function openPreviewComposer(...args) { return xnsCommentActions.openPreviewComposer(...args); }
+function openPreviewEditor(...args) { return xnsCommentActions.openPreviewEditor(...args); }
 function runPreviewAction(...args) { return xnsCommentActions.runPreviewAction(...args); }
 
-export { ensurePreviewMenu, getActionContext, getDirectCommentMenu, getMenuActionKey, openPreviewComposer, runPreviewAction };
+export { ensurePreviewMenu, getActionContext, getDirectCommentMenu, getMenuActionKey, openPreviewComposer, openPreviewEditor, runPreviewAction };

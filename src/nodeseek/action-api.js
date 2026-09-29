@@ -10,6 +10,7 @@ function createNodeSeekActionApi({ windowObj, navigatorObj, state, requestTimeou
     '/api/statistics/dislike',
     '/api/statistics/collection',
     '/api/content/new-comment',
+    '/api/content/edit-comment',
     '/api/vote/voteforitem',
   ]);
 

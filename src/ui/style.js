@@ -98,6 +98,8 @@ function installStyle() {
       .xns-preview-thread .xns-action-count, .xns-preview-menu .xns-action-count { font-variant-numeric:tabular-nums; }
       .xns-preview-thread .comment-menu > .menu-item.xns-action-pending, .xns-preview-menu > .menu-item.xns-action-pending { opacity:.55; pointer-events:none; }
       .xns-preview-thread .comment-menu > .menu-item.xns-action-failed, .xns-preview-menu > .menu-item.xns-action-failed { color:#b91c1c; }
+      /* 已操作状态：对齐官方 .comment-menu .menu-item.clicked 的红色高亮。 */
+      .xns-preview-thread .comment-menu > .menu-item.xns-action-done, .xns-preview-menu > .menu-item.xns-action-done { color:#e70606; }
       .xns-action-state { font-size:11px; }
       .xns-preview-composer { margin-top:10px; padding-top:8px; border-top:1px solid rgba(100,116,139,.2); }
       .xns-preview-composer-title { margin:0 0 6px; font-size:14px; }
@@ -139,6 +141,7 @@ function installStyle() {
       .dark-layout .xns-preview-thread .xns-comment-child { border-left-color:rgba(96,165,250,.6) !important; }
       .dark-layout .xns-preview-thread .floor-link-wrapper .floor-link, .dark-layout .xns-preview-content .floor-link-wrapper .floor-link { background:rgba(148,163,184,.14); }
       .dark-layout .xns-preview-thread .floor-link-wrapper .floor-link:hover, .dark-layout .xns-preview-thread .floor-link-wrapper .floor-link:focus-visible, .dark-layout .xns-preview-content .floor-link-wrapper .floor-link:hover, .dark-layout .xns-preview-content .floor-link-wrapper .floor-link:focus-visible { color:#93c5fd; background:rgba(59,130,246,.18); }
+      .dark-layout .xns-preview-thread .comment-menu > .menu-item.xns-action-done, .dark-layout .xns-preview-menu > .menu-item.xns-action-done { color:#f87171; }
       .dark-layout .xns-preview-thread .comment-menu > .menu-item:hover, .dark-layout .xns-preview-thread .comment-menu > .menu-item:focus-visible, .dark-layout .xns-preview-menu > .menu-item:hover, .dark-layout .xns-preview-menu > .menu-item:focus-visible { color:#93c5fd; background:rgba(59,130,246,.18); }
       .dark-layout .xns-preview-content pre.xns-code-block { color:#e5e7eb; background:#0b1220; }
       .dark-layout .xns-preview-content .xns-ansi-fg-black { color:#e5e7eb; } .dark-layout .xns-preview-content .xns-ansi-fg-white { color:#111827; }

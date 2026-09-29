@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.67
+// @version      0.5.68
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -231,6 +231,7 @@
 			"/api/statistics/dislike",
 			"/api/statistics/collection",
 			"/api/content/new-comment",
+			"/api/content/edit-comment",
 			"/api/vote/voteforitem"
 		]);
 		async function dynamicSign(method, url, body) {
@@ -463,35 +464,58 @@
 	function isRecord(value) {
 		return Boolean(value) && typeof value === "object";
 	}
-	function createSsrStateService({ documentObj, qs }) {
+	function normalizeState(data) {
+		if (!isRecord(data)) return null;
+		const postData = data.postData;
+		const hasComments = isRecord(postData) && Array.isArray(postData.comments);
+		if (data.user === void 0 && !hasComments) return null;
+		return data;
+	}
+	function createSsrStateService({ documentObj, windowObj, qs }) {
+		let liveState = null;
 		function extractSsrState(doc) {
 			try {
 				const encoded = qs(doc, "#temp-script[type=\"application/json\"]")?.textContent?.trim();
 				if (!encoded) return null;
-				const json = decodeURIComponent(escape(atob(encoded)));
-				const data = JSON.parse(json);
-				if (!isRecord(data)) return null;
-				const postData = data.postData;
-				const hasComments = isRecord(postData) && Array.isArray(postData.comments);
-				if (data.user === void 0 && !hasComments) return null;
-				return data;
+				return normalizeState(JSON.parse(decodeURIComponent(escape(atob(encoded)))));
 			} catch {
 				return null;
 			}
 		}
+		function readLiveState() {
+			const runtime = normalizeState(windowObj.__config__);
+			if (runtime) {
+				liveState = runtime;
+				return runtime;
+			}
+			const inline = extractSsrState(documentObj);
+			if (inline) {
+				liveState = inline;
+				return inline;
+			}
+			return liveState;
+		}
 		function getDocState(root) {
 			return root && root !== documentObj ? root.__xnsState || null : null;
 		}
+		function getSsrState(root) {
+			if (!root) return null;
+			const stored = root.__xnsState;
+			if (stored) return stored;
+			return root === documentObj ? readLiveState() : extractSsrState(root);
+		}
 		return Object.freeze({
 			extractSsrState,
-			getDocState
+			getDocState,
+			getSsrState
 		});
 	}
-	var { extractSsrState, getDocState } = createSsrStateService({
+	var { extractSsrState, getDocState, getSsrState } = createSsrStateService({
 		documentObj: document,
+		windowObj: window,
 		qs
 	});
-	function createIdentityService({ documentObj, extractSsrState }) {
+	function createIdentityService({ documentObj, getSsrState }) {
 		let resolved = false;
 		let uid = null;
 		function uidFromHref(href) {
@@ -499,7 +523,7 @@
 			return match ? String(match[1]) : null;
 		}
 		function fromPageState() {
-			const user = extractSsrState(documentObj)?.user;
+			const user = getSsrState(documentObj)?.user;
 			const value = user && (user.id ?? user.uid ?? user.userId ?? user.memberId ?? user.member_id);
 			return value === void 0 || value === null ? null : String(value);
 		}
@@ -531,7 +555,7 @@
 	}
 	var { currentUserUid } = createIdentityService({
 		documentObj: document,
-		extractSsrState
+		getSsrState
 	});
 	function getCurrentUserUid() {
 		return currentUserUid();
@@ -2621,6 +2645,7 @@
 				author: getAuthorName(item),
 				reply: extractReplyMetadata(item, postId),
 				counts: commentId !== null && options.state ? getSsrCommentCounts(options.state, commentId) : null,
+				markdown: commentId !== null && options.state ? getSsrCommentMarkdown(options.state, commentId) : null,
 				node: current ? node : null,
 				html: current ? null : node.outerHTML,
 				parent: null,
@@ -2652,7 +2677,7 @@
 		function releaseCommentHtml(record) {
 			if (record && !record.current && record.node) record.html = null;
 		}
-		function getSsrCommentCounts(stateValue, commentId) {
+		function getSsrCommentEntry(stateValue, commentId) {
 			if (!stateValue || typeof stateValue !== "object") return null;
 			let index = ssrCommentIndexes.get(stateValue);
 			if (!index) {
@@ -2664,7 +2689,10 @@
 				index = built;
 				ssrCommentIndexes.set(stateValue, index);
 			}
-			const comment = index.get(String(commentId));
+			return index.get(String(commentId)) || null;
+		}
+		function getSsrCommentCounts(stateValue, commentId) {
+			const comment = getSsrCommentEntry(stateValue, commentId);
 			if (!comment) return null;
 			return {
 				like: safeCount(comment.upvoteCount),
@@ -2674,6 +2702,10 @@
 				chickened: Boolean(comment.liked),
 				disliked: Boolean(comment.disliked)
 			};
+		}
+		function getSsrCommentMarkdown(stateValue, commentId) {
+			const comment = getSsrCommentEntry(stateValue, commentId);
+			return typeof comment?.markdown === "string" ? comment.markdown : null;
 		}
 		return Object.freeze({
 			sanitizeImportedNode,
@@ -4362,7 +4394,7 @@
 	function formatPageStatus(...args) {
 		return xnsPageStatusFormatter.format(...args);
 	}
-	function createPreviewRenderer({ document, windowObj, pageInfo, selectors, maxPage, qs, qsa, createElement, clearElement, getPostInfo, buildPostUrl, getDocState, getCommentId, getSsrCommentCounts, safeCount, sanitizeImportedNode, materializeCommentNode, getDirectCommentMenu, ensurePreviewMenu, stripRenderArtifacts, buildReplyTree, flattenReplyTree, createCommentVirtualizer, addRemoteNote, formatPageStatus }) {
+	function createPreviewRenderer({ document, windowObj, state, pageInfo, selectors, maxPage, qs, qsa, createElement, clearElement, getPostInfo, buildPostUrl, getDocState, getCommentId, getSsrCommentCounts, safeCount, sanitizeImportedNode, materializeCommentNode, getDirectCommentMenu, ensurePreviewMenu, stripRenderArtifacts, buildReplyTree, flattenReplyTree, createCommentVirtualizer, addRemoteNote, formatPageStatus, openPreviewEditor }) {
 		function ensurePreviewEditOption(node, record) {
 			if (!node || !record?.isMine) return;
 			const menu = getDirectCommentMenu(node);
@@ -4386,6 +4418,11 @@
 			item.addEventListener("click", (event) => {
 				event.preventDefault();
 				event.stopPropagation();
+				if (node.closest(".xns-overlay")) {
+					openPreviewEditor(node, record);
+					return;
+				}
+				if (state.post?.requestNativeEdit?.(record)) return;
 				const postId = record.postId || pageInfo?.postId || getPostInfo(windowObj.location.href)?.postId || "";
 				const floor = record.floor;
 				const url = buildPostUrl(postId, record.page || 1, floor >= 0 ? floor : null);
@@ -4549,6 +4586,7 @@
 	var xnsPreviewRenderer = createPreviewRenderer({
 		document,
 		windowObj: window,
+		state,
 		pageInfo,
 		selectors: SELECTORS,
 		maxPage: 50,
@@ -4571,7 +4609,8 @@
 		flattenReplyTree,
 		createCommentVirtualizer,
 		addRemoteNote,
-		formatPageStatus
+		formatPageStatus,
+		openPreviewEditor
 	});
 	function prepareCommentRecord(...args) {
 		return xnsPreviewRenderer.prepareCommentRecord(...args);
@@ -5323,10 +5362,13 @@
 	function syncPreviewReply(...args) {
 		return xnsPreviewController.syncPreviewReply(...args);
 	}
+	function refreshPreviewModal(...args) {
+		return xnsPreviewController.refreshPreviewModal(...args);
+	}
 	function openPreviewModal(...args) {
 		return xnsPreviewController.openPreviewModal(...args);
 	}
-	function createCommentActions({ windowObj, documentObj, state, pageInfo, qs, qsa, createElement, getPostInfo, buildPostUrl, parseSameOriginUrl, safePositiveInt, getFloor, getCommentId, getAuthorName, getPostContent, findCommentList, postAction, syncPreviewReply }) {
+	function createCommentActions({ windowObj, documentObj, state, pageInfo, qs, qsa, createElement, getPostInfo, buildPostUrl, parseSameOriginUrl, safeCount, safePositiveInt, getFloor, getCommentId, getAuthorName, getPostContent, findCommentList, postAction, syncPreviewReply, refreshPreviewModal }) {
 		const PREVIEW_ACTIONS = [
 			[
 				"like",
@@ -5366,6 +5408,53 @@
 			]
 		];
 		const MENU_ITEMS_SELECTOR = ":scope > .menu-item";
+		const ACTION_FLAGS = {
+			like: "liked",
+			chicken: "chickened",
+			dislike: "disliked",
+			favorite: "collected"
+		};
+		const ACTION_COUNTS = {
+			like: "like",
+			chicken: "chicken",
+			dislike: "dislike",
+			favorite: "favorite"
+		};
+		const interactionStates = new Map();
+		function getInteractionKey(action, comment) {
+			if (action === "favorite") {
+				const postId = safePositiveInt(comment?.getAttribute?.("data-xns-post-id") || "") || safePositiveInt(state.modal?.postId || "") || safePositiveInt(pageInfo?.postId || "");
+				return postId === null ? null : `post:${postId}`;
+			}
+			const commentId = comment ? getCommentId(comment) : null;
+			return commentId === null ? null : `comment:${commentId}:${action}`;
+		}
+		function getInteractionState(action, comment, counts = null) {
+			const key = getInteractionKey(action, comment);
+			if (!key) return null;
+			let entry = interactionStates.get(key);
+			if (!entry) {
+				entry = {
+					done: Boolean(counts?.[ACTION_FLAGS[action]]),
+					count: safeCount(counts ? counts[ACTION_COUNTS[action]] : null)
+				};
+				interactionStates.set(key, entry);
+			}
+			return entry;
+		}
+		function updateInteractionState(action, comment, patch = {}) {
+			const entry = getInteractionState(action, comment);
+			if (!entry) return null;
+			if (typeof patch.done === "boolean") entry.done = patch.done;
+			const nextCount = safeCount(patch.count);
+			if (nextCount !== null) entry.count = nextCount;
+			return entry;
+		}
+		function applyInteractionState(menuItem, entry) {
+			menuItem.classList.toggle("xns-action-done", Boolean(entry?.done));
+			const countNode = qs(menuItem, ":scope > .xns-action-count") || getMenuCountElement(menuItem);
+			if (countNode && Number.isFinite(entry?.count) && entry.count >= 0) countNode.textContent = String(entry.count);
+		}
 		function getDirectCommentMenu(comment) {
 			return Array.from(comment?.children || []).find((child) => child.matches?.(".comment-menu, .comment-actions")) || null;
 		}
@@ -5435,18 +5524,15 @@
 					item.dataset.xnsAction = action;
 					const actionMeta = PREVIEW_ACTIONS.find(([key]) => key === action);
 					if (!item.hasAttribute("aria-label")) item.setAttribute("aria-label", actionMeta?.[1] || action);
-					if (action === "favorite" && /已收藏|取消收藏/.test(`${item.title} ${item.textContent}`)) item.dataset.xnsFavoriteState = "added";
 				}
 				if (!item.hasAttribute("role")) item.setAttribute("role", "button");
 				if (!item.hasAttribute("tabindex")) item.tabIndex = 0;
 			});
 			const counts = options.counts || null;
-			if (counts) menuItems.forEach((item) => {
+			menuItems.forEach((item) => {
 				const action = getMenuActionKey(item);
-				const value = counts[action];
-				const countNode = qs(item, ":scope > .xns-action-count") || getMenuCountElement(item);
-				if (countNode && Number.isFinite(value) && value >= 0) countNode.textContent = String(value);
-				if (action === "favorite" && counts.collected && item.dataset.xnsFavoriteState !== "removed") item.dataset.xnsFavoriteState = "added";
+				if (!action || !ACTION_FLAGS[action]) return;
+				applyInteractionState(item, getInteractionState(action, comment, counts));
 			});
 			return menu;
 		}
@@ -5485,12 +5571,6 @@
 			}
 			stateNode.textContent = text;
 		}
-		function bumpMenuCount(menuItem, delta) {
-			const count = getMenuCountElement(menuItem);
-			if (!count) return;
-			const value = Number(count.textContent || 0);
-			count.textContent = String(Math.max(0, value + delta));
-		}
 		function getPreviewCommentText(comment) {
 			const content = getPostContent(comment);
 			if (!content) return "";
@@ -5516,6 +5596,69 @@
 		}
 		function getDirectComposer(comment) {
 			return Array.from(comment?.children || []).find((child) => child.matches?.(":scope.xns-preview-composer")) || null;
+		}
+		function openPreviewEditor(comment, record, context = null) {
+			if (!comment || !record) return;
+			const commentId = getCommentId(comment);
+			if (commentId === null) return;
+			const actionContext = context || {
+				modal: state.modal,
+				postId: state.modal?.postId || pageInfo?.postId || "",
+				url: state.modal?.url
+			};
+			getDirectComposer(comment)?.remove();
+			const composer = createElement("section", "xns-preview-composer xns-preview-editor");
+			composer.appendChild(createElement("h3", "xns-preview-composer-title", `编辑 #${getDisplayFloor(comment)} · ${getAuthorName(comment)}`));
+			const textarea = documentObj.createElement("textarea");
+			textarea.setAttribute("aria-label", "编辑评论内容");
+			textarea.value = typeof record.markdown === "string" ? record.markdown : "";
+			composer.appendChild(textarea);
+			const actions = createElement("div", "xns-preview-composer-actions");
+			const submit = createElement("button", "", "保存修改");
+			submit.type = "button";
+			const cancel = createElement("button", "", "取消");
+			cancel.type = "button";
+			const status = createElement("span", "xns-preview-composer-status");
+			actions.append(submit, cancel, status);
+			composer.appendChild(actions);
+			const menu = qs(comment, ":scope > .xns-preview-menu") || getDirectCommentMenu(comment);
+			if (menu) menu.insertAdjacentElement("afterend", composer);
+			else comment.appendChild(composer);
+			textarea.focus();
+			composer.scrollIntoView({
+				behavior: "smooth",
+				block: "nearest"
+			});
+			cancel.addEventListener("click", () => composer.remove());
+			submit.addEventListener("click", async () => {
+				const content = textarea.value.trim();
+				if (!content) {
+					status.textContent = "请输入内容。";
+					textarea.focus();
+					return;
+				}
+				if (content === (record.markdown || "").trim()) {
+					status.textContent = "内容没有变化。";
+					return;
+				}
+				submit.disabled = true;
+				status.textContent = "正在保存…";
+				try {
+					await postAction("/api/content/edit-comment", {
+						content,
+						commentId
+					}, { context: actionContext });
+					record.markdown = content;
+					status.textContent = "已保存，正在刷新…";
+					textarea.readOnly = true;
+					submit.remove();
+					if (actionContext.modal && state.modal === actionContext.modal) refreshPreviewModal?.();
+					else composer.remove();
+				} catch (error) {
+					status.textContent = `保存失败：${error.message || "网络错误"}`;
+					submit.disabled = false;
+				}
+			});
 		}
 		function openPreviewComposer(action, comment, context = null) {
 			const modal = context?.modal || state.modal;
@@ -5635,41 +5778,43 @@
 				setActionState(menuItem, action === "favorite" ? "缺少帖子ID" : "缺少目标ID", true);
 				return;
 			}
-			if (action !== "favorite" && menuItem.dataset.xnsActionDone === "true") {
+			const stateEntry = getInteractionState(action, comment);
+			if (action !== "favorite" && stateEntry?.done) {
 				setActionState(menuItem, "已操作");
 				return;
 			}
 			if (menuItem.classList.contains("xns-action-pending")) return;
 			if (action === "chicken" && !windowObj.confirm("确认给这条评论加鸡腿？NodeSeek 可能会消耗鸡腿。")) return;
 			if (action === "dislike" && !windowObj.confirm("确认反对这条评论？NodeSeek 可能会消耗两个鸡腿。")) return;
-			const isFavoriteRemoval = action === "favorite" && menuItem.dataset.xnsFavoriteState === "added";
+			const isFavoriteRemoval = action === "favorite" && Boolean(stateEntry?.done);
 			menuItem.classList.add("xns-action-pending");
 			menuItem.classList.remove("xns-action-failed");
 			setActionState(menuItem, "处理中…");
 			try {
-				if (action === "like") await postAction("/api/statistics/upvote", {
+				let response = null;
+				if (action === "like") response = await postAction("/api/statistics/upvote", {
 					commentId: targetId,
 					action: "add"
 				}, { context: actionContext });
-				else if (action === "chicken") await postAction("/api/statistics/like", {
+				else if (action === "chicken") response = await postAction("/api/statistics/like", {
 					commentId: targetId,
 					action: "add"
 				}, { context: actionContext });
-				else if (action === "dislike") await postAction("/api/statistics/dislike", {
+				else if (action === "dislike") response = await postAction("/api/statistics/dislike", {
 					commentId: targetId,
 					action: "add"
 				}, { context: actionContext });
-				else if (action === "favorite") await postAction("/api/statistics/collection", {
-					action: isFavoriteRemoval ? "del" : "add",
-					postId
+				else if (action === "favorite") response = await postAction("/api/statistics/collection", {
+					postId,
+					action: isFavoriteRemoval ? "remove" : "add"
 				}, { context: actionContext });
-				if (action === "favorite") {
-					menuItem.dataset.xnsFavoriteState = isFavoriteRemoval ? "removed" : "added";
-					bumpMenuCount(menuItem, isFavoriteRemoval ? -1 : 1);
-				} else {
-					menuItem.dataset.xnsActionDone = "true";
-					bumpMenuCount(menuItem, 1);
-				}
+				const fallbackCount = Number.isFinite(stateEntry?.count) ? stateEntry.count + (isFavoriteRemoval ? -1 : 1) : null;
+				const responseCount = safeCount(action === "favorite" ? response?.postCollectionCount : response?.current);
+				updateInteractionState(action, comment, {
+					done: !isFavoriteRemoval,
+					count: responseCount === null ? fallbackCount : responseCount
+				});
+				applyInteractionState(menuItem, getInteractionState(action, comment));
 				setActionState(menuItem, "✓");
 				windowObj.setTimeout(() => {
 					if (menuItem.isConnected && !menuItem.classList.contains("xns-action-failed")) qs(menuItem, ":scope > .xns-action-state")?.remove();
@@ -5686,6 +5831,7 @@
 			ensurePreviewMenu,
 			getActionContext,
 			openPreviewComposer,
+			openPreviewEditor,
 			runPreviewAction
 		});
 	}
@@ -5700,6 +5846,7 @@
 		getPostInfo,
 		buildPostUrl,
 		parseSameOriginUrl,
+		safeCount,
 		safePositiveInt,
 		getFloor,
 		getCommentId,
@@ -5707,7 +5854,8 @@
 		getPostContent,
 		findCommentList,
 		postAction,
-		syncPreviewReply: (...args) => syncPreviewReply(...args)
+		syncPreviewReply: (...args) => syncPreviewReply(...args),
+		refreshPreviewModal: (...args) => refreshPreviewModal(...args)
 	});
 	function getDirectCommentMenu(...args) {
 		return xnsCommentActions.getDirectCommentMenu(...args);
@@ -5723,6 +5871,9 @@
 	}
 	function openPreviewComposer(...args) {
 		return xnsCommentActions.openPreviewComposer(...args);
+	}
+	function openPreviewEditor(...args) {
+		return xnsCommentActions.openPreviewEditor(...args);
 	}
 	function runPreviewAction(...args) {
 		return xnsCommentActions.runPreviewAction(...args);
@@ -5789,7 +5940,7 @@
 	function handleKeydown(...args) {
 		return xnsAppEvents.handleKeydown(...args);
 	}
-	function createPostPageController({ documentObj, windowObj, appState, selectors, maxPage, findCommentList, createElement, qs, qsa, fetchHtml, parseHtml, getFloor, getCommentItems, sanitizeImportedNode, releaseCommentNode, getDocState, getCurrentUserUid, getCommentRecord, fetchPostPages, flattenReplyTree, createCommentVirtualizer, prepareCommentRecord, addRemoteNote, installPreviewFeatures, formatPageStatus, updateSettings, getMaxPage, buildPostUrl }) {
+	function createPostPageController({ documentObj, windowObj, appState, selectors, maxPage, findCommentList, createElement, qs, qsa, fetchHtml, parseHtml, getFloor, getCommentItems, sanitizeImportedNode, releaseCommentNode, getSsrState, getCurrentUserUid, getCommentRecord, fetchPostPages, flattenReplyTree, createCommentVirtualizer, prepareCommentRecord, addRemoteNote, installPreviewFeatures, formatPageStatus, updateSettings, getMaxPage, buildPostUrl }) {
 		const NATIVE_EDIT_REQUEST_KEY = "xns-comment-preview-native-edit";
 		return class PostPageController {
 			constructor(info) {
@@ -5830,6 +5981,7 @@
 				}
 			}
 			openNativeEditAfterReload(floor) {
+				if (this.applyNativeEdit(this.getSsrCommentIndex(null, floor))) return;
 				const started = Date.now();
 				const findEdit = () => {
 					const comment = Array.from(this.list?.children || []).find((node) => node.nodeType === 1 && String(node.id) === String(floor));
@@ -5845,6 +5997,34 @@
 				};
 				check();
 			}
+			rememberNativeEditRequest(floor) {
+				try {
+					windowObj.sessionStorage?.setItem(NATIVE_EDIT_REQUEST_KEY, JSON.stringify({
+						postId: this.info.postId,
+						floor: String(floor)
+					}));
+					return true;
+				} catch {
+					return false;
+				}
+			}
+			getSsrCommentIndex(commentId, floor) {
+				const comments = getSsrState(documentObj)?.postData?.comments;
+				if (!Array.isArray(comments)) return -1;
+				if (commentId !== null && commentId !== void 0) {
+					const byCommentId = comments.findIndex((item) => String(item?.commentId) === String(commentId));
+					if (byCommentId >= 0) return byCommentId;
+				}
+				if (floor === null || floor === void 0) return -1;
+				return comments.findIndex((item) => String(item?.floorIndex) === String(floor));
+			}
+			applyNativeEdit(index) {
+				if (!Number.isInteger(index) || index < 0) return false;
+				const editor = windowObj.editor;
+				if (typeof editor?.edit !== "function") return false;
+				editor.edit(index);
+				return true;
+			}
 			async init() {
 				this.list = await this.waitForCommentList();
 				if (!this.list) return;
@@ -5852,8 +6032,7 @@
 				this.createToolbar();
 				const nativeEditFloor = this.consumeNativeEditRequest();
 				if (nativeEditFloor) {
-					appState.mode = "original";
-					this.showStatus("原版评论已恢复。");
+					await this.reloadPages();
 					this.openNativeEditAfterReload(nativeEditFloor);
 					return;
 				}
@@ -5980,7 +6159,7 @@
 				}
 			}
 			loadCurrentPage() {
-				const state = getDocState(documentObj);
+				const state = getSsrState(documentObj);
 				const records = [];
 				this.originalChildren.forEach((item, index) => {
 					if (item.nodeType !== 1) return;
@@ -6083,7 +6262,7 @@
 				this.progressiveTimer = 0;
 			}
 			collectRemoteRecords(root, page) {
-				const state = getDocState(root);
+				const state = getSsrState(root);
 				return getCommentItems(root).map((item, index) => getCommentRecord(item, this.info.postId, page, index, false, {
 					keepCommentMenu: true,
 					state,
@@ -6103,17 +6282,20 @@
 			}
 			prepareNativeEdit(comment) {
 				if (!this.virtualizer || !this.originalChildren.includes(comment)) return false;
-				const floor = comment.getAttribute("data-xns-floor") || comment.id || "";
-				if (!/^\d{1,15}$/.test(String(floor))) return false;
-				try {
-					windowObj.sessionStorage?.setItem(NATIVE_EDIT_REQUEST_KEY, JSON.stringify({
-						postId: this.info.postId,
-						floor: String(floor)
-					}));
-				} catch {
-					return false;
-				}
+				const floor = Number(comment.getAttribute("data-xns-floor") ?? comment.id);
+				const index = this.getSsrCommentIndex(getCommentId(comment), Number.isInteger(floor) ? floor : null);
+				if (this.applyNativeEdit(index)) return true;
+				if (!Number.isInteger(floor) || floor < 0 || !this.rememberNativeEditRequest(floor)) return false;
 				windowObj.location.reload();
+				return true;
+			}
+			requestNativeEdit(record) {
+				const floor = Number(record?.floor);
+				const page = Number(record?.page) || 1;
+				if (!Number.isInteger(floor) || floor < 0 || !this.rememberNativeEditRequest(floor)) return false;
+				const url = buildPostUrl(this.info.postId, page, floor);
+				if (!url) return false;
+				windowObj.location.assign(url.href);
 				return true;
 			}
 			showLoading(text) {
@@ -6218,7 +6400,7 @@
 		getCommentItems,
 		sanitizeImportedNode,
 		releaseCommentNode,
-		getDocState,
+		getSsrState,
 		getCurrentUserUid,
 		getCommentRecord,
 		fetchPostPages,
@@ -18087,6 +18269,8 @@
       .xns-preview-thread .xns-action-count, .xns-preview-menu .xns-action-count { font-variant-numeric:tabular-nums; }
       .xns-preview-thread .comment-menu > .menu-item.xns-action-pending, .xns-preview-menu > .menu-item.xns-action-pending { opacity:.55; pointer-events:none; }
       .xns-preview-thread .comment-menu > .menu-item.xns-action-failed, .xns-preview-menu > .menu-item.xns-action-failed { color:#b91c1c; }
+      /* 已操作状态：对齐官方 .comment-menu .menu-item.clicked 的红色高亮。 */
+      .xns-preview-thread .comment-menu > .menu-item.xns-action-done, .xns-preview-menu > .menu-item.xns-action-done { color:#e70606; }
       .xns-action-state { font-size:11px; }
       .xns-preview-composer { margin-top:10px; padding-top:8px; border-top:1px solid rgba(100,116,139,.2); }
       .xns-preview-composer-title { margin:0 0 6px; font-size:14px; }
@@ -18128,6 +18312,7 @@
       .dark-layout .xns-preview-thread .xns-comment-child { border-left-color:rgba(96,165,250,.6) !important; }
       .dark-layout .xns-preview-thread .floor-link-wrapper .floor-link, .dark-layout .xns-preview-content .floor-link-wrapper .floor-link { background:rgba(148,163,184,.14); }
       .dark-layout .xns-preview-thread .floor-link-wrapper .floor-link:hover, .dark-layout .xns-preview-thread .floor-link-wrapper .floor-link:focus-visible, .dark-layout .xns-preview-content .floor-link-wrapper .floor-link:hover, .dark-layout .xns-preview-content .floor-link-wrapper .floor-link:focus-visible { color:#93c5fd; background:rgba(59,130,246,.18); }
+      .dark-layout .xns-preview-thread .comment-menu > .menu-item.xns-action-done, .dark-layout .xns-preview-menu > .menu-item.xns-action-done { color:#f87171; }
       .dark-layout .xns-preview-thread .comment-menu > .menu-item:hover, .dark-layout .xns-preview-thread .comment-menu > .menu-item:focus-visible, .dark-layout .xns-preview-menu > .menu-item:hover, .dark-layout .xns-preview-menu > .menu-item:focus-visible { color:#93c5fd; background:rgba(59,130,246,.18); }
       .dark-layout .xns-preview-content pre.xns-code-block { color:#e5e7eb; background:#0b1220; }
       .dark-layout .xns-preview-content .xns-ansi-fg-black { color:#e5e7eb; } .dark-layout .xns-preview-content .xns-ansi-fg-white { color:#111827; }

@@ -1,14 +1,14 @@
-import { extractSsrState } from './ssr-state.js';
+import { getSsrState } from './ssr-state.js';
 import type { SsrState } from './ssr-state.js';
 
 // 当前用户身份读取服务。
 // 只读取页面已经提供的 SSR 状态或用户菜单，不读取 Cookie、Storage 或浏览器会话。
 interface IdentityDeps {
   documentObj: Document;
-  extractSsrState: (doc: Document) => SsrState | null;
+  getSsrState: (doc: Document) => SsrState | null;
 }
 
-function createIdentityService({ documentObj, extractSsrState }: IdentityDeps) {
+function createIdentityService({ documentObj, getSsrState }: IdentityDeps) {
   let resolved = false;
   let uid: string | null = null;
 
@@ -18,7 +18,8 @@ function createIdentityService({ documentObj, extractSsrState }: IdentityDeps) {
   }
 
   function fromPageState(): string | null {
-    const user = extractSsrState(documentObj)?.user;
+    // 首次调用通常早于官方 hydration，这一读会顺便把实时状态缓存下来。
+    const user = getSsrState(documentObj)?.user;
     const value = user && (user.id ?? user.uid ?? user.userId ?? user.memberId ?? user.member_id);
     return value === undefined || value === null ? null : String(value);
   }
@@ -55,7 +56,7 @@ function createIdentityService({ documentObj, extractSsrState }: IdentityDeps) {
 
 const xnsIdentityService = createIdentityService({
   documentObj: document,
-  extractSsrState,
+  getSsrState,
 });
 const { currentUserUid } = xnsIdentityService;
 
