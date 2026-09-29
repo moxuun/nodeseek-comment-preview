@@ -19,7 +19,7 @@ interface SsrCommentCounts {
   disliked: boolean;
 }
 
-interface CommentRecord {
+export interface CommentRecord {
   floor: number;
   page: number;
   postId: string;
@@ -46,12 +46,12 @@ interface SsrCommentEntry {
   disliked?: unknown;
 }
 
-interface SsrState {
+export interface SsrState {
   postData?: { comments?: SsrCommentEntry[] };
   user?: Record<string, unknown>;
 }
 
-interface CommentRecordOptions {
+export interface CommentRecordOptions {
   keepCommentMenu?: boolean;
   state?: SsrState | null;
   getCurrentUserUid?: () => string | null;

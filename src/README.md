@@ -6,6 +6,7 @@
 `src/ui/settings.js` 仅桥接现有状态、偏好保存和油猴菜单；React 不接管 NodeSeek 原生评论节点。
 `src/nodeseek/sanitize.ts` 使用 DOMPurify 清洗远端节点，再应用楼层 ID、评论菜单、链接和延迟图片规则；不清洗或替换当前页原生评论节点。
 `src/nodeseek/content-parser.ts` 解析评论记录并调用清洗，输出预览和帖子页共用的记录模型。
+`src/data/page-loader.ts` 负责分页读取、并发控制与记录合并。
 其余业务模块仍为 JS，虚拟列表库将单独迁移。
 
 | 目录职责 | 说明 |

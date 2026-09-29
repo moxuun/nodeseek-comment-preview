@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.64
+// @version      0.5.65
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -2980,7 +2980,7 @@
 				const delay = Math.max(0, nextStartAt - Date.now());
 				if (delay) await new Promise((resolve) => windowObj.setTimeout(resolve, delay));
 				nextStartAt = Date.now() + currentGap;
-				release();
+				release?.();
 			}
 			function observeResponse(status) {
 				if (status === 429 || status >= 500) {
@@ -3007,7 +3007,7 @@
 				keepCommentMenu: true,
 				state,
 				getCurrentUserUid
-			})).filter(Boolean);
+			})).filter((record) => record !== null);
 		}
 		async function fetchPostPages(info, firstDocument, options = {}) {
 			const pageLimit = Math.min(maxPage, Math.max(1, Number(options.pageLimit) || Number(getMaxPage?.()) || maxPage));
@@ -3069,8 +3069,9 @@
 							}
 						});
 					} catch (error) {
+						const code = error?.code;
 						failedPages.add(page);
-						if (error?.code === "CLOUDFLARE_CHALLENGE") challengePages.add(page);
+						if (code === "CLOUDFLARE_CHALLENGE") challengePages.add(page);
 						else challengePages.delete(page);
 						options.onPageFailed?.(page, progressState());
 					}
@@ -3130,7 +3131,7 @@
 			loadPreviewRecords
 		});
 	}
-	var xnsPageLoader = createPageLoader({
+	var { collectPageRecords, fetchPostPages, loadPreviewRecords } = createPageLoader({
 		windowObj: window,
 		maxPage: 50,
 		getMaxPage,
@@ -3145,15 +3146,6 @@
 		getCurrentUserUid,
 		buildPostUrl
 	});
-	function collectPageRecords(...args) {
-		return xnsPageLoader.collectPageRecords(...args);
-	}
-	function fetchPostPages(...args) {
-		return xnsPageLoader.fetchPostPages(...args);
-	}
-	function loadPreviewRecords(...args) {
-		return xnsPageLoader.loadPreviewRecords(...args);
-	}
 	function createVoteFeature({ windowObj, documentObj, qs, qsa, createElement, parseSameOriginUrl, safePositiveInt, dynamicSign, postAction, getActionContext, fetchFn }) {
 		function getVoteIdFromLink(link) {
 			const href = link.getAttribute("data-href") || link.getAttribute("href") || "";
