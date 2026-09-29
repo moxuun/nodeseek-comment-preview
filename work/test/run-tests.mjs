@@ -19,6 +19,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..');
 const fixtureServer = path.join(repoRoot, 'work', 'xns-fixture-server.mjs');
 
+// 楼层关系线几何的纯逻辑测试：用几组小型树对拍 flattenReplyTree 的输入输出（不依赖浏览器），先跑。
+const { failures: treeLineFailures } = await import('./thread-lines.test.mjs');
+
 // ---------- 基础工具 ----------
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -994,9 +997,14 @@ scenario('楼中楼按 linux tree 缩进：子楼层是与顶层同款的卡片�
       first: readRow(rows.find((el) => depthOf(el) === 1)),
       deep: readRow(rows.slice().sort((a, b) => depthOf(b) - depthOf(a))[0]),
       leaf: readRow(rows.find((el) => el.classList.contains('xns-comment-leaf'))),
-      // leaf 标记必须精确：标记为 leaf 的条目后面不能再出现更深的条目，否则它的竖线会提前断掉。
-      leafViolations: rows.filter((el, index) => el.classList.contains('xns-comment-leaf')
-        && rows.slice(index + 1).some((next) => depthOf(next) > depthOf(el))).length,
+      // leaf 标记必须精确：标记为 leaf 的条目，它自己的子树必须是空的。展平顺序是深度优先，
+      // 所以只看“下一个不比它更深的条目”之前的那一段（兄弟的子树跟在这段之后，不能算进本条）。
+      leafViolations: rows.filter((el, index) => {
+        if (!el.classList.contains('xns-comment-leaf')) return false;
+        const rest = rows.slice(index + 1);
+        const end = rest.findIndex((next) => depthOf(next) <= depthOf(el));
+        return (end === -1 ? rest : rest.slice(0, end)).length > 0;
+      }).length,
     };
   });
   assert(info.count > 0 && info.root && info.first && info.deep && info.leaf, `楼中楼应存在多层嵌套与叶子条目，实际 ${JSON.stringify(info)}`);
@@ -1021,22 +1029,19 @@ scenario('楼中楼按 linux tree 缩进：子楼层是与顶层同款的卡片�
     assert(Math.abs(row.overlayLeft + row.connectorX + 9 + 1) < 0.5,
       `横线终点应正好落在卡片左边缘（不能伸进卡片），实际 ${JSON.stringify(row)}`);
   });
-  // 核心规则：0..d-2 层的祖先都还有后续兄弟（否则本条不会是它们的后代），竖线必须贯穿整行；
-  // 父层竖线要么因还有后续兄弟而贯穿整行，要么在本行横线处收口——不能垂出一条没用的长线。
+  // 树形几何的完整规则由 thread-lines.test.mjs 用小型树逐条对拍；这里只断言 CSS 侧必须成立的部分：
+  // 只可能画祖先层的竖线、层级不重复，父层竖线要么贯穿整行、要么在本行横线处收口。
+  // 不能反过来要求“所有更上层祖先都有竖线”：末子节点的后代本来就只保留部分层级。
   [info.first, info.deep, info.leaf].forEach((row) => {
     const parentLevel = row.depth - 1;
-    // 本层竖线不画在自己的卡片里（卡片不透底，画进来就成了卡片内部的一条装饰线）。
-    assert(row.columnLevels.every((level) => level < row.depth),
-      `第 ${row.depth} 层不应画本层竖线，实际 ${JSON.stringify(row)}`);
-    for (let level = 0; level < parentLevel; level += 1) {
-      assert(row.columnLevels.includes(level),
-        `第 ${row.depth} 层的祖先第 ${level} 层还有后续兄弟，竖线应贯穿整行，实际 ${JSON.stringify(row)}`);
-    }
+    assert(row.columnLevels.every((level) => Number.isInteger(level) && level >= 0 && level < row.depth)
+      && row.columnLevels.every((level, index) => index === 0 || row.columnLevels[index - 1] < level),
+      `第 ${row.depth} 层只应画祖先层的竖线且不重复，实际 ${JSON.stringify(row)}`);
     const continued = row.columnLevels.includes(parentLevel);
     assert(continued ? row.stopWidth === '0px' : row.stopX === parentLevel * 18 + 6 && row.stopWidth === '3px',
       `第 ${row.depth} 层的父层竖线要么贯穿整行、要么只画到横线处（x=${parentLevel * 18 + 6}，宽 3px），实际 ${JSON.stringify(row)}`);
   });
-  // leaf 标记必须精确：标记为 leaf 的条目后面不能再出现更深的条目，否则父层竖线会提前断掉。
+  // leaf 标记必须精确：标记为 leaf 的条目自己的子树里不能再有更深的条目。
   assert(info.leafViolations === 0, `叶子标记必须精确，实际 ${JSON.stringify(info.leafViolations)}`);
   await page.close();
 });
@@ -2009,4 +2014,4 @@ for (const report of reports) {
   }
 }
 console.log(`\n${reports.length - failed}/${reports.length} 通过${failed ? `，${failed} 失败` : ''}`);
-process.exit(failed ? 1 : 0);
+process.exit(failed || treeLineFailures ? 1 : 0);
