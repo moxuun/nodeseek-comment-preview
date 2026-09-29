@@ -18,6 +18,9 @@ interface SsrCommentCounts {
   liked: boolean;
   chickened: boolean;
   disliked: boolean;
+  /** 收藏只存在于帖子级 SSR 数据，由内容解析后的调用方补写。 */
+  favorite?: number | null;
+  collected?: boolean;
 }
 
 export interface CommentRecord {

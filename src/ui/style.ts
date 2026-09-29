@@ -3,13 +3,26 @@ import { XNS_PREVIEW_SHELL_STYLES } from './preview-shell-style.js';
 import { XNS_SETTINGS_STYLES } from './settings-style.js';
 import { XNS_STYLE_TOKENS } from './tokens.js';
 
+/** 样式注入依赖；样式文本是构建期静态资源，运行时只负责一次性安装。 */
+interface StyleInstallerDeps {
+  documentObj: Document;
+  styleId: string;
+  ansiColors: readonly string[];
+  ansiFgHex: readonly string[];
+  ansiBgHex: readonly string[];
+  ansiBrightHex: readonly string[];
+  styleTokens: string;
+  settingsStyles: string;
+  previewShellStyles: string;
+}
+
 // 全局样式注入。样式是构建期静态资源，运行时只负责一次性安装。
-function createStyleInstaller({ documentObj, styleId, ansiColors, ansiFgHex, ansiBgHex, ansiBrightHex, styleTokens, settingsStyles, previewShellStyles }) {
-function ansiRulesFor(prefix, property, hexes) {
+function createStyleInstaller({ documentObj, styleId, ansiColors, ansiFgHex, ansiBgHex, ansiBrightHex, styleTokens, settingsStyles, previewShellStyles }: StyleInstallerDeps) {
+function ansiRulesFor(prefix: string, property: string, hexes: readonly string[]): string {
   return ansiColors.map((name, index) => `.xns-preview-content .xns-ansi-${prefix}-${name} { ${property}:${hexes[index]}; }`).join(' ');
 }
 
-function installStyle() {
+function installStyle(): void {
   if (documentObj.getElementById(styleId)) return;
   const style = documentObj.createElement('style');
   style.id = styleId;
@@ -166,7 +179,7 @@ const xnsStyleInstaller = createStyleInstaller({
   settingsStyles: XNS_SETTINGS_STYLES,
   previewShellStyles: XNS_PREVIEW_SHELL_STYLES,
 });
-function ansiRulesFor(...args) { return xnsStyleInstaller.ansiRulesFor(...args); }
-function installStyle(...args) { return xnsStyleInstaller.installStyle(...args); }
+
+const installStyle = (): void => xnsStyleInstaller.installStyle();
 
 export { installStyle };

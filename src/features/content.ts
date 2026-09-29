@@ -1,6 +1,37 @@
 import { clearElement, createElement, qs, qsa } from '../core/dom.js';
-import { installPreviewVotePanels } from './vote.js';
 import { installPreviewImageFallback } from '../preview/lightbox.js';
+import { installPreviewVotePanels } from './vote.js';
+
+/** 预览内容增强选项；`skipRemote` 用于跳过跨页只读内容。 */
+interface PreviewContentOptions {
+  skipRemote?: boolean;
+}
+
+/** ANSI 累积状态。 */
+interface AnsiState {
+  fg: string;
+  bg: string;
+  bold: boolean;
+  dim: boolean;
+  italic: boolean;
+  underline: boolean;
+  strike: boolean;
+  hidden: boolean;
+  inverse: boolean;
+}
+
+/** 内容增强依赖；测试可注入替身。 */
+interface ContentFeatureDeps {
+  windowObj: Window & typeof globalThis;
+  documentObj: Document;
+  navigatorObj: Navigator;
+  qs: typeof qs;
+  qsa: typeof qsa;
+  createElement: typeof createElement;
+  clearElement: typeof clearElement;
+  installPreviewImageFallback: (root: Element | null | undefined, options?: PreviewContentOptions) => void;
+  installPreviewVotePanels: (root: Element | null | undefined, options?: PreviewContentOptions) => void;
+}
 
 // 预览内容增强：ANSI、官方魔法标签页、Markdown 标签页、图片和代码复制。
 function createContentFeatures({
@@ -13,15 +44,15 @@ function createContentFeatures({
   clearElement,
   installPreviewImageFallback,
   installPreviewVotePanels,
-}) {
+}: ContentFeatureDeps) {
   const ANSI_COLORS = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
   const NodeCtor = windowObj.Node;
 
-  function createAnsiState() {
+  function createAnsiState(): AnsiState {
     return { fg: '', bg: '', bold: false, dim: false, italic: false, underline: false, strike: false, hidden: false, inverse: false };
   }
 
-  function applyAnsiCodes(state, rawCodes) {
+  function applyAnsiCodes(state: AnsiState, rawCodes: number[]): void {
     const codes = rawCodes.length ? rawCodes : [0];
     for (let index = 0; index < codes.length; index += 1) {
       const code = Number(codes[index]);
@@ -53,7 +84,7 @@ function createContentFeatures({
     }
   }
 
-  function getAnsiClasses(state) {
+  function getAnsiClasses(state: AnsiState): string[] {
     return [
       state.fg && `xns-ansi-fg-${state.fg}`,
       state.bg && `xns-ansi-bg-${state.bg}`,
@@ -64,10 +95,10 @@ function createContentFeatures({
       state.strike && 'xns-ansi-strike',
       state.hidden && 'xns-ansi-hidden',
       state.inverse && 'xns-ansi-inverse',
-    ].filter(Boolean);
+    ].filter(Boolean) as string[];
   }
 
-  function appendAnsiText(code, text, state) {
+  function appendAnsiText(code: Element, text: string, state: AnsiState): void {
     if (!text) return;
     const classes = getAnsiClasses(state);
     if (!classes.length) {
@@ -79,27 +110,28 @@ function createContentFeatures({
     code.appendChild(span);
   }
 
-  function isAnsiCodeBlock(pre) {
+  function isAnsiCodeBlock(pre: Element): boolean {
     const code = qs(pre, ':scope > code') || qs(pre, 'code');
     const className = `${String(pre.className || '')} ${String(code?.className || '')}`;
     return Boolean(code && /(?:^|\s)(?:language-ansi|lang-ansi|ansi)(?:\s|$)/i.test(className));
   }
 
-  function serializeAnsiNode(node) {
+  function serializeAnsiNode(node: Node): string {
     if (node.nodeType === NodeCtor.TEXT_NODE) return node.nodeValue || '';
     if (node.nodeType !== NodeCtor.ELEMENT_NODE) return '';
     let output = '';
-    if (node.matches('span[data-ansicode]')) {
-      const code = Number(node.getAttribute('data-ansicode'));
+    const element = node as Element;
+    if (element.matches('span[data-ansicode]')) {
+      const code = Number(element.getAttribute('data-ansicode'));
       if (Number.isInteger(code) && code >= 0 && code <= 127) output += String.fromCharCode(code);
     }
     Array.from(node.childNodes).forEach((child) => { output += serializeAnsiNode(child); });
     return output;
   }
 
-  function renderAnsiCodeBlock(pre) {
+  function renderAnsiCodeBlock(pre: Element): void {
     if (!isAnsiCodeBlock(pre)) return;
-    const code = qs(pre, ':scope > code') || qs(pre, 'code');
+    const code = (qs(pre, ':scope > code') || qs(pre, 'code')) as HTMLElement | null;
     if (!code || code.dataset.xnsAnsiRendered === 'true') return;
     const source = serializeAnsiNode(code)
       .replace(/\u0008/g, '')
@@ -109,7 +141,7 @@ function createContentFeatures({
     const state = createAnsiState();
     const ansiPattern = /\u001b\[([0-9;]*)m/g;
     let cursor = 0;
-    let match;
+    let match: RegExpExecArray | null;
     while ((match = ansiPattern.exec(source))) {
       appendAnsiText(code, source.slice(cursor, match.index), state);
       applyAnsiCodes(state, match[1].split(';').filter((value) => value !== '').map(Number));
@@ -119,7 +151,7 @@ function createContentFeatures({
     code.dataset.xnsAnsiRendered = 'true';
   }
 
-  function queryPreviewContent(root, selector, options = {}) {
+  function queryPreviewContent(root: Element | null | undefined, selector: string, options: PreviewContentOptions = {}): Element[] {
     if (!root) return [];
     const isPreviewRoot = root.matches?.('.xns-preview-content') || root.closest?.('.xns-preview-content');
     let querySelector = selector;
@@ -129,7 +161,7 @@ function createContentFeatures({
         .map((part) => part.trim().replace(/^\.xns-preview-content\s+/, ''))
         .join(', ');
     }
-    const matches = [];
+    const matches: Element[] = [];
     if (root.matches?.(selector)) matches.push(root);
     matches.push(...qsa(root, querySelector));
     const owner = root.matches?.('.content-item') ? root : null;
@@ -140,17 +172,18 @@ function createContentFeatures({
     });
   }
 
-  function installPreviewAnsiBlocks(root, options = {}) {
+  function installPreviewAnsiBlocks(root: Element | null | undefined, options: PreviewContentOptions = {}): void {
     queryPreviewContent(root, '.xns-preview-content pre', options).forEach(renderAnsiCodeBlock);
   }
 
-  function installPreviewMagicTabs(root, options = {}) {
+  function installPreviewMagicTabs(root: Element | null | undefined, options: PreviewContentOptions = {}): void {
     queryPreviewContent(root, '.xns-preview-content .nsk-magic-tabs', options).forEach((tabs) => {
-      if (tabs.dataset.xnsMagicTabsBound === 'true') return;
-      const titles = qsa(tabs, ':scope > .nsk-magic-tab-title');
-      const bodies = qsa(tabs, ':scope > .nsk-magic-tab-body');
+      const host = tabs as HTMLElement;
+      if (host.dataset.xnsMagicTabsBound === 'true') return;
+      const titles = qsa<HTMLElement>(tabs, ':scope > .nsk-magic-tab-title');
+      const bodies = qsa<HTMLElement>(tabs, ':scope > .nsk-magic-tab-body');
       if (!titles.length || titles.length !== bodies.length) return;
-      const activate = (selected) => {
+      const activate = (selected: number): void => {
         titles.forEach((title, index) => {
           const active = index === selected;
           title.classList.toggle('xns-active', active);
@@ -172,31 +205,32 @@ function createContentFeatures({
       });
       bodies.forEach((body) => body.setAttribute('role', 'tabpanel'));
       activate(0);
-      tabs.dataset.xnsMagicTabsBound = 'true';
+      host.dataset.xnsMagicTabsBound = 'true';
     });
   }
 
-  function getDirectiveText(node) {
+  function getDirectiveText(node: Element | null): string {
     if (!node || node.nodeType !== NodeCtor.ELEMENT_NODE || node.matches('pre, code')) return '';
     return (node.textContent || '').trim().replace(/\s+/g, ' ');
   }
 
-  function getMarkdownTabLabel(text) {
+  function getMarkdownTabLabel(text: string): string {
     const match = /^:::\s*tab-item(?:\s+(.+?))?\s*$/i.exec(text);
     return match?.[1]?.trim() || '标签页';
   }
 
-  function installPreviewMarkdownTabs(root, options = {}) {
+  function installPreviewMarkdownTabs(root: Element | null | undefined, options: PreviewContentOptions = {}): void {
     const selector = '.xns-preview-content .post-content, .xns-preview-content article.post-content';
     const contents = queryPreviewContent(root, selector, options);
     contents.forEach((content) => {
-      if (content.dataset.xnsTabsBound === 'true') return;
+      const host = content as HTMLElement;
+      if (host.dataset.xnsTabsBound === 'true') return;
       const children = Array.from(content.children);
       const start = children.findIndex((node) => getDirectiveText(node) === ':::: tabs');
       if (start < 0) return;
-      const tabs = [];
+      const tabs: Array<{ label: string; nodes: Element[] }> = [];
       const markers = [children[start]];
-      let current = null;
+      let current: { label: string; nodes: Element[] } | null = null;
       let end = -1;
       for (let index = start + 1; index < children.length; index += 1) {
         const node = children[index];
@@ -227,7 +261,7 @@ function createContentFeatures({
       wrapper.appendChild(nav);
       content.insertBefore(wrapper, children[start]);
       tabs.forEach((tab, tabIndex) => {
-        const button = createElement('button', 'xns-markdown-tab', tab.label);
+        const button = createElement('button', 'xns-markdown-tab', tab.label) as HTMLButtonElement;
         const panel = createElement('div', 'xns-markdown-tab-panel');
         const active = tabIndex === 0;
         button.type = 'button';
@@ -253,12 +287,12 @@ function createContentFeatures({
         wrapper.appendChild(panel);
       });
       markers.forEach((node) => node.remove());
-      content.dataset.xnsTabsBound = 'true';
+      host.dataset.xnsTabsBound = 'true';
     });
   }
 
-  function fallbackCopyText(text) {
-    const textarea = createElement('textarea');
+  function fallbackCopyText(text: string): boolean {
+    const textarea = createElement('textarea') as HTMLTextAreaElement;
     textarea.value = text;
     textarea.setAttribute('readonly', '');
     textarea.style.position = 'fixed';
@@ -274,7 +308,7 @@ function createContentFeatures({
     return copied;
   }
 
-  function copyText(text) {
+  function copyText(text: string): Promise<void> {
     if (navigatorObj.clipboard?.writeText) {
       return navigatorObj.clipboard.writeText(text).catch(() => {
         if (!fallbackCopyText(text)) throw new Error('copy failed');
@@ -283,20 +317,21 @@ function createContentFeatures({
     return fallbackCopyText(text) ? Promise.resolve() : Promise.reject(new Error('copy failed'));
   }
 
-  function installPreviewCodeBlocks(root, options = {}) {
+  function installPreviewCodeBlocks(root: Element | null | undefined, options: PreviewContentOptions = {}): void {
     queryPreviewContent(root, '.xns-preview-content pre', options).forEach((pre) => {
-      if (pre.dataset.xnsCodeBound === 'true') return;
+      const host = pre as HTMLElement;
+      if (host.dataset.xnsCodeBound === 'true') return;
       const code = qs(pre, ':scope > code') || qs(pre, 'code');
       if (!code) return;
-      pre.dataset.xnsCodeBound = 'true';
-      pre.classList.add('xns-code-block');
-      const button = createElement('button', 'xns-code-copy-btn', '复制');
+      host.dataset.xnsCodeBound = 'true';
+      host.classList.add('xns-code-block');
+      const button = createElement('button', 'xns-code-copy-btn', '复制') as HTMLButtonElement;
       button.type = 'button';
       button.setAttribute('aria-label', '复制代码');
       button.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        const text = code.innerText ?? code.textContent ?? '';
+        const text = (code as HTMLElement).innerText ?? code.textContent ?? '';
         button.disabled = true;
         void copyText(text).then(() => {
           button.textContent = '已复制';
@@ -313,11 +348,11 @@ function createContentFeatures({
           }, 2_000);
         });
       });
-      pre.appendChild(button);
+      host.appendChild(button);
     });
   }
 
-  function installPreviewFeatures(root, options = {}) {
+  function installPreviewFeatures(root: Element | null | undefined, options: PreviewContentOptions = {}): void {
     installPreviewMagicTabs(root, options);
     installPreviewMarkdownTabs(root, options);
     installPreviewAnsiBlocks(root, options);
@@ -340,7 +375,6 @@ const xnsContentFeatures = createContentFeatures({
   installPreviewImageFallback,
   installPreviewVotePanels,
 });
-function installPreviewFeatures(...args) { return xnsContentFeatures.installPreviewFeatures(...args); }
-function installPreviewCodeBlocks(...args) { return xnsContentFeatures.installPreviewCodeBlocks(...args); }
+const installPreviewFeatures = (root: Element | null | undefined, options?: PreviewContentOptions): void => xnsContentFeatures.installPreviewFeatures(root, options);
 
 export { installPreviewFeatures };

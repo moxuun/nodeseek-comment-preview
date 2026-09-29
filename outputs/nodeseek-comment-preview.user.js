@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.74
+// @version      0.5.75
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -3117,6 +3117,181 @@
 		getCurrentUserUid,
 		buildPostUrl
 	});
+	function createPreviewLightbox({ documentObj, state, qsa, createElement, getSafeUrlAttribute }) {
+		function getPreviewImageSource(image) {
+			const link = image?.closest("a[href]");
+			const candidates = [
+				image?.currentSrc,
+				image?.getAttribute("src"),
+				image?.getAttribute("data-src"),
+				image?.getAttribute("data-original"),
+				link?.getAttribute("href")
+			];
+			for (const candidate of candidates) {
+				const safe = getSafeUrlAttribute("src", candidate);
+				if (safe) return safe;
+			}
+			return null;
+		}
+		function closeImageLightbox() {
+			const lightbox = state.lightbox;
+			if (!lightbox) return;
+			lightbox.cleanup?.();
+			lightbox.overlay?.remove();
+			state.lightbox = null;
+		}
+		function openImageLightbox(image) {
+			const source = getPreviewImageSource(image);
+			if (!source) return;
+			closeImageLightbox();
+			const overlay = createElement("div", "xns-lightbox");
+			overlay.tabIndex = -1;
+			overlay.setAttribute("role", "dialog");
+			overlay.setAttribute("aria-modal", "true");
+			overlay.setAttribute("aria-label", "图片预览");
+			const stage = createElement("div", "xns-lightbox-stage");
+			const preview = documentObj.createElement("img");
+			preview.className = "xns-lightbox-image";
+			preview.src = source;
+			preview.alt = image.getAttribute("alt") || "图片预览";
+			preview.setAttribute("referrerpolicy", "origin");
+			preview.setAttribute("draggable", "false");
+			const close = createElement("button", "xns-lightbox-close", "×");
+			close.type = "button";
+			close.setAttribute("aria-label", "关闭图片预览");
+			const original = createElement("a", "xns-lightbox-open", "打开原图");
+			original.href = source;
+			original.target = "_blank";
+			original.rel = "noopener noreferrer";
+			stage.appendChild(preview);
+			overlay.append(stage, close, original);
+			let scale = 1;
+			let offsetX = 0;
+			let offsetY = 0;
+			let dragging = false;
+			let pointerId = null;
+			let startX = 0;
+			let startY = 0;
+			let startOffsetX = 0;
+			let startOffsetY = 0;
+			const render = () => {
+				preview.style.transform = `translate3d(${offsetX}px, ${offsetY}px, 0) scale(${scale})`;
+			};
+			const onWheel = (event) => {
+				event.preventDefault();
+				scale = Math.min(4, Math.max(.5, scale * (event.deltaY < 0 ? 1.12 : .89)));
+				if (scale <= 1) {
+					scale = 1;
+					offsetX = 0;
+					offsetY = 0;
+				}
+				render();
+			};
+			const onPointerDown = (event) => {
+				if (event.button !== 0) return;
+				dragging = true;
+				pointerId = event.pointerId;
+				startX = event.clientX;
+				startY = event.clientY;
+				startOffsetX = offsetX;
+				startOffsetY = offsetY;
+				stage.classList.add("xns-dragging");
+				stage.setPointerCapture?.(event.pointerId);
+				event.preventDefault();
+			};
+			const onPointerMove = (event) => {
+				if (!dragging || event.pointerId !== pointerId) return;
+				offsetX = startOffsetX + event.clientX - startX;
+				offsetY = startOffsetY + event.clientY - startY;
+				render();
+			};
+			const onPointerUp = (event) => {
+				if (event.pointerId !== pointerId) return;
+				dragging = false;
+				pointerId = null;
+				stage.classList.remove("xns-dragging");
+				stage.releasePointerCapture?.(event.pointerId);
+			};
+			const cleanup = () => {
+				stage.removeEventListener("wheel", onWheel);
+				stage.removeEventListener("pointerdown", onPointerDown);
+				stage.removeEventListener("pointermove", onPointerMove);
+				stage.removeEventListener("pointerup", onPointerUp);
+				stage.removeEventListener("pointercancel", onPointerUp);
+			};
+			stage.addEventListener("wheel", onWheel, { passive: false });
+			stage.addEventListener("pointerdown", onPointerDown);
+			stage.addEventListener("pointermove", onPointerMove);
+			stage.addEventListener("pointerup", onPointerUp);
+			stage.addEventListener("pointercancel", onPointerUp);
+			stage.addEventListener("click", (event) => {
+				if (event.target === stage) closeImageLightbox();
+			});
+			preview.addEventListener("click", (event) => event.stopPropagation());
+			close.addEventListener("click", closeImageLightbox);
+			overlay.addEventListener("click", (event) => {
+				if (event.target === overlay) closeImageLightbox();
+			});
+			documentObj.body.appendChild(overlay);
+			state.lightbox = {
+				overlay,
+				cleanup
+			};
+			render();
+			overlay.focus();
+		}
+		function installPreviewImageFallback(root, options = {}) {
+			const selector = Boolean(root?.matches(".xns-preview-content") || root?.closest(".xns-preview-content")) ? "img" : ".xns-preview-content img";
+			const images = [];
+			if (root && root.matches(".xns-preview-content img")) images.push(root);
+			const owner = root?.matches(".content-item") ? root : null;
+			images.push(...qsa(root, selector));
+			images.filter((image) => {
+				if (owner && image.closest(".content-item") !== owner) return false;
+				if (options.skipRemote && (image.matches("[data-xns-remote]") || image.closest("[data-xns-remote]"))) return false;
+				return true;
+			}).forEach((image) => {
+				const deferredSource = image.getAttribute("data-xns-deferred-src");
+				if (deferredSource) {
+					if (!image.getAttribute("src")) image.setAttribute("src", deferredSource);
+					image.removeAttribute("data-xns-deferred-src");
+				}
+				if (image.dataset.xnsImageBound === "true") return;
+				image.dataset.xnsImageBound = "true";
+				image.setAttribute("tabindex", "0");
+				image.setAttribute("role", "button");
+				image.setAttribute("title", "点击放大图片");
+				const open = (event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					openImageLightbox(image);
+				};
+				image.addEventListener("click", open);
+				image.addEventListener("keydown", (event) => {
+					if (event.key === "Enter" || event.key === " ") open(event);
+				});
+				image.addEventListener("error", () => {
+					if (image.nextElementSibling?.matches(".xns-image-error")) return;
+					const message = createElement("span", "xns-image-error", "图片加载失败：图片站拒绝了当前嵌入来源。仍可点击“打开原图”尝试查看。");
+					image.insertAdjacentElement("afterend", message);
+				}, { once: true });
+			});
+		}
+		return Object.freeze({
+			closeImageLightbox,
+			openImageLightbox,
+			installPreviewImageFallback
+		});
+	}
+	var xnsPreviewLightbox = createPreviewLightbox({
+		documentObj: document,
+		state,
+		qsa,
+		createElement,
+		getSafeUrlAttribute
+	});
+	var closeImageLightbox = () => xnsPreviewLightbox.closeImageLightbox();
+	var installPreviewImageFallback = (root, options) => xnsPreviewLightbox.installPreviewImageFallback(root, options);
 	function createVoteFeature({ windowObj, documentObj, qs, qsa, createElement, parseSameOriginUrl, safePositiveInt, dynamicSign, postAction, getActionContext, fetchFn }) {
 		function getVoteIdFromLink(link) {
 			const href = link.getAttribute("data-href") || link.getAttribute("href") || "";
@@ -3319,181 +3494,6 @@
 	});
 	var installPreviewVotePanels = (root, options) => xnsVoteFeature.installPreviewVotePanels(root, options);
 	var handleVoteClick = (event) => xnsVoteFeature.handleVoteClick(event);
-	function createPreviewLightbox({ documentObj, state, qsa, createElement, getSafeUrlAttribute }) {
-		function getPreviewImageSource(image) {
-			const link = image?.closest("a[href]");
-			const candidates = [
-				image?.currentSrc,
-				image?.getAttribute("src"),
-				image?.getAttribute("data-src"),
-				image?.getAttribute("data-original"),
-				link?.getAttribute("href")
-			];
-			for (const candidate of candidates) {
-				const safe = getSafeUrlAttribute("src", candidate);
-				if (safe) return safe;
-			}
-			return null;
-		}
-		function closeImageLightbox() {
-			const lightbox = state.lightbox;
-			if (!lightbox) return;
-			lightbox.cleanup?.();
-			lightbox.overlay?.remove();
-			state.lightbox = null;
-		}
-		function openImageLightbox(image) {
-			const source = getPreviewImageSource(image);
-			if (!source) return;
-			closeImageLightbox();
-			const overlay = createElement("div", "xns-lightbox");
-			overlay.tabIndex = -1;
-			overlay.setAttribute("role", "dialog");
-			overlay.setAttribute("aria-modal", "true");
-			overlay.setAttribute("aria-label", "图片预览");
-			const stage = createElement("div", "xns-lightbox-stage");
-			const preview = documentObj.createElement("img");
-			preview.className = "xns-lightbox-image";
-			preview.src = source;
-			preview.alt = image.getAttribute("alt") || "图片预览";
-			preview.setAttribute("referrerpolicy", "origin");
-			preview.setAttribute("draggable", "false");
-			const close = createElement("button", "xns-lightbox-close", "×");
-			close.type = "button";
-			close.setAttribute("aria-label", "关闭图片预览");
-			const original = createElement("a", "xns-lightbox-open", "打开原图");
-			original.href = source;
-			original.target = "_blank";
-			original.rel = "noopener noreferrer";
-			stage.appendChild(preview);
-			overlay.append(stage, close, original);
-			let scale = 1;
-			let offsetX = 0;
-			let offsetY = 0;
-			let dragging = false;
-			let pointerId = null;
-			let startX = 0;
-			let startY = 0;
-			let startOffsetX = 0;
-			let startOffsetY = 0;
-			const render = () => {
-				preview.style.transform = `translate3d(${offsetX}px, ${offsetY}px, 0) scale(${scale})`;
-			};
-			const onWheel = (event) => {
-				event.preventDefault();
-				scale = Math.min(4, Math.max(.5, scale * (event.deltaY < 0 ? 1.12 : .89)));
-				if (scale <= 1) {
-					scale = 1;
-					offsetX = 0;
-					offsetY = 0;
-				}
-				render();
-			};
-			const onPointerDown = (event) => {
-				if (event.button !== 0) return;
-				dragging = true;
-				pointerId = event.pointerId;
-				startX = event.clientX;
-				startY = event.clientY;
-				startOffsetX = offsetX;
-				startOffsetY = offsetY;
-				stage.classList.add("xns-dragging");
-				stage.setPointerCapture?.(event.pointerId);
-				event.preventDefault();
-			};
-			const onPointerMove = (event) => {
-				if (!dragging || event.pointerId !== pointerId) return;
-				offsetX = startOffsetX + event.clientX - startX;
-				offsetY = startOffsetY + event.clientY - startY;
-				render();
-			};
-			const onPointerUp = (event) => {
-				if (event.pointerId !== pointerId) return;
-				dragging = false;
-				pointerId = null;
-				stage.classList.remove("xns-dragging");
-				stage.releasePointerCapture?.(event.pointerId);
-			};
-			const cleanup = () => {
-				stage.removeEventListener("wheel", onWheel);
-				stage.removeEventListener("pointerdown", onPointerDown);
-				stage.removeEventListener("pointermove", onPointerMove);
-				stage.removeEventListener("pointerup", onPointerUp);
-				stage.removeEventListener("pointercancel", onPointerUp);
-			};
-			stage.addEventListener("wheel", onWheel, { passive: false });
-			stage.addEventListener("pointerdown", onPointerDown);
-			stage.addEventListener("pointermove", onPointerMove);
-			stage.addEventListener("pointerup", onPointerUp);
-			stage.addEventListener("pointercancel", onPointerUp);
-			stage.addEventListener("click", (event) => {
-				if (event.target === stage) closeImageLightbox();
-			});
-			preview.addEventListener("click", (event) => event.stopPropagation());
-			close.addEventListener("click", closeImageLightbox);
-			overlay.addEventListener("click", (event) => {
-				if (event.target === overlay) closeImageLightbox();
-			});
-			documentObj.body.appendChild(overlay);
-			state.lightbox = {
-				overlay,
-				cleanup
-			};
-			render();
-			overlay.focus();
-		}
-		function installPreviewImageFallback(root, options = {}) {
-			const selector = Boolean(root?.matches(".xns-preview-content") || root?.closest(".xns-preview-content")) ? "img" : ".xns-preview-content img";
-			const images = [];
-			if (root && root.matches(".xns-preview-content img")) images.push(root);
-			const owner = root?.matches(".content-item") ? root : null;
-			images.push(...qsa(root, selector));
-			images.filter((image) => {
-				if (owner && image.closest(".content-item") !== owner) return false;
-				if (options.skipRemote && (image.matches("[data-xns-remote]") || image.closest("[data-xns-remote]"))) return false;
-				return true;
-			}).forEach((image) => {
-				const deferredSource = image.getAttribute("data-xns-deferred-src");
-				if (deferredSource) {
-					if (!image.getAttribute("src")) image.setAttribute("src", deferredSource);
-					image.removeAttribute("data-xns-deferred-src");
-				}
-				if (image.dataset.xnsImageBound === "true") return;
-				image.dataset.xnsImageBound = "true";
-				image.setAttribute("tabindex", "0");
-				image.setAttribute("role", "button");
-				image.setAttribute("title", "点击放大图片");
-				const open = (event) => {
-					event.preventDefault();
-					event.stopPropagation();
-					openImageLightbox(image);
-				};
-				image.addEventListener("click", open);
-				image.addEventListener("keydown", (event) => {
-					if (event.key === "Enter" || event.key === " ") open(event);
-				});
-				image.addEventListener("error", () => {
-					if (image.nextElementSibling?.matches(".xns-image-error")) return;
-					const message = createElement("span", "xns-image-error", "图片加载失败：图片站拒绝了当前嵌入来源。仍可点击“打开原图”尝试查看。");
-					image.insertAdjacentElement("afterend", message);
-				}, { once: true });
-			});
-		}
-		return Object.freeze({
-			closeImageLightbox,
-			openImageLightbox,
-			installPreviewImageFallback
-		});
-	}
-	var xnsPreviewLightbox = createPreviewLightbox({
-		documentObj: document,
-		state,
-		qsa,
-		createElement,
-		getSafeUrlAttribute
-	});
-	var closeImageLightbox = () => xnsPreviewLightbox.closeImageLightbox();
-	var installPreviewImageFallback = (root, options) => xnsPreviewLightbox.installPreviewImageFallback(root, options);
 	function createContentFeatures({ windowObj, documentObj, navigatorObj, qs, qsa, createElement, clearElement, installPreviewImageFallback, installPreviewVotePanels }) {
 		const ANSI_COLORS = [
 			"black",
@@ -3585,8 +3585,9 @@
 			if (node.nodeType === NodeCtor.TEXT_NODE) return node.nodeValue || "";
 			if (node.nodeType !== NodeCtor.ELEMENT_NODE) return "";
 			let output = "";
-			if (node.matches("span[data-ansicode]")) {
-				const code = Number(node.getAttribute("data-ansicode"));
+			const element = node;
+			if (element.matches("span[data-ansicode]")) {
+				const code = Number(element.getAttribute("data-ansicode"));
 				if (Number.isInteger(code) && code >= 0 && code <= 127) output += String.fromCharCode(code);
 			}
 			Array.from(node.childNodes).forEach((child) => {
@@ -3632,7 +3633,8 @@
 		}
 		function installPreviewMagicTabs(root, options = {}) {
 			queryPreviewContent(root, ".xns-preview-content .nsk-magic-tabs", options).forEach((tabs) => {
-				if (tabs.dataset.xnsMagicTabsBound === "true") return;
+				const host = tabs;
+				if (host.dataset.xnsMagicTabsBound === "true") return;
 				const titles = qsa(tabs, ":scope > .nsk-magic-tab-title");
 				const bodies = qsa(tabs, ":scope > .nsk-magic-tab-body");
 				if (!titles.length || titles.length !== bodies.length) return;
@@ -3658,7 +3660,7 @@
 				});
 				bodies.forEach((body) => body.setAttribute("role", "tabpanel"));
 				activate(0);
-				tabs.dataset.xnsMagicTabsBound = "true";
+				host.dataset.xnsMagicTabsBound = "true";
 			});
 		}
 		function getDirectiveText(node) {
@@ -3670,7 +3672,8 @@
 		}
 		function installPreviewMarkdownTabs(root, options = {}) {
 			queryPreviewContent(root, ".xns-preview-content .post-content, .xns-preview-content article.post-content", options).forEach((content) => {
-				if (content.dataset.xnsTabsBound === "true") return;
+				const host = content;
+				if (host.dataset.xnsTabsBound === "true") return;
 				const children = Array.from(content.children);
 				const start = children.findIndex((node) => getDirectiveText(node) === ":::: tabs");
 				if (start < 0) return;
@@ -3735,7 +3738,7 @@
 					wrapper.appendChild(panel);
 				});
 				markers.forEach((node) => node.remove());
-				content.dataset.xnsTabsBound = "true";
+				host.dataset.xnsTabsBound = "true";
 			});
 		}
 		function fallbackCopyText(text) {
@@ -3766,11 +3769,12 @@
 		}
 		function installPreviewCodeBlocks(root, options = {}) {
 			queryPreviewContent(root, ".xns-preview-content pre", options).forEach((pre) => {
-				if (pre.dataset.xnsCodeBound === "true") return;
+				const host = pre;
+				if (host.dataset.xnsCodeBound === "true") return;
 				const code = qs(pre, ":scope > code") || qs(pre, "code");
 				if (!code) return;
-				pre.dataset.xnsCodeBound = "true";
-				pre.classList.add("xns-code-block");
+				host.dataset.xnsCodeBound = "true";
+				host.classList.add("xns-code-block");
 				const button = createElement("button", "xns-code-copy-btn", "复制");
 				button.type = "button";
 				button.setAttribute("aria-label", "复制代码");
@@ -3794,7 +3798,7 @@
 						}, 2e3);
 					});
 				});
-				pre.appendChild(button);
+				host.appendChild(button);
 			});
 		}
 		function installPreviewFeatures(root, options = {}) {
@@ -3821,9 +3825,7 @@
 		installPreviewImageFallback,
 		installPreviewVotePanels
 	});
-	function installPreviewFeatures(...args) {
-		return xnsContentFeatures.installPreviewFeatures(...args);
-	}
+	var installPreviewFeatures = (root, options) => xnsContentFeatures.installPreviewFeatures(root, options);
 	function createPreviewModalUi({ windowObj, documentObj, state, createElement, closeImageLightbox }) {
 		function removeBodyLock() {
 			if (!state.modal) documentObj.documentElement.style.removeProperty("overflow");
@@ -3979,6 +3981,50 @@
 	var createRefreshButton = (onClick) => xnsPreviewModalUi.createRefreshButton(onClick);
 	var createShareButton = (onClick) => xnsPreviewModalUi.createShareButton(onClick);
 	var installPreviewScrollButtons = (dialog, body) => xnsPreviewModalUi.installPreviewScrollButtons(dialog, body);
+	function createPageStatusFormatter({ maxPage, getMaxPage }) {
+		function format(options = {}) {
+			const configuredLimit = Number(options.pageLimit) || Number(getMaxPage?.()) || maxPage;
+			const pageLimit = Math.min(maxPage, Math.max(1, configuredLimit));
+			const totalPages = Number(options.totalPages) || 0;
+			const loadedPages = Math.max(0, Number(options.loadedPages) || 0);
+			const failedCount = Array.isArray(options.failedPages) ? options.failedPages.length : 0;
+			const targetPages = Math.min(pageLimit, totalPages || loadedPages);
+			const pageProgress = targetPages ? `已读取 ${loadedPages}/${targetPages} 页` : "";
+			const stage = options.loading ? pageProgress ? `正在读取其他分页 · ${pageProgress}` : "正在读取其他分页…" : pageProgress;
+			const failed = failedCount ? `${failedCount} 页读取失败` : "";
+			const challengeCount = Array.isArray(options.challengePages) ? options.challengePages.length : 0;
+			const challenge = challengeCount ? `${challengeCount} 页被 Cloudflare 验证拦截，请完成验证后重试` : "";
+			const truncated = options.truncated ? `帖子共 ${totalPages || pageLimit} 页，仅读取前 ${pageLimit} 页，后面的内容没有显示` : "";
+			const detail = [
+				stage,
+				failed,
+				challenge,
+				truncated
+			].filter(Boolean).join(" · ");
+			return {
+				targetPages,
+				loadedPages,
+				failedCount,
+				stage,
+				failed,
+				challenge,
+				challengeCount,
+				truncated,
+				detail,
+				compact: [
+					Number.isFinite(options.commentCount) ? `${options.commentCount} 条回复` : "",
+					failedCount ? `${failedCount} 页失败` : "",
+					challengeCount ? `${challengeCount} 页需验证` : ""
+				].filter(Boolean).join(" · ") || detail,
+				tone: failedCount ? "is-failed" : ""
+			};
+		}
+		return Object.freeze({ format });
+	}
+	var formatPageStatus = createPageStatusFormatter({
+		maxPage: 50,
+		getMaxPage
+	}).format;
 	function createPreviewRenderUtils({ qs, qsa, createElement, buildPostUrl }) {
 		function stripRenderArtifacts(item) {
 			if (!item?.classList) return;
@@ -4314,51 +4360,7 @@
 		});
 		return api;
 	}
-	function createPageStatusFormatter({ maxPage, getMaxPage }) {
-		function format(options = {}) {
-			const configuredLimit = Number(options.pageLimit) || Number(getMaxPage?.()) || maxPage;
-			const pageLimit = Math.min(maxPage, Math.max(1, configuredLimit));
-			const totalPages = Number(options.totalPages) || 0;
-			const loadedPages = Math.max(0, Number(options.loadedPages) || 0);
-			const failedCount = Array.isArray(options.failedPages) ? options.failedPages.length : 0;
-			const targetPages = Math.min(pageLimit, totalPages || loadedPages);
-			const pageProgress = targetPages ? `已读取 ${loadedPages}/${targetPages} 页` : "";
-			const stage = options.loading ? pageProgress ? `正在读取其他分页 · ${pageProgress}` : "正在读取其他分页…" : pageProgress;
-			const failed = failedCount ? `${failedCount} 页读取失败` : "";
-			const challengeCount = Array.isArray(options.challengePages) ? options.challengePages.length : 0;
-			const challenge = challengeCount ? `${challengeCount} 页被 Cloudflare 验证拦截，请完成验证后重试` : "";
-			const truncated = options.truncated ? `帖子共 ${totalPages || pageLimit} 页，仅读取前 ${pageLimit} 页，后面的内容没有显示` : "";
-			const detail = [
-				stage,
-				failed,
-				challenge,
-				truncated
-			].filter(Boolean).join(" · ");
-			return {
-				targetPages,
-				loadedPages,
-				failedCount,
-				stage,
-				failed,
-				challenge,
-				challengeCount,
-				truncated,
-				detail,
-				compact: [
-					Number.isFinite(options.commentCount) ? `${options.commentCount} 条回复` : "",
-					failedCount ? `${failedCount} 页失败` : "",
-					challengeCount ? `${challengeCount} 页需验证` : ""
-				].filter(Boolean).join(" · ") || detail,
-				tone: failedCount ? "is-failed" : ""
-			};
-		}
-		return Object.freeze({ format });
-	}
-	var formatPageStatus = createPageStatusFormatter({
-		maxPage: 50,
-		getMaxPage
-	}).format;
-	function createPreviewRenderer({ document, windowObj, state, pageInfo, selectors, maxPage, qs, qsa, createElement, clearElement, getPostInfo, buildPostUrl, getDocState, getCommentId, getSsrCommentCounts, safeCount, sanitizeImportedNode, materializeCommentNode, getDirectCommentMenu, ensurePreviewMenu, stripRenderArtifacts, buildReplyTree, flattenReplyTree, createCommentVirtualizer, addRemoteNote, formatPageStatus, openPreviewEditor }) {
+	function createPreviewRenderer({ document, windowObj, state, pageInfo, selectors, qs, qsa, createElement, clearElement, getPostInfo, buildPostUrl, getDocState, getCommentId, getSsrCommentCounts, safeCount, sanitizeImportedNode, materializeCommentNode, getDirectCommentMenu, ensurePreviewMenu, stripRenderArtifacts, flattenReplyTree, createCommentVirtualizer, addRemoteNote, formatPageStatus, openPreviewEditor }) {
 		function ensurePreviewEditOption(node, record) {
 			if (!node || !record?.isMine) return;
 			const menu = getDirectCommentMenu(node);
@@ -4482,7 +4484,7 @@
 					retry.addEventListener("click", (event) => {
 						event.preventDefault();
 						event.stopPropagation();
-						options.onRetry();
+						options.onRetry?.();
 					});
 					statusNode.appendChild(retry);
 				}
@@ -4502,6 +4504,7 @@
 			const heading = qs(section, ":scope > h3");
 			const thread = qs(section, ":scope > .xns-preview-thread");
 			if (!heading || !thread) return;
+			const host = section;
 			heading.textContent = `${records.length} 条回复`;
 			qs(section, ":scope > .xns-preview-empty")?.remove();
 			if (records.length) {
@@ -4511,28 +4514,29 @@
 					options.onNodeMounted?.(node, record);
 				};
 				const onNodeUnmounted = (node, entry) => {
-					if (!entry.record.current) entry.record.node = null;
-					options.onNodeUnmounted?.(node, entry.record);
+					const record = entry.record;
+					if (!record.current) record.node = null;
+					options.onNodeUnmounted?.(node, record);
 				};
-				const renderItem = (entry) => prepareCommentRecord(entry.record, entry.depth);
+				const renderItem = (entry) => prepareCommentRecord(entry.record, entry.depth ?? 0);
 				const virtualizerOptions = {
 					getViewport: () => thread.closest(".xns-modal-body") || windowObj,
 					renderItem,
 					onMount: onNodeMounted,
 					onUnmount: onNodeUnmounted
 				};
-				const virtualizer = section.__xnsVirtualizer || createCommentVirtualizer({
+				const virtualizer = host.__xnsVirtualizer || createCommentVirtualizer({
 					windowObj,
 					documentObj: document,
 					createElement,
 					estimatedHeight: 135,
 					overscanScreens: 2
 				}).mount(thread, virtualizerOptions);
-				section.__xnsVirtualizer = virtualizer;
+				host.__xnsVirtualizer = virtualizer;
 				virtualizer.setEntries(flattenReplyTree(records), virtualizerOptions);
 			} else {
-				section.__xnsVirtualizer?.destroy();
-				delete section.__xnsVirtualizer;
+				host.__xnsVirtualizer?.destroy();
+				delete host.__xnsVirtualizer;
 				clearElement(thread);
 				section.appendChild(createElement("p", "xns-status xns-preview-empty", "没有读取到评论。"));
 			}
@@ -4553,7 +4557,6 @@
 		state,
 		pageInfo,
 		selectors: SELECTORS,
-		maxPage: 50,
 		qs,
 		qsa,
 		createElement,
@@ -4569,22 +4572,15 @@
 		getDirectCommentMenu,
 		ensurePreviewMenu,
 		stripRenderArtifacts,
-		buildReplyTree,
 		flattenReplyTree,
 		createCommentVirtualizer,
 		addRemoteNote,
 		formatPageStatus,
 		openPreviewEditor
 	});
-	function prepareCommentRecord(...args) {
-		return xnsPreviewRenderer.prepareCommentRecord(...args);
-	}
-	function buildPreviewPostNode(...args) {
-		return xnsPreviewRenderer.buildPreviewPostNode(...args);
-	}
-	function renderPreviewRecords(...args) {
-		return xnsPreviewRenderer.renderPreviewRecords(...args);
-	}
+	var buildPreviewPostNode = (parsed, info) => xnsPreviewRenderer.buildPreviewPostNode(parsed, info);
+	var prepareCommentRecord = (record, depth) => xnsPreviewRenderer.prepareCommentRecord(record, depth);
+	var renderPreviewRecords = (section, info, records, options) => xnsPreviewRenderer.renderPreviewRecords(section, info, records, options);
 	function createPreviewController({ windowObj, documentObj, state, selectors, maxPage, qs, qsa, createElement, clearElement, getPostInfo, buildPostUrl, sanitizeImportedNode, parseHtml, fetchHtml, getPageNumbers, collectPageRecords, loadPreviewRecords, buildPreviewPostNode, renderPreviewRecords, installPreviewFeatures, installPreviewScrollButtons, closeImageLightbox, closeModal, createCloseButton, createRefreshButton, createShareButton, openPreviewComposer }) {
 		async function copyPreviewLink(url, setLabel) {
 			const text = url?.href || "";
@@ -18314,9 +18310,7 @@
 		settingsStyles: XNS_SETTINGS_STYLES,
 		previewShellStyles: XNS_PREVIEW_SHELL_STYLES
 	});
-	function installStyle(...args) {
-		return xnsStyleInstaller.installStyle(...args);
-	}
+	var installStyle = () => xnsStyleInstaller.installStyle();
 	function createAppBootstrap({ documentObj, windowObj, pageInfo, state, installStyle, registerSettingsMenu, createPreviewEntryController, createFloorNavigationController, parseSameOriginUrl, getPostInfo, openPreviewModal, handleFloorClick, handlePreviewActionClick, handleVoteClick, handleKeydown, PostEnhancer }) {
 		function start() {
 			installStyle();

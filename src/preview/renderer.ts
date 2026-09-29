@@ -1,14 +1,67 @@
-import { buildReplyTree, flattenReplyTree } from '../comments/thread.js';
-import { MAX_PAGE, SELECTORS, state } from '../core/config.js';
+import { flattenReplyTree } from '../comments/thread.js';
+import { SELECTORS, state } from '../core/config.js';
 import { clearElement, createElement, getCommentId, qs, qsa, safeCount } from '../core/dom.js';
 import { pageInfo } from '../core/runtime.js';
 import { ensurePreviewMenu, getDirectCommentMenu, openPreviewEditor } from '../features/comment-actions.js';
 import { getSsrCommentCounts, materializeCommentNode, sanitizeImportedNode } from '../nodeseek/content-parser.js';
 import { getDocState } from '../nodeseek/ssr-state.js';
 import { buildPostUrl, getPostInfo } from '../nodeseek/url.js';
+import { formatPageStatus } from '../ui/status.js';
 import { addRemoteNote, stripRenderArtifacts } from './render-utils.js';
 import { createCommentVirtualizer } from './virtualizer.js';
-import { formatPageStatus } from '../ui/status.js';
+import type { CommentRecord } from '../nodeseek/content-parser.js';
+import type { PageStatusOptions } from '../ui/status.js';
+import type { CommentVirtualEntry, CommentVirtualizer, VirtualizerSetupOptions } from './virtualizer.js';
+
+/** 帖子信息中渲染需要的字段。 */
+interface RenderPostInfo {
+  postId: string;
+  page?: number;
+}
+
+/** 状态行渲染选项。 */
+interface RenderStatusOptions extends PageStatusOptions {
+  statusNode?: HTMLElement | null;
+  onRetry?: () => void;
+}
+
+/** 楼层列表渲染选项。 */
+interface RenderRecordsOptions extends RenderStatusOptions {
+  onNodeMounted?: (node: HTMLElement, record: CommentRecord) => void;
+  onNodeUnmounted?: (node: HTMLElement, record: CommentRecord) => void;
+}
+
+/** 挂载了虚拟列表实例的渲染容器。 */
+type RenderHost = HTMLElement & { __xnsVirtualizer?: CommentVirtualizer };
+
+/** 渲染器依赖；测试可注入替身。 */
+interface PreviewRendererDeps {
+  document: Document;
+  windowObj: Window & typeof globalThis;
+  state: typeof state;
+  pageInfo: typeof pageInfo;
+  selectors: typeof SELECTORS;
+  qs: typeof qs;
+  qsa: typeof qsa;
+  createElement: typeof createElement;
+  clearElement: typeof clearElement;
+  getPostInfo: typeof getPostInfo;
+  buildPostUrl: typeof buildPostUrl;
+  getDocState: typeof getDocState;
+  getCommentId: typeof getCommentId;
+  getSsrCommentCounts: typeof getSsrCommentCounts;
+  safeCount: typeof safeCount;
+  sanitizeImportedNode: typeof sanitizeImportedNode;
+  materializeCommentNode: typeof materializeCommentNode;
+  getDirectCommentMenu: (node: Element) => Element | null;
+  ensurePreviewMenu: (node: Element, options: { includeFavorite: boolean; counts?: unknown }) => void;
+  stripRenderArtifacts: typeof stripRenderArtifacts;
+  flattenReplyTree: typeof flattenReplyTree;
+  createCommentVirtualizer: typeof createCommentVirtualizer;
+  addRemoteNote: typeof addRemoteNote;
+  formatPageStatus: typeof formatPageStatus;
+  openPreviewEditor: (node: Element, record: CommentRecord) => unknown;
+}
 
 // 预览内容渲染服务。
 // 这里仅负责把已加载的帖子记录转换成官方风格的楼层节点；网络读取由 page-loader 负责。
@@ -18,7 +71,6 @@ function createPreviewRenderer({
   state,
   pageInfo,
   selectors,
-  maxPage,
   qs,
   qsa,
   createElement,
@@ -34,18 +86,17 @@ function createPreviewRenderer({
   getDirectCommentMenu,
   ensurePreviewMenu,
   stripRenderArtifacts,
-  buildReplyTree,
   flattenReplyTree,
   createCommentVirtualizer,
   addRemoteNote,
   formatPageStatus,
   openPreviewEditor,
-}) {
-  function ensurePreviewEditOption(node, record) {
+}: PreviewRendererDeps) {
+  function ensurePreviewEditOption(node: Element | null, record: CommentRecord | null | undefined): void {
     if (!node || !record?.isMine) return;
     const menu = getDirectCommentMenu(node);
     if (!menu) return;
-    let item = qsa(menu, ':scope > .menu-item').find((el) => (el.textContent || '').trim() === '编辑' && !el.dataset?.xnsAction);
+    let item = qsa(menu, ':scope > .menu-item').find((el) => (el.textContent || '').trim() === '编辑' && !(el as HTMLElement).dataset?.xnsAction) as HTMLElement | undefined;
     // 帖子详情页已有 NodeSeek/Vue 原生编辑项时直接保留。它带有官方事件
     // 处理器，由官方在楼层下方展开编辑器；脚本不能覆盖成打开新标签。
     // 如果原生项没有渲染出来，仍要先补回可见入口；后面不接管当前页的点击，
@@ -55,7 +106,7 @@ function createPreviewRenderer({
       return;
     }
     if (!item) {
-      item = createElement('span', 'menu-item');
+      item = createElement('span', 'menu-item') as HTMLElement;
       item.setAttribute('role', 'button');
       item.tabIndex = 0;
       item.innerHTML = '<svg class="iconpark-icon" aria-hidden="true"><use href="#edit"></use></svg><span>编辑</span>';
@@ -74,7 +125,8 @@ function createPreviewRenderer({
         return;
       }
       // 帖子页沿用官方编辑器：能直接定位就就地展开，否则先跳到该评论所在的页。
-      if (state.post?.requestNativeEdit?.(record)) return;
+      const post = state.post as { requestNativeEdit?: (target: CommentRecord) => boolean } | null | undefined;
+      if (post?.requestNativeEdit?.(record)) return;
       const postId = record.postId || pageInfo?.postId || getPostInfo(windowObj.location.href)?.postId || '';
       const floor = record.floor;
       const url = buildPostUrl(postId, record.page || 1, floor >= 0 ? floor : null);
@@ -82,8 +134,8 @@ function createPreviewRenderer({
     });
   }
 
-  function prepareCommentRecord(record, depth) {
-    const node = materializeCommentNode(record);
+  function prepareCommentRecord(record: CommentRecord, depth: number): HTMLElement | null {
+    const node = materializeCommentNode(record) as HTMLElement | null;
     if (!node) return null;
     stripRenderArtifacts(record.node);
     node.setAttribute('data-xns-floor', String(record.floor));
@@ -100,7 +152,7 @@ function createPreviewRenderer({
     return node;
   }
 
-  function appendNestedRecord(record, container, depth) {
+  function appendNestedRecord(record: CommentRecord, container: Element, depth: number): void {
     const node = prepareCommentRecord(record, depth);
     if (!node) return;
     container.appendChild(node);
@@ -110,7 +162,7 @@ function createPreviewRenderer({
     node.appendChild(replyList);
   }
 
-  function buildPreviewPostNode(parsed, info) {
+  function buildPreviewPostNode(parsed: Document | Element, info: RenderPostInfo): Element | null {
     const postRoot = qs(parsed, '.nsk-post');
     const source = postRoot?.matches?.('.content-item')
       ? postRoot
@@ -126,7 +178,7 @@ function createPreviewRenderer({
     node.setAttribute('data-xns-floor', '0');
     node.setAttribute('data-xns-target-type', 'post');
     node.setAttribute('data-xns-post-id', info.postId);
-    const floorLink = qs(node, '.floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link');
+    const floorLink = qs(node, '.floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link') as HTMLAnchorElement | null;
     const floorUrl = buildPostUrl(info.postId, 1, 0);
     if (floorLink && floorUrl) {
       floorLink.href = floorUrl.href;
@@ -135,7 +187,7 @@ function createPreviewRenderer({
       floorLink.title = '打开原帖 #0';
       floorLink.setAttribute('aria-label', '打开原帖 #0');
     }
-    const postState = getDocState(parsed);
+    const postState = getDocState(parsed as Document);
     const postCommentId = getCommentId(node);
     const counts = postCommentId !== null && postState ? getSsrCommentCounts(postState, postCommentId) : null;
     if (counts) {
@@ -147,9 +199,9 @@ function createPreviewRenderer({
     return node;
   }
 
-  function renderPreviewStatus(section, options = {}) {
+  function renderPreviewStatus(section: Element, options: RenderStatusOptions = {}): HTMLElement {
     const status = formatPageStatus(options);
-    const statusNode = options.statusNode || qs(section, ':scope > .xns-preview-status') || createElement('div', 'xns-preview-status');
+    const statusNode = (options.statusNode || qs(section, ':scope > .xns-preview-status') || createElement('div', 'xns-preview-status')) as HTMLElement;
     if (!statusNode.parentNode) section.insertBefore(statusNode, qs(section, ':scope > .xns-preview-thread'));
     clearElement(statusNode);
     statusNode.className = options.statusNode ? 'xns-modal-toolbar-status xns-preview-status' : 'xns-preview-status';
@@ -166,14 +218,14 @@ function createPreviewRenderer({
       statusNode.classList.add('is-failed');
       statusNode.appendChild(createElement('span', 'xns-page-failed', status.failed));
       if (typeof options.onRetry === 'function') {
-        const retry = createElement('button', 'xns-inline-retry', '重试');
+        const retry = createElement('button', 'xns-inline-retry', '重试') as HTMLButtonElement;
         retry.type = 'button';
         retry.title = '重新读取失败分页';
         retry.setAttribute('aria-label', '重新读取失败分页');
         retry.addEventListener('click', (event) => {
           event.preventDefault();
           event.stopPropagation();
-          options.onRetry();
+          options.onRetry?.();
         });
         statusNode.appendChild(retry);
       }
@@ -190,41 +242,43 @@ function createPreviewRenderer({
     return statusNode;
   }
 
-  function renderPreviewRecords(section, info, records, options = {}) {
+  function renderPreviewRecords(section: Element, info: RenderPostInfo, records: CommentRecord[], options: RenderRecordsOptions = {}): void {
     const heading = qs(section, ':scope > h3');
     const thread = qs(section, ':scope > .xns-preview-thread');
     if (!heading || !thread) return;
+    const host = section as RenderHost;
     heading.textContent = `${records.length} 条回复`;
     qs(section, ':scope > .xns-preview-empty')?.remove();
     if (records.length) {
-      const onNodeMounted = (node, entry) => {
-        const record = entry.record;
+      const onNodeMounted = (node: HTMLElement, entry: CommentVirtualEntry): void => {
+        const record = entry.record as unknown as CommentRecord;
         addRemoteNote(record, info.postId, record.page !== info.page);
         options.onNodeMounted?.(node, record);
       };
-      const onNodeUnmounted = (node, entry) => {
-        if (!entry.record.current) entry.record.node = null;
-        options.onNodeUnmounted?.(node, entry.record);
+      const onNodeUnmounted = (node: HTMLElement, entry: CommentVirtualEntry): void => {
+        const record = entry.record as unknown as CommentRecord;
+        if (!record.current) record.node = null;
+        options.onNodeUnmounted?.(node, record);
       };
-      const renderItem = (entry) => prepareCommentRecord(entry.record, entry.depth);
-      const virtualizerOptions = {
+      const renderItem = (entry: CommentVirtualEntry): HTMLElement | null => prepareCommentRecord(entry.record as unknown as CommentRecord, entry.depth ?? 0);
+      const virtualizerOptions: VirtualizerSetupOptions = {
         getViewport: () => thread.closest('.xns-modal-body') || windowObj,
         renderItem,
         onMount: onNodeMounted,
         onUnmount: onNodeUnmounted,
       };
-      const virtualizer = section.__xnsVirtualizer || createCommentVirtualizer({
+      const virtualizer = host.__xnsVirtualizer || createCommentVirtualizer({
         windowObj,
         documentObj: document,
         createElement,
         estimatedHeight: 135,
         overscanScreens: 2,
-      }).mount(thread, virtualizerOptions);
-      section.__xnsVirtualizer = virtualizer;
+      }).mount(thread as RenderHost, virtualizerOptions);
+      host.__xnsVirtualizer = virtualizer;
       virtualizer.setEntries(flattenReplyTree(records), virtualizerOptions);
     } else {
-      section.__xnsVirtualizer?.destroy();
-      delete section.__xnsVirtualizer;
+      host.__xnsVirtualizer?.destroy();
+      delete host.__xnsVirtualizer;
       clearElement(thread);
       section.appendChild(createElement('p', 'xns-status xns-preview-empty', '没有读取到评论。'));
     }
@@ -247,7 +301,6 @@ const xnsPreviewRenderer = createPreviewRenderer({
   state,
   pageInfo,
   selectors: SELECTORS,
-  maxPage: MAX_PAGE,
   qs,
   qsa,
   createElement,
@@ -263,7 +316,6 @@ const xnsPreviewRenderer = createPreviewRenderer({
   getDirectCommentMenu,
   ensurePreviewMenu,
   stripRenderArtifacts,
-  buildReplyTree,
   flattenReplyTree,
   createCommentVirtualizer,
   addRemoteNote,
@@ -271,11 +323,9 @@ const xnsPreviewRenderer = createPreviewRenderer({
   openPreviewEditor,
 });
 
-function ensurePreviewEditOption(...args) { return xnsPreviewRenderer.ensurePreviewEditOption(...args); }
-function prepareCommentRecord(...args) { return xnsPreviewRenderer.prepareCommentRecord(...args); }
-function appendNestedRecord(...args) { return xnsPreviewRenderer.appendNestedRecord(...args); }
-function buildPreviewPostNode(...args) { return xnsPreviewRenderer.buildPreviewPostNode(...args); }
-function renderPreviewStatus(...args) { return xnsPreviewRenderer.renderPreviewStatus(...args); }
-function renderPreviewRecords(...args) { return xnsPreviewRenderer.renderPreviewRecords(...args); }
+const buildPreviewPostNode = (parsed: Document | Element, info: RenderPostInfo): Element | null => xnsPreviewRenderer.buildPreviewPostNode(parsed, info);
+const prepareCommentRecord = (record: CommentRecord, depth: number): HTMLElement | null => xnsPreviewRenderer.prepareCommentRecord(record, depth);
+const renderPreviewRecords = (section: Element, info: RenderPostInfo, records: CommentRecord[], options?: RenderRecordsOptions): void => xnsPreviewRenderer.renderPreviewRecords(section, info, records, options);
 
 export { buildPreviewPostNode, prepareCommentRecord, renderPreviewRecords };
+export type { RenderPostInfo, RenderRecordsOptions, RenderStatusOptions };
