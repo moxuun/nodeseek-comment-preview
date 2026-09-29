@@ -2,6 +2,7 @@ import { DEFAULT_MODE, MAX_PAGE, state } from './config.js';
 
 // 用户偏好存储；只保存界面设置，不保存帖子内容、登录信息或写操作数据。
 function createPreferences({ windowObj, documentObj, state, storageKey, defaultMode, maxPage }) {
+  /** @type {Readonly<import('../ui/settings-panel').Settings>} */
   const defaults = Object.freeze({
     mode: defaultMode,
     maxPages: maxPage,
@@ -11,6 +12,7 @@ function createPreferences({ windowObj, documentObj, state, storageKey, defaultM
   let values = { ...defaults };
   let ownsDarkClass = false;
 
+  /** @returns {import('../ui/settings-panel').Settings} */
   function normalize(raw = {}) {
     const mode = raw.mode === 'original' ? 'original' : defaultMode;
     const requestedPages = Number(raw.maxPages);

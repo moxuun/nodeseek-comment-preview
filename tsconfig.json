@@ -7,6 +7,7 @@
     "allowJs": true,
     "checkJs": false,
     "strict": true,
+    "jsx": "react-jsx",
     "noEmit": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,

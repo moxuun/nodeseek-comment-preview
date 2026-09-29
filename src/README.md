@@ -2,7 +2,9 @@
 
 源码按功能拆分，使用显式 ES 模块依赖，由 Vite + vite-plugin-monkey 构建到 `outputs/`。
 `src/main.ts` 是唯一脚本入口，`vite.config.ts` 管理 userscript 元数据，版本读取根目录 `package.json`。
-当前仅迁移构建和 TS 入口；业务模块仍为 JS，React、虚拟列表库与 DOMPurify 将分别迁移。
+设置面板由 `src/ui/settings-panel.tsx` 使用 React + TypeScript 渲染，关闭时卸载 React root。
+`src/ui/settings.js` 仅桥接现有状态、偏好保存和油猴菜单；React 不接管 NodeSeek 原生评论节点。
+其余业务模块仍为 JS，虚拟列表库与 DOMPurify 将分别迁移。
 
 | 目录职责 | 说明 |
 | --- | --- |

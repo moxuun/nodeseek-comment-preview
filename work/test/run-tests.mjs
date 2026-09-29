@@ -625,7 +625,39 @@ scenario('设置入口迁移到油猴菜单', async (ctx) => {
     await page.click('.xns-settings-primary');
     await page.evaluate(() => window.__xnsSettingsMenuCallback?.());
     await waitFor(page, () => document.querySelectorAll('.xns-settings-panel select')[1]?.value === '20', 5_000, '设置从油猴菜单重新打开后保持');
+    await page.select('.xns-settings-field:nth-child(1) select', 'original');
+    await page.select('.xns-settings-field:nth-child(3) select', 'compact');
+    await page.select('.xns-settings-field:nth-child(4) select', 'dark');
+    const changed = await page.evaluate(() => ({
+      stored: JSON.parse(localStorage.getItem('xns-comment-preview-settings')),
+      compact: document.documentElement.classList.contains('xns-density-compact'),
+      dark: document.documentElement.classList.contains('dark-layout'),
+      virtual: !!document.querySelector('.comment-container .xns-virtual-list'),
+    }));
+    assert(changed.stored.mode === 'original' && changed.stored.maxPages === 20 && changed.stored.density === 'compact' && changed.stored.theme === 'dark', '四项设置应即时保存');
+    assert(changed.compact && changed.dark && !changed.virtual, '布局、密度、主题应即时应用');
+    await page.click('.xns-settings-actions button:first-child');
+    await waitFor(page, () => !!document.querySelector('.comment-container .xns-virtual-list'), 5_000, '恢复默认布局');
+    const reset = await page.evaluate(() => ({
+      values: [...document.querySelectorAll('.xns-settings-panel select')].map(select => select.value),
+      compact: document.documentElement.classList.contains('xns-density-compact'),
+      dark: document.documentElement.classList.contains('dark-layout'),
+      stored: JSON.parse(localStorage.getItem('xns-comment-preview-settings')),
+    }));
+    assert(JSON.stringify(reset.values) === JSON.stringify(['thread', '50', 'comfortable', 'auto']), '恢复默认必须同步更新受控表单');
+    assert(!reset.compact && !reset.dark && reset.stored.mode === 'thread' && reset.stored.maxPages === 50, '恢复默认应同步保存并移除脚本应用的样式');
     await page.click('.xns-settings-primary');
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await page.evaluate(() => { window.__xnsSettingsMenuCallback(); window.__xnsSettingsMenuCallback(); });
+      await waitFor(page, () => document.activeElement?.matches('.xns-settings-close'), 5_000, '重开后聚焦关闭按钮');
+      assert(await page.$$eval('.xns-settings-overlay', nodes => nodes.length) === 1, '重复打开应卸载旧 React root，仅保留一个面板');
+      await page.keyboard.press('Escape');
+      assert(await page.$('.xns-settings-overlay') === null, 'Esc 应关闭并卸载面板');
+    }
+    await page.evaluate(() => window.__xnsSettingsMenuCallback());
+    await waitFor(page, () => !!document.querySelector('.xns-settings-panel'), 5_000, '遮罩关闭测试');
+    await page.click('.xns-settings-overlay', { offset: { x: 2, y: 2 } });
+    assert(await page.$('.xns-settings-overlay') === null, '点击遮罩应关闭并卸载面板');
   } finally {
     await page.evaluate((raw) => {
       if (raw === null) localStorage.removeItem('xns-comment-preview-settings');
