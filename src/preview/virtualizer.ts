@@ -1,44 +1,100 @@
 // 评论虚拟列表：保留完整评论记录，只把视口附近的楼层物化成 DOM。
 // 它不读取网络，也不改变楼层关系；帖子页和预览弹窗共用同一套窗口模型。
+
+/** 楼层记录或楼层记录中虚拟列表关心的字段。 */
+interface VirtualEntryRecord {
+  postId?: string | number | null;
+  floor?: number | string | null;
+}
+
+/** 虚拟列表条目：`{ record, depth }`，`index` 由 `setEntries` 写入。 */
+interface CommentVirtualEntry extends VirtualEntryRecord {
+  record?: VirtualEntryRecord | null;
+  depth?: number;
+  index?: number;
+}
+
+type VirtualizerViewport = Element | Window;
+
+type RenderItem = (entry: CommentVirtualEntry, index: number) => HTMLElement | null;
+type MountHook = (node: HTMLElement, entry: CommentVirtualEntry, index: number) => void;
+type PinnedHook = (node: HTMLElement, entry: CommentVirtualEntry, index: number) => boolean;
+type GetViewport = () => VirtualizerViewport | null;
+
+/** 挂载了虚拟列表实例的宿主元素。 */
+type VirtualizerHost = HTMLElement & { __xnsVirtualizer?: CommentVirtualizer };
+
+type CreateElement = (tagName: string, className?: string, text?: string) => HTMLElement;
+
+/** 允许注入测试替身的最小 window 契约。 */
+interface VirtualizerWindow extends Window {
+  ResizeObserver?: typeof ResizeObserver;
+}
+
+interface VirtualizerOptions {
+  windowObj: VirtualizerWindow;
+  documentObj: Document;
+  createElement: CreateElement;
+  estimatedHeight?: number;
+  overscanScreens?: number;
+}
+
+interface VirtualizerSetupOptions {
+  renderItem?: RenderItem;
+  onMount?: MountHook;
+  onUnmount?: MountHook;
+  isPinned?: PinnedHook;
+  getViewport?: GetViewport;
+}
+
+interface CommentVirtualizer {
+  mount(host: VirtualizerHost, options?: VirtualizerSetupOptions): CommentVirtualizer;
+  setEntries(entries: CommentVirtualEntry[] | null | undefined, options?: VirtualizerSetupOptions): void;
+  scrollToIndex(index: number, behavior?: ScrollBehavior): HTMLElement | null;
+  scrollToFloor(floor: number | string): HTMLElement | null;
+  destroy(): void;
+}
+
 function createCommentVirtualizer({
   windowObj,
   documentObj,
   createElement,
   estimatedHeight = 150,
   overscanScreens = 2,
-} = {}) {
-  let host = null;
-  let entries = [];
-  let renderItem = null;
-  let onMount = null;
-  let onUnmount = null;
-  let isPinned = null;
-  let getViewport = null;
-  let viewport = null;
+}: VirtualizerOptions): CommentVirtualizer {
+  let host: VirtualizerHost | null = null;
+  let entries: CommentVirtualEntry[] = [];
+  let renderItem: RenderItem | null = null;
+  let onMount: MountHook | null = null;
+  let onUnmount: MountHook | null = null;
+  let isPinned: PinnedHook | null = null;
+  let getViewport: GetViewport | null = null;
+  let viewport: VirtualizerViewport | null = null;
   let frame = 0;
   let destroyed = false;
-  let forceIndex = null;
-  const mounted = new Map();
-  const heights = new Map();
+  let forceIndex: number | null = null;
+  const mounted = new Map<number, HTMLElement>();
+  const heights = new Map<string, number>();
 
-  const keyOf = (entry) => {
+  const keyOf = (entry: CommentVirtualEntry | null | undefined): string => {
     const record = entry?.record || entry;
     return `${record?.postId || ''}:${record?.floor ?? ''}`;
   };
 
-  const isWindowViewport = (value) => !value || value === windowObj || value === windowObj.window;
+  const isWindowViewport = (value: VirtualizerViewport | null | undefined): value is Window =>
+    !value || value === windowObj || value === windowObj.window;
 
-  function getHeight(index) {
+  function getHeight(index: number): number {
     return Math.max(1, Number(heights.get(keyOf(entries[index]))) || Number(estimatedHeight) || 1);
   }
 
-  function sumHeights(start, end) {
+  function sumHeights(start: number, end: number): number {
     let total = 0;
     for (let index = Math.max(0, start); index < Math.min(entries.length, end); index += 1) total += getHeight(index);
     return total;
   }
 
-  function findIndexAtOffset(offset) {
+  function findIndexAtOffset(offset: number): number {
     const target = Math.max(0, Number(offset) || 0);
     let passed = 0;
     for (let index = 0; index < entries.length; index += 1) {
@@ -49,12 +105,12 @@ function createCommentVirtualizer({
     return entries.length;
   }
 
-  function resolveViewport() {
+  function resolveViewport(): VirtualizerViewport {
     const next = typeof getViewport === 'function' ? getViewport() : viewport;
     return next || windowObj;
   }
 
-  function getHostOffset(nextViewport) {
+  function getHostOffset(nextViewport: VirtualizerViewport): number {
     if (isWindowViewport(nextViewport)) {
       return (host?.getBoundingClientRect?.().top || 0) + (Number(windowObj.scrollY) || 0);
     }
@@ -65,7 +121,7 @@ function createCommentVirtualizer({
     return Math.max(0, hostRect.top - viewportRect.top - (Number(nextViewport.clientTop) || 0) + scrollTop);
   }
 
-  function getViewportMetrics() {
+  function getViewportMetrics(): { start: number; end: number; height: number } {
     const nextViewport = resolveViewport();
     if (nextViewport !== viewport) bindViewport(nextViewport);
     if (isWindowViewport(nextViewport)) {
@@ -80,21 +136,21 @@ function createCommentVirtualizer({
     return { start, end: start + height, height };
   }
 
-  function createSpacer(height) {
+  function createSpacer(height: number): HTMLElement {
     const spacer = createElement('li', 'xns-virtual-spacer');
     spacer.setAttribute('aria-hidden', 'true');
     spacer.style.height = `${Math.max(0, Math.round(height))}px`;
     return spacer;
   }
 
-  function defaultPinned(node) {
+  function defaultPinned(node: HTMLElement | null): boolean {
     if (!node) return false;
     if (node.hasAttribute('data-xns-pinned')) return true;
     if (node.querySelector('.xns-preview-composer, [aria-expanded="true"]')) return true;
     return Array.from(node.querySelectorAll('video')).some((video) => !video.paused);
   }
 
-  function scheduleRender() {
+  function scheduleRender(): void {
     if (destroyed || frame) return;
     frame = windowObj.requestAnimationFrame(() => {
       frame = 0;
@@ -102,7 +158,7 @@ function createCommentVirtualizer({
     });
   }
 
-  function measureNode(node) {
+  function measureNode(node: HTMLElement | null): number {
     if (!node?.getBoundingClientRect) return 0;
     const rect = node.getBoundingClientRect();
     let height = rect.height;
@@ -116,14 +172,14 @@ function createCommentVirtualizer({
     return Math.max(1, height);
   }
 
-  const resizeObserver = typeof windowObj.ResizeObserver === 'function'
+  const resizeObserver: ResizeObserver | null = typeof windowObj.ResizeObserver === 'function'
     ? new windowObj.ResizeObserver((observations) => {
       let changed = false;
       observations.forEach((observation) => {
         const index = Array.from(mounted.entries()).find(([, node]) => node === observation.target)?.[0];
         if (index === undefined) return;
         const key = keyOf(entries[index]);
-        const height = measureNode(observation.target);
+        const height = measureNode(observation.target as HTMLElement);
         if (Math.abs((heights.get(key) || 0) - height) > 1) {
           heights.set(key, height);
           changed = true;
@@ -133,7 +189,7 @@ function createCommentVirtualizer({
     })
     : null;
 
-  function unmount(index) {
+  function unmount(index: number): void {
     const node = mounted.get(index);
     if (!node) return;
     resizeObserver?.unobserve(node);
@@ -141,7 +197,7 @@ function createCommentVirtualizer({
     onUnmount?.(node, entries[index], index);
   }
 
-  function renderWindow() {
+  function renderWindow(): void {
     if (destroyed || !host) return;
     if (!entries.length) {
       mounted.forEach((_, index) => unmount(index));
@@ -155,7 +211,7 @@ function createCommentVirtualizer({
     if (start >= entries.length) start = Math.max(0, entries.length - 1);
     end = Math.min(entries.length, Math.max(start + 1, end));
     const pin = typeof isPinned === 'function' ? isPinned : defaultPinned;
-    const desired = new Set();
+    const desired = new Set<number>();
     for (let index = start; index < end; index += 1) desired.add(index);
     // 只额外加入被楼层导航命中的一个目标，不把目标与顶部窗口之间的
     // 所有评论都物化出来。
@@ -163,7 +219,7 @@ function createCommentVirtualizer({
     mounted.forEach((node, index) => { if (pin(node, entries[index], index)) desired.add(index); });
     mounted.forEach((_, index) => { if (!desired.has(index)) unmount(index); });
 
-    const newlyMounted = [];
+    const newlyMounted: Array<{ index: number; node: HTMLElement }> = [];
     Array.from(desired).sort((a, b) => a - b).forEach((index) => {
       if (mounted.has(index)) return;
       const node = renderItem?.(entries[index], index);
@@ -192,7 +248,7 @@ function createCommentVirtualizer({
     });
   }
 
-  function bindViewport(nextViewport) {
+  function bindViewport(nextViewport: VirtualizerViewport): void {
     if (nextViewport === viewport) return;
     if (viewport?.removeEventListener) {
       viewport.removeEventListener('scroll', scheduleRender);
@@ -207,15 +263,17 @@ function createCommentVirtualizer({
     viewport?.addEventListener?.('error', scheduleRender, true);
   }
 
-  function setEntries(nextEntries, options = {}) {
+  function setEntries(nextEntries: CommentVirtualEntry[] | null | undefined, options: VirtualizerSetupOptions = {}): void {
     if (destroyed) return;
     if (typeof options.renderItem === 'function') renderItem = options.renderItem;
     if (typeof options.onMount === 'function') onMount = options.onMount;
     if (typeof options.onUnmount === 'function') onUnmount = options.onUnmount;
     if (typeof options.isPinned === 'function') isPinned = options.isPinned;
     if (typeof options.getViewport === 'function') getViewport = options.getViewport;
-    const normalized = Array.isArray(nextEntries) ? nextEntries.map((entry, index) => ({ ...entry, index })) : [];
-    const nextKeys = new Set(normalized.map(keyOf));
+    const normalized: CommentVirtualEntry[] = Array.isArray(nextEntries)
+      ? nextEntries.map((entry, index) => ({ ...entry, index }))
+      : [];
+    const nextKeys = new Set(normalized.map((entry) => keyOf(entry)));
     mounted.forEach((_, index) => {
       const oldKey = keyOf(entries[index]);
       const nextKey = keyOf(normalized[index]);
@@ -227,7 +285,7 @@ function createCommentVirtualizer({
     renderWindow();
   }
 
-  function mount(nextHost, options = {}) {
+  function mount(nextHost: VirtualizerHost, options: VirtualizerSetupOptions = {}): CommentVirtualizer {
     if (destroyed) return api;
     host = nextHost;
     if (typeof options.renderItem === 'function') renderItem = options.renderItem;
@@ -242,7 +300,7 @@ function createCommentVirtualizer({
     return api;
   }
 
-  function scrollToIndex(index, behavior = 'smooth') {
+  function scrollToIndex(index: number, behavior: ScrollBehavior = 'smooth'): HTMLElement | null {
     if (!host || index < 0 || index >= entries.length) return null;
     forceIndex = index;
     renderWindow();
@@ -259,14 +317,14 @@ function createCommentVirtualizer({
     return mounted.get(index) || null;
   }
 
-  function scrollToFloor(floor) {
+  function scrollToFloor(floor: number | string): HTMLElement | null {
     const index = entries.findIndex((entry) => String(entry.record?.floor) === String(floor));
     // 先同步定位并物化目标，再由调用方负责高亮；否则平滑滚动尚未改变
     // scrollTop 时，下一帧可能把刚物化的目标误判为屏外节点。
     return index < 0 ? null : scrollToIndex(index, 'auto');
   }
 
-  function destroy() {
+  function destroy(): void {
     if (destroyed) return;
     destroyed = true;
     if (frame) windowObj.cancelAnimationFrame(frame);
@@ -284,8 +342,9 @@ function createCommentVirtualizer({
     host?.replaceChildren();
   }
 
-  const api = Object.freeze({ mount, setEntries, scrollToIndex, scrollToFloor, destroy });
+  const api: CommentVirtualizer = Object.freeze({ mount, setEntries, scrollToIndex, scrollToFloor, destroy });
   return api;
 }
 
 export { createCommentVirtualizer };
+export type { CommentVirtualEntry, CommentVirtualizer, VirtualizerSetupOptions, VirtualizerViewport };
