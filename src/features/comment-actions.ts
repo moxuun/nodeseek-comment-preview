@@ -3,7 +3,6 @@ import { createElement, findCommentList, getAuthorName, getCommentId, getFloor, 
 import { pageInfo } from '../core/runtime.js';
 import { postAction } from '../nodeseek/action-api.js';
 import { buildPostUrl, getPostInfo, parseSameOriginUrl } from '../nodeseek/url.js';
-import { syncPreviewReply, refreshPreviewModal } from '../preview/controller.js';
 import type { CommentRecord, SsrCommentCounts } from '../nodeseek/content-parser.js';
 
 /** 评论菜单动作键；引用和回复只负责打开编辑器，不记账。 */
@@ -29,6 +28,10 @@ interface ActionModalHandle {
   body?: HTMLElement | null;
   composer?: HTMLElement | null;
   composerHost?: HTMLElement | null;
+  /** 弹窗自己提供的重渲染入口（楼层动作不再反向 import preview controller）。 */
+  refresh?: () => void;
+  /** 弹窗自己提供的回复同步入口。 */
+  syncReply?: () => Promise<boolean>;
 }
 /** state.post 里 comment-actions 会用到的字段；完整句柄由 post-page controller 写入。 */
 interface ActionPostHandle {
@@ -67,8 +70,6 @@ interface CommentActionsDeps {
   getPostContent: typeof getPostContent;
   findCommentList: typeof findCommentList;
   postAction: typeof postAction;
-  syncPreviewReply: typeof syncPreviewReply;
-  refreshPreviewModal: typeof refreshPreviewModal;
 }
 
 /** `action` 是否属于会记账的互动动作。 */
@@ -96,8 +97,6 @@ function createCommentActions({
   getPostContent,
   findCommentList,
   postAction,
-  syncPreviewReply,
-  refreshPreviewModal,
 }: CommentActionsDeps) {
   const PREVIEW_ACTIONS: readonly PreviewActionDefinition[] = [
     ['like', '点赞', '♡', true],
@@ -367,7 +366,7 @@ function createCommentActions({
         status.textContent = '已保存，正在刷新…';
         textarea.readOnly = true;
         submit.remove();
-        if (actionContext.modal && state.modal === actionContext.modal) refreshPreviewModal?.();
+        if (actionContext.modal && state.modal === actionContext.modal) actionContext.modal.refresh?.();
         else composer.remove();
       } catch (error) {
         status.textContent = `保存失败：${(error as Error).message || '网络错误'}`;
@@ -468,7 +467,7 @@ function createCommentActions({
             if (postModal.composerHost) postModal.composerHost.hidden = true;
           }
           composer.remove();
-          void syncPreviewReply?.(postModal);
+          void postModal?.syncReply?.();
         } else if (state.post) {
           const postHandle = state.post as ActionPostHandle;
           if (postHandle.composer === composer) postHandle.composer = null;
@@ -566,8 +565,6 @@ const xnsCommentActions = createCommentActions({
   getPostContent,
   findCommentList,
   postAction,
-  syncPreviewReply: (...args) => syncPreviewReply(...args),
-  refreshPreviewModal: (...args) => refreshPreviewModal(...args),
 });
 function getDirectCommentMenu(comment?: Element | null): Element | null { return xnsCommentActions.getDirectCommentMenu(comment); }
 function getMenuActionKey(menuItem?: Element | null): PreviewActionKey | '' { return xnsCommentActions.getMenuActionKey(menuItem); }

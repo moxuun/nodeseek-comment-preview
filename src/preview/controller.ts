@@ -62,6 +62,10 @@ interface PreviewModalState {
   totalPages: number | null;
   pageLimit: number;
   refreshScrollCleanup?: (() => void) | null;
+  /** 重新读取并渲染弹窗内容（楼层动作在编辑/删除后调到）。 */
+  refresh: () => void;
+  /** 回复成功后同步新楼层（楼层动作在回复成功后调到）。 */
+  syncReply: () => Promise<boolean>;
 }
 
 /** 渐进渲染回调的载荷：分页进度 + 当前记录。 */
@@ -826,14 +830,18 @@ function createPreviewController({
     overlay.appendChild(dialog);
     documentObj.body.appendChild(overlay);
     documentObj.documentElement.style.overflow = 'hidden';
-    state.modal = {
+    const modalState: PreviewModalState = {
       overlay, dialog, body, composerHost, title, url: fetchUrl, fallbackLink: fallbackLink || null,
       postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup,
       headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null,
       replySyncController: null, replySyncPromise: null, replySyncing: false, pendingReplySync: false,
       toolbarStatus, previewSeed: null, previewRecords: [], loadedPages: 0, failedPages: [],
       challengePages: [], truncated: false, totalPages: null, pageLimit: maxPage,
+      // 弹窗自己持有这两个入口：楼层动作直接用捕获到的那一次弹窗，不再反向 import 控制器。
+      refresh: () => refreshPreviewModal(),
+      syncReply: () => syncPreviewReply(modalState),
     };
+    state.modal = modalState;
     overlay.focus();
     void loadPreviewModal(currentModal(), '正在读取帖子内容…');
   }

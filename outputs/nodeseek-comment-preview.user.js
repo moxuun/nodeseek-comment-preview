@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.84
+// @version      0.5.85
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -318,6 +318,1398 @@
 	});
 	var dynamicSign = (method, url, body) => xnsNodeSeekActionApi.dynamicSign(method, url, body);
 	var postAction = (apiPath, payload, options) => xnsNodeSeekActionApi.postAction(apiPath, payload, options);
+	function isInteractionAction(action) {
+		return action === "like" || action === "chicken" || action === "dislike" || action === "favorite";
+	}
+	function createCommentActions({ windowObj, documentObj, state, pageInfo, qs, qsa, createElement, getPostInfo, buildPostUrl, parseSameOriginUrl, safeCount, safePositiveInt, getFloor, getCommentId, getAuthorName, getPostContent, findCommentList, postAction }) {
+		const PREVIEW_ACTIONS = [
+			[
+				"like",
+				"点赞",
+				"♡",
+				true
+			],
+			[
+				"chicken",
+				"加鸡腿",
+				"🍗",
+				true
+			],
+			[
+				"dislike",
+				"反对",
+				"♧",
+				true
+			],
+			[
+				"favorite",
+				"收藏",
+				"☆",
+				true
+			],
+			[
+				"quote",
+				"引用",
+				"❝",
+				false
+			],
+			[
+				"reply",
+				"回复",
+				"↩",
+				false
+			]
+		];
+		const MENU_ITEMS_SELECTOR = ":scope > .menu-item";
+		const ACTION_FLAGS = {
+			like: "liked",
+			chicken: "chickened",
+			dislike: "disliked",
+			favorite: "collected"
+		};
+		const ACTION_COUNTS = {
+			like: "like",
+			chicken: "chicken",
+			dislike: "dislike",
+			favorite: "favorite"
+		};
+		const interactionStates = new Map();
+		function getInteractionKey(action, comment) {
+			if (action === "favorite") {
+				const modal = state.modal;
+				const postId = safePositiveInt(comment?.getAttribute?.("data-xns-post-id") || "") || safePositiveInt(modal?.postId || "") || safePositiveInt(pageInfo?.postId || "");
+				return postId === null ? null : `post:${postId}`;
+			}
+			const commentId = comment ? getCommentId(comment) : null;
+			return commentId === null ? null : `comment:${commentId}:${action}`;
+		}
+		function getInteractionState(action, comment, counts = null) {
+			const key = getInteractionKey(action, comment);
+			if (!key) return null;
+			let entry = interactionStates.get(key);
+			if (!entry) {
+				entry = {
+					done: Boolean(counts?.[ACTION_FLAGS[action]]),
+					count: safeCount(counts ? counts[ACTION_COUNTS[action]] : null)
+				};
+				interactionStates.set(key, entry);
+			}
+			return entry;
+		}
+		function updateInteractionState(action, comment, patch = {}) {
+			const entry = getInteractionState(action, comment);
+			if (!entry) return null;
+			if (typeof patch.done === "boolean") entry.done = patch.done;
+			const nextCount = safeCount(patch.count);
+			if (nextCount !== null) entry.count = nextCount;
+			return entry;
+		}
+		function applyInteractionState(menuItem, entry) {
+			menuItem.classList.toggle("xns-action-done", Boolean(entry?.done));
+			const countNode = qs(menuItem, ":scope > .xns-action-count") || getMenuCountElement(menuItem);
+			const count = entry && typeof entry.count === "number" && Number.isFinite(entry.count) && entry.count >= 0 ? entry.count : null;
+			if (countNode && count !== null) countNode.textContent = String(count);
+		}
+		function getDirectCommentMenu(comment) {
+			return Array.from(comment?.children || []).find((child) => child.matches?.(".comment-menu, .comment-actions")) || null;
+		}
+		function getMenuActionKey(menuItem) {
+			const node = menuItem;
+			const values = [
+				node?.dataset?.action,
+				node?.dataset?.type,
+				menuItem?.getAttribute?.("title"),
+				menuItem?.getAttribute?.("aria-label"),
+				menuItem?.textContent
+			].filter(Boolean).join(" ").toLowerCase();
+			if (/\b(like|upvote)\b|点赞/.test(values)) return "like";
+			if (/\b(chicken|freelike)\b|鸡腿|投喂/.test(values)) return "chicken";
+			if (/\b(dislike|downvote)\b|反对|踩/.test(values)) return "dislike";
+			if (/\b(favorite|favourite|collection)\b|收藏/.test(values)) return "favorite";
+			if (/\bquote\b|引用/.test(values)) return "quote";
+			if (/\breply\b|回复/.test(values)) return "reply";
+			return "";
+		}
+		function createPreviewMenuItem([key, label, icon, withCount]) {
+			const item = createElement("span", "menu-item");
+			item.dataset.xnsAction = key;
+			item.title = label;
+			item.setAttribute("role", "button");
+			item.tabIndex = 0;
+			const iconNode = createElement("span", "xns-action-icon", icon);
+			iconNode.setAttribute("aria-hidden", "true");
+			item.appendChild(iconNode);
+			if (withCount) item.appendChild(createElement("span", "xns-action-count", "0"));
+			item.appendChild(createElement("span", "xns-action-label", label));
+			item.setAttribute("aria-label", label);
+			return item;
+		}
+		function createPreviewMenu(includeFavorite = true) {
+			const menu = createElement("div", "comment-menu xns-preview-menu");
+			PREVIEW_ACTIONS.filter(([key]) => includeFavorite || key !== "favorite").forEach((action) => menu.appendChild(createPreviewMenuItem(action)));
+			return menu;
+		}
+		function getMenuCountElement(menuItem) {
+			return qsa(menuItem, ":scope > span").find((node) => /^\d+$/.test((node.textContent || "").trim())) || null;
+		}
+		function ensurePreviewMenu(comment, options = {}) {
+			const includeFavorite = options.includeFavorite !== false;
+			let menu = getDirectCommentMenu(comment);
+			if (!menu) {
+				menu = createPreviewMenu(includeFavorite);
+				comment.appendChild(menu);
+			}
+			menu.classList.add("comment-menu", "xns-preview-menu");
+			let menuItems = qsa(menu, MENU_ITEMS_SELECTOR);
+			if (!includeFavorite) menuItems = menuItems.filter((item) => {
+				if (getMenuActionKey(item) === "favorite") {
+					item.remove();
+					return false;
+				}
+				return true;
+			});
+			const existingActions = new Set(menuItems.map(getMenuActionKey).filter(Boolean));
+			PREVIEW_ACTIONS.filter(([key]) => includeFavorite || key !== "favorite").filter(([key]) => !existingActions.has(key)).forEach((action) => {
+				const item = createPreviewMenuItem(action);
+				menu.appendChild(item);
+				menuItems.push(item);
+			});
+			menuItems.forEach((item) => {
+				const action = getMenuActionKey(item);
+				if (action) {
+					item.dataset.xnsAction = action;
+					const actionMeta = PREVIEW_ACTIONS.find(([key]) => key === action);
+					if (!item.hasAttribute("aria-label")) item.setAttribute("aria-label", actionMeta?.[1] || action);
+				}
+				if (!item.hasAttribute("role")) item.setAttribute("role", "button");
+				if (!item.hasAttribute("tabindex")) item.tabIndex = 0;
+			});
+			const counts = options.counts || null;
+			menuItems.forEach((item) => {
+				const action = getMenuActionKey(item);
+				if (!action || !isInteractionAction(action)) return;
+				applyInteractionState(item, getInteractionState(action, comment, counts));
+			});
+			return menu;
+		}
+		function getDisplayFloor(comment) {
+			if ((comment?.getAttribute("data-xns-floor") || comment?.getAttribute("id") || "") === "0") return 0;
+			return getFloor(comment);
+		}
+		function getActionTargetId(comment) {
+			const modal = state.modal;
+			const commentId = getCommentId(comment);
+			if (commentId !== null) return commentId;
+			if (comment?.getAttribute("data-xns-target-type") === "post") return safePositiveInt(comment.getAttribute("data-xns-post-id") || "") || safePositiveInt(modal?.postId || "");
+			return null;
+		}
+		function getPageActionContext() {
+			return {
+				modal: null,
+				postId: (pageInfo || getPostInfo(windowObj.location.href))?.postId || "",
+				url: parseSameOriginUrl(windowObj.location.href)
+			};
+		}
+		function getActionContext(menuItem) {
+			const modal = menuItem?.closest?.(".xns-overlay") ? state.modal : null;
+			if (modal) return {
+				modal,
+				postId: modal.postId,
+				url: modal.url
+			};
+			return getPageActionContext();
+		}
+		function setActionState(menuItem, text, failed = false) {
+			menuItem.classList.toggle("xns-action-failed", failed);
+			let stateNode = qs(menuItem, ":scope > .xns-action-state");
+			if (!stateNode) {
+				stateNode = createElement("span", "xns-action-state");
+				menuItem.appendChild(stateNode);
+			}
+			stateNode.textContent = text;
+		}
+		function getPreviewCommentText(comment) {
+			const content = getPostContent(comment);
+			if (!content) return "";
+			const copy = content.cloneNode(true);
+			qsa(copy, ".xns-remote-floor-link, .floor-link-wrapper").forEach((node) => node.remove());
+			return (copy.innerText || copy.textContent || "").trim().slice(0, 12e3);
+		}
+		function getPreviewSourceUrl(comment, context = null) {
+			const modal = state.modal;
+			const contextUrl = context?.url?.href || modal?.url?.href || windowObj.location.href;
+			if (!comment) return contextUrl;
+			const contextInfo = getPostInfo(contextUrl);
+			const modalInfo = context?.postId ? {
+				postId: String(context.postId),
+				page: contextInfo?.page || 1
+			} : contextInfo || (modal?.postId ? {
+				postId: modal.postId,
+				page: 1
+			} : null);
+			if (!modalInfo) return contextUrl;
+			const page = safePositiveInt(comment?.getAttribute("data-xns-source-page")) || modalInfo.page;
+			const floor = getDisplayFloor(comment);
+			return buildPostUrl(modalInfo.postId, page, floor)?.href || contextUrl;
+		}
+		function getDirectComposer(comment) {
+			return Array.from(comment?.children || []).find((child) => child.matches?.(":scope.xns-preview-composer")) || null;
+		}
+		function openPreviewEditor(comment, record, context = null) {
+			if (!comment || !record) return;
+			const commentId = getCommentId(comment);
+			if (commentId === null) return;
+			const actionContext = context || {
+				modal: state.modal,
+				postId: pageInfo?.postId || "",
+				url: state.modal?.url
+			};
+			getDirectComposer(comment)?.remove();
+			const composer = createElement("section", "xns-preview-composer xns-preview-editor");
+			composer.appendChild(createElement("h3", "xns-preview-composer-title", `编辑 #${getDisplayFloor(comment)} · ${getAuthorName(comment)}`));
+			const textarea = documentObj.createElement("textarea");
+			textarea.setAttribute("aria-label", "编辑评论内容");
+			textarea.value = typeof record.markdown === "string" ? record.markdown : "";
+			composer.appendChild(textarea);
+			const actions = createElement("div", "xns-preview-composer-actions");
+			const submit = createElement("button", "", "保存修改");
+			submit.type = "button";
+			const cancel = createElement("button", "", "取消");
+			cancel.type = "button";
+			const status = createElement("span", "xns-preview-composer-status");
+			actions.append(submit, cancel, status);
+			composer.appendChild(actions);
+			const menu = qs(comment, ":scope > .xns-preview-menu") || getDirectCommentMenu(comment);
+			if (menu) menu.insertAdjacentElement("afterend", composer);
+			else comment.appendChild(composer);
+			textarea.focus();
+			composer.scrollIntoView({
+				behavior: "smooth",
+				block: "nearest"
+			});
+			cancel.addEventListener("click", () => composer.remove());
+			submit.addEventListener("click", async () => {
+				const content = textarea.value.trim();
+				if (!content) {
+					status.textContent = "请输入内容。";
+					textarea.focus();
+					return;
+				}
+				if (content === (record.markdown || "").trim()) {
+					status.textContent = "内容没有变化。";
+					return;
+				}
+				submit.disabled = true;
+				status.textContent = "正在保存…";
+				try {
+					await postAction("/api/content/edit-comment", {
+						content,
+						commentId
+					}, { context: actionContext });
+					record.markdown = content;
+					status.textContent = "已保存，正在刷新…";
+					textarea.readOnly = true;
+					submit.remove();
+					if (actionContext.modal && state.modal === actionContext.modal) actionContext.modal.refresh?.();
+					else composer.remove();
+				} catch (error) {
+					status.textContent = `保存失败：${error.message || "网络错误"}`;
+					submit.disabled = false;
+				}
+			});
+		}
+		function openPreviewComposer(action, comment, context = null) {
+			const modal = context?.modal || state.modal || null;
+			const actionContext = context || {
+				modal,
+				postId: modal?.postId || pageInfo?.postId || "",
+				url: modal?.url || parseSameOriginUrl(windowObj.location.href)
+			};
+			const isPostReply = !comment || action === "post-reply";
+			const host = isPostReply ? modal?.composerHost || modal?.body || findCommentList() : comment || findCommentList();
+			if (!host) return;
+			const post = state.post;
+			(isPostReply ? modal?.composer || post?.composer : getDirectComposer(comment))?.remove();
+			const floor = isPostReply ? null : getDisplayFloor(comment);
+			const author = isPostReply ? "" : getAuthorName(comment);
+			const isReply = action === "reply" && !isPostReply;
+			const composer = createElement("section", "xns-preview-composer");
+			const floorLabel = floor === null ? "" : floor;
+			const composerTitle = isPostReply ? "回复帖子" : `${isReply ? "回复" : "引用"} #${floorLabel} · ${author}`;
+			composer.appendChild(createElement("h3", "xns-preview-composer-title", composerTitle));
+			const textarea = documentObj.createElement("textarea");
+			textarea.setAttribute("aria-label", isPostReply || isReply ? "回复内容" : "引用内容");
+			const sourceUrl = isPostReply ? actionContext.url?.href || windowObj.location.href : getPreviewSourceUrl(comment, actionContext);
+			if (isPostReply) {
+				textarea.placeholder = "输入对帖子的回复内容…";
+				textarea.value = "";
+			} else {
+				const replyToken = `@${author} [#${floorLabel}](${sourceUrl})`;
+				const quoted = getPreviewCommentText(comment).split(/\r?\n/).slice(0, 80).map((line) => `> ${line}`).join("\n");
+				textarea.value = isReply ? `${replyToken} ` : `> ${replyToken}\n${quoted}\n\n`;
+			}
+			composer.appendChild(textarea);
+			const actions = createElement("div", "xns-preview-composer-actions");
+			const submit = createElement("button", "", "发送回复");
+			submit.type = "button";
+			const original = createElement("a", "", "打开原帖回复");
+			original.href = getPreviewSourceUrl(comment, actionContext);
+			original.target = "_blank";
+			original.rel = "noopener noreferrer";
+			const cancel = createElement("button", "", "取消");
+			cancel.type = "button";
+			const status = createElement("span", "xns-preview-composer-status");
+			actions.append(submit, original, cancel, status);
+			composer.appendChild(actions);
+			if (isPostReply && modal?.composerHost) {
+				modal.composerHost.hidden = false;
+				modal.composerHost.classList.add("is-open");
+				modal.composerHost.appendChild(composer);
+				modal.composer = composer;
+			} else {
+				const menu = qs(comment, ".xns-preview-menu");
+				if (menu) menu.insertAdjacentElement("afterend", composer);
+				else host.appendChild(composer);
+				const postHandle = state.post;
+				if (isPostReply && postHandle) postHandle.composer = composer;
+			}
+			textarea.focus();
+			if (!isPostReply || !modal?.composerHost) composer.scrollIntoView({
+				behavior: "smooth",
+				block: "nearest"
+			});
+			cancel.addEventListener("click", () => {
+				composer.remove();
+				if (modal?.composer === composer) {
+					modal.composer = null;
+					modal.composerHost?.classList.remove("is-open");
+					if (modal.composerHost) modal.composerHost.hidden = true;
+				}
+				const postHandle = state.post;
+				if (!modal && postHandle?.composer === composer) postHandle.composer = null;
+			});
+			submit.addEventListener("click", async () => {
+				const content = textarea.value.trim();
+				if (!content) {
+					status.textContent = "请输入内容。";
+					textarea.focus();
+					return;
+				}
+				submit.disabled = true;
+				status.textContent = "正在发送…";
+				try {
+					await postAction("/api/content/new-comment", {
+						content,
+						mode: "new-comment",
+						postId: Number(actionContext.postId)
+					}, { context: actionContext });
+					status.textContent = "回复已发送，正在更新楼中楼…";
+					textarea.readOnly = true;
+					submit.remove();
+					if (actionContext.modal && state.modal === actionContext.modal) {
+						const postModal = actionContext.modal;
+						if (postModal.composer === composer) {
+							postModal.composer = null;
+							postModal.composerHost?.classList.remove("is-open");
+							if (postModal.composerHost) postModal.composerHost.hidden = true;
+						}
+						composer.remove();
+						postModal?.syncReply?.();
+					} else if (state.post) {
+						const postHandle = state.post;
+						if (postHandle.composer === composer) postHandle.composer = null;
+						composer.remove();
+						await postHandle.reloadPages?.({ refreshCurrentPage: true });
+					}
+				} catch (error) {
+					status.textContent = `发送失败：${error.message || "网络错误"}`;
+					submit.disabled = false;
+				}
+			});
+		}
+		async function runPreviewAction(action, menuItem, comment, context = null) {
+			const actionContext = context || getActionContext(menuItem);
+			if (action === "quote" || action === "reply") {
+				openPreviewComposer(action, comment, actionContext);
+				return;
+			}
+			const postId = safePositiveInt(actionContext?.postId || "");
+			const targetId = getActionTargetId(comment);
+			if (action !== "favorite" && targetId === null || action === "favorite" && postId === null) {
+				setActionState(menuItem, action === "favorite" ? "缺少帖子ID" : "缺少目标ID", true);
+				return;
+			}
+			const stateEntry = getInteractionState(action, comment);
+			if (action !== "favorite" && stateEntry?.done) {
+				setActionState(menuItem, "已操作");
+				return;
+			}
+			if (menuItem.classList.contains("xns-action-pending")) return;
+			if (action === "chicken" && !windowObj.confirm("确认给这条评论加鸡腿？NodeSeek 可能会消耗鸡腿。")) return;
+			if (action === "dislike" && !windowObj.confirm("确认反对这条评论？NodeSeek 可能会消耗两个鸡腿。")) return;
+			const isFavoriteRemoval = action === "favorite" && Boolean(stateEntry?.done);
+			menuItem.classList.add("xns-action-pending");
+			menuItem.classList.remove("xns-action-failed");
+			setActionState(menuItem, "处理中…");
+			try {
+				let response = null;
+				if (action === "like") response = await postAction("/api/statistics/upvote", {
+					commentId: targetId,
+					action: "add"
+				}, { context: actionContext });
+				else if (action === "chicken") response = await postAction("/api/statistics/like", {
+					commentId: targetId,
+					action: "add"
+				}, { context: actionContext });
+				else if (action === "dislike") response = await postAction("/api/statistics/dislike", {
+					commentId: targetId,
+					action: "add"
+				}, { context: actionContext });
+				else if (action === "favorite") response = await postAction("/api/statistics/collection", {
+					postId,
+					action: isFavoriteRemoval ? "remove" : "add"
+				}, { context: actionContext });
+				const payload = response;
+				const previousCount = stateEntry?.count ?? null;
+				const fallbackCount = Number.isFinite(previousCount) && previousCount !== null ? previousCount + (isFavoriteRemoval ? -1 : 1) : null;
+				const responseCount = safeCount(action === "favorite" ? payload?.postCollectionCount : payload?.current);
+				updateInteractionState(action, comment, {
+					done: !isFavoriteRemoval,
+					count: responseCount === null ? fallbackCount : responseCount
+				});
+				applyInteractionState(menuItem, getInteractionState(action, comment));
+				setActionState(menuItem, "✓");
+				windowObj.setTimeout(() => {
+					if (menuItem.isConnected && !menuItem.classList.contains("xns-action-failed")) qs(menuItem, ":scope > .xns-action-state")?.remove();
+				}, 1800);
+			} catch (error) {
+				setActionState(menuItem, `失败：${error.message || "操作未完成"}`, true);
+			} finally {
+				menuItem.classList.remove("xns-action-pending");
+			}
+		}
+		return Object.freeze({
+			getDirectCommentMenu,
+			getMenuActionKey,
+			ensurePreviewMenu,
+			getActionContext,
+			openPreviewComposer,
+			openPreviewEditor,
+			runPreviewAction
+		});
+	}
+	var xnsCommentActions = createCommentActions({
+		windowObj: window,
+		documentObj: document,
+		state,
+		pageInfo,
+		qs,
+		qsa,
+		createElement,
+		getPostInfo,
+		buildPostUrl,
+		parseSameOriginUrl,
+		safeCount,
+		safePositiveInt,
+		getFloor,
+		getCommentId,
+		getAuthorName,
+		getPostContent,
+		findCommentList,
+		postAction
+	});
+	function getDirectCommentMenu(comment) {
+		return xnsCommentActions.getDirectCommentMenu(comment);
+	}
+	function getMenuActionKey(menuItem) {
+		return xnsCommentActions.getMenuActionKey(menuItem);
+	}
+	function ensurePreviewMenu(comment, options = {}) {
+		return xnsCommentActions.ensurePreviewMenu(comment, options);
+	}
+	function getActionContext(menuItem) {
+		return xnsCommentActions.getActionContext(menuItem);
+	}
+	function openPreviewComposer(action, comment, context) {
+		return xnsCommentActions.openPreviewComposer(action, comment, context);
+	}
+	function openPreviewEditor(comment, record, context) {
+		return xnsCommentActions.openPreviewEditor(comment, record, context);
+	}
+	function runPreviewAction(action, menuItem, comment, context) {
+		return xnsCommentActions.runPreviewAction(action, menuItem, comment, context);
+	}
+	function createPreviewLightbox({ documentObj, state, qsa, createElement, getSafeUrlAttribute }) {
+		function getPreviewImageSource(image) {
+			const link = image?.closest("a[href]");
+			const candidates = [
+				image?.currentSrc,
+				image?.getAttribute("src"),
+				image?.getAttribute("data-src"),
+				image?.getAttribute("data-original"),
+				link?.getAttribute("href")
+			];
+			for (const candidate of candidates) {
+				const safe = getSafeUrlAttribute("src", candidate);
+				if (safe) return safe;
+			}
+			return null;
+		}
+		function closeImageLightbox() {
+			const lightbox = state.lightbox;
+			if (!lightbox) return;
+			lightbox.cleanup?.();
+			lightbox.overlay?.remove();
+			state.lightbox = null;
+		}
+		function openImageLightbox(image) {
+			const source = getPreviewImageSource(image);
+			if (!source) return;
+			closeImageLightbox();
+			const overlay = createElement("div", "xns-lightbox");
+			overlay.tabIndex = -1;
+			overlay.setAttribute("role", "dialog");
+			overlay.setAttribute("aria-modal", "true");
+			overlay.setAttribute("aria-label", "图片预览");
+			const stage = createElement("div", "xns-lightbox-stage");
+			const preview = documentObj.createElement("img");
+			preview.className = "xns-lightbox-image";
+			preview.src = source;
+			preview.alt = image.getAttribute("alt") || "图片预览";
+			preview.setAttribute("referrerpolicy", "origin");
+			preview.setAttribute("draggable", "false");
+			const close = createElement("button", "xns-lightbox-close", "×");
+			close.type = "button";
+			close.setAttribute("aria-label", "关闭图片预览");
+			const original = createElement("a", "xns-lightbox-open", "打开原图");
+			original.href = source;
+			original.target = "_blank";
+			original.rel = "noopener noreferrer";
+			stage.appendChild(preview);
+			overlay.append(stage, close, original);
+			let scale = 1;
+			let offsetX = 0;
+			let offsetY = 0;
+			let dragging = false;
+			let pointerId = null;
+			let startX = 0;
+			let startY = 0;
+			let startOffsetX = 0;
+			let startOffsetY = 0;
+			const render = () => {
+				preview.style.transform = `translate3d(${offsetX}px, ${offsetY}px, 0) scale(${scale})`;
+			};
+			const onWheel = (event) => {
+				event.preventDefault();
+				scale = Math.min(4, Math.max(.5, scale * (event.deltaY < 0 ? 1.12 : .89)));
+				if (scale <= 1) {
+					scale = 1;
+					offsetX = 0;
+					offsetY = 0;
+				}
+				render();
+			};
+			const onPointerDown = (event) => {
+				if (event.button !== 0) return;
+				dragging = true;
+				pointerId = event.pointerId;
+				startX = event.clientX;
+				startY = event.clientY;
+				startOffsetX = offsetX;
+				startOffsetY = offsetY;
+				stage.classList.add("xns-dragging");
+				stage.setPointerCapture?.(event.pointerId);
+				event.preventDefault();
+			};
+			const onPointerMove = (event) => {
+				if (!dragging || event.pointerId !== pointerId) return;
+				offsetX = startOffsetX + event.clientX - startX;
+				offsetY = startOffsetY + event.clientY - startY;
+				render();
+			};
+			const onPointerUp = (event) => {
+				if (event.pointerId !== pointerId) return;
+				dragging = false;
+				pointerId = null;
+				stage.classList.remove("xns-dragging");
+				stage.releasePointerCapture?.(event.pointerId);
+			};
+			const cleanup = () => {
+				stage.removeEventListener("wheel", onWheel);
+				stage.removeEventListener("pointerdown", onPointerDown);
+				stage.removeEventListener("pointermove", onPointerMove);
+				stage.removeEventListener("pointerup", onPointerUp);
+				stage.removeEventListener("pointercancel", onPointerUp);
+			};
+			stage.addEventListener("wheel", onWheel, { passive: false });
+			stage.addEventListener("pointerdown", onPointerDown);
+			stage.addEventListener("pointermove", onPointerMove);
+			stage.addEventListener("pointerup", onPointerUp);
+			stage.addEventListener("pointercancel", onPointerUp);
+			stage.addEventListener("click", (event) => {
+				if (event.target === stage) closeImageLightbox();
+			});
+			preview.addEventListener("click", (event) => event.stopPropagation());
+			close.addEventListener("click", closeImageLightbox);
+			overlay.addEventListener("click", (event) => {
+				if (event.target === overlay) closeImageLightbox();
+			});
+			documentObj.body.appendChild(overlay);
+			state.lightbox = {
+				overlay,
+				cleanup
+			};
+			render();
+			overlay.focus();
+		}
+		function installPreviewImageFallback(root, options = {}) {
+			const selector = Boolean(root?.matches(".xns-preview-content") || root?.closest(".xns-preview-content")) ? "img" : ".xns-preview-content img";
+			const images = [];
+			if (root && root.matches(".xns-preview-content img")) images.push(root);
+			const owner = root?.matches(".content-item") ? root : null;
+			images.push(...qsa(root, selector));
+			images.filter((image) => {
+				if (owner && image.closest(".content-item") !== owner) return false;
+				if (options.skipRemote && (image.matches("[data-xns-remote]") || image.closest("[data-xns-remote]"))) return false;
+				return true;
+			}).forEach((image) => {
+				const deferredSource = image.getAttribute("data-xns-deferred-src");
+				if (deferredSource) {
+					if (!image.getAttribute("src")) image.setAttribute("src", deferredSource);
+					image.removeAttribute("data-xns-deferred-src");
+				}
+				if (image.dataset.xnsImageBound === "true") return;
+				image.dataset.xnsImageBound = "true";
+				image.setAttribute("tabindex", "0");
+				image.setAttribute("role", "button");
+				image.setAttribute("title", "点击放大图片");
+				const open = (event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					openImageLightbox(image);
+				};
+				image.addEventListener("click", open);
+				image.addEventListener("keydown", (event) => {
+					if (event.key === "Enter" || event.key === " ") open(event);
+				});
+				image.addEventListener("error", () => {
+					if (image.nextElementSibling?.matches(".xns-image-error")) return;
+					const message = createElement("span", "xns-image-error", "图片加载失败：图片站拒绝了当前嵌入来源。仍可点击“打开原图”尝试查看。");
+					image.insertAdjacentElement("afterend", message);
+				}, { once: true });
+			});
+		}
+		return Object.freeze({
+			closeImageLightbox,
+			openImageLightbox,
+			installPreviewImageFallback
+		});
+	}
+	var xnsPreviewLightbox = createPreviewLightbox({
+		documentObj: document,
+		state,
+		qsa,
+		createElement,
+		getSafeUrlAttribute
+	});
+	var closeImageLightbox = () => xnsPreviewLightbox.closeImageLightbox();
+	var installPreviewImageFallback = (root, options) => xnsPreviewLightbox.installPreviewImageFallback(root, options);
+	function createCommentVirtualizer({ windowObj, documentObj, createElement, estimatedHeight = 150, overscanScreens = 2 }) {
+		let host = null;
+		let entries = [];
+		let renderItem = null;
+		let onMount = null;
+		let onUnmount = null;
+		let onUpdate = null;
+		let isPinned = null;
+		let getViewport = null;
+		let viewport = null;
+		let frame = 0;
+		let destroyed = false;
+		let forceIndex = null;
+		const mounted = new Map();
+		const heights = new Map();
+		const keyOf = (entry) => {
+			const record = entry?.record || entry;
+			return `${record?.postId || ""}:${record?.floor ?? ""}`;
+		};
+		const isWindowViewport = (value) => !value || value === windowObj || value === windowObj.window;
+		function getHeight(index) {
+			return Math.max(1, Number(heights.get(keyOf(entries[index]))) || Number(estimatedHeight) || 1);
+		}
+		function sumHeights(start, end) {
+			let total = 0;
+			for (let index = Math.max(0, start); index < Math.min(entries.length, end); index += 1) total += getHeight(index);
+			return total;
+		}
+		function findIndexAtOffset(offset) {
+			const target = Math.max(0, Number(offset) || 0);
+			let passed = 0;
+			for (let index = 0; index < entries.length; index += 1) {
+				const next = passed + getHeight(index);
+				if (target < next) return index;
+				passed = next;
+			}
+			return entries.length;
+		}
+		function resolveViewport() {
+			return (typeof getViewport === "function" ? getViewport() : viewport) || windowObj;
+		}
+		function getHostOffset(nextViewport) {
+			if (isWindowViewport(nextViewport)) return (host?.getBoundingClientRect?.().top || 0) + (Number(windowObj.scrollY) || 0);
+			const scrollTop = Math.max(0, Number(nextViewport.scrollTop) || 0);
+			const hostRect = host?.getBoundingClientRect?.();
+			const viewportRect = nextViewport.getBoundingClientRect?.();
+			if (!hostRect || !viewportRect) return Math.max(0, Number(host?.offsetTop) || 0);
+			return Math.max(0, hostRect.top - viewportRect.top - (Number(nextViewport.clientTop) || 0) + scrollTop);
+		}
+		function getViewportMetrics() {
+			const nextViewport = resolveViewport();
+			if (nextViewport !== viewport) bindViewport(nextViewport);
+			if (isWindowViewport(nextViewport)) {
+				const scrollTop = Number(windowObj.scrollY) || 0;
+				const hostTop = getHostOffset(nextViewport);
+				const height = Math.max(1, Number(windowObj.innerHeight) || 800);
+				return {
+					start: Math.max(0, scrollTop - hostTop),
+					end: Math.max(0, scrollTop - hostTop) + height,
+					height
+				};
+			}
+			const height = Math.max(1, Number(nextViewport.clientHeight) || 800);
+			const scrollTop = Math.max(0, Number(nextViewport.scrollTop) || 0);
+			const start = Math.max(0, scrollTop - getHostOffset(nextViewport));
+			return {
+				start,
+				end: start + height,
+				height
+			};
+		}
+		function createSpacer(height) {
+			const spacer = createElement("li", "xns-virtual-spacer");
+			spacer.setAttribute("aria-hidden", "true");
+			spacer.style.height = `${Math.max(0, Math.round(height))}px`;
+			return spacer;
+		}
+		function defaultPinned(node) {
+			if (!node) return false;
+			if (node.hasAttribute("data-xns-pinned")) return true;
+			if (node.querySelector(".xns-preview-composer, [aria-expanded=\"true\"]")) return true;
+			return Array.from(node.querySelectorAll("video")).some((video) => !video.paused);
+		}
+		function scheduleRender() {
+			if (destroyed || frame) return;
+			frame = windowObj.requestAnimationFrame(() => {
+				frame = 0;
+				renderWindow();
+			});
+		}
+		function measureNode(node) {
+			if (!node?.getBoundingClientRect) return 0;
+			let height = node.getBoundingClientRect().height;
+			try {
+				const style = windowObj.getComputedStyle(node);
+				height += Number.parseFloat(style.marginTop) || 0;
+				height += Number.parseFloat(style.marginBottom) || 0;
+			} catch {}
+			return Math.max(1, height);
+		}
+		const resizeObserver = typeof windowObj.ResizeObserver === "function" ? new windowObj.ResizeObserver((observations) => {
+			let changed = false;
+			observations.forEach((observation) => {
+				const index = Array.from(mounted.entries()).find(([, node]) => node === observation.target)?.[0];
+				if (index === void 0) return;
+				const key = keyOf(entries[index]);
+				const height = measureNode(observation.target);
+				if (Math.abs((heights.get(key) || 0) - height) > 1) {
+					heights.set(key, height);
+					changed = true;
+				}
+			});
+			if (changed) scheduleRender();
+		}) : null;
+		function unmount(index) {
+			const node = mounted.get(index);
+			if (!node) return;
+			resizeObserver?.unobserve(node);
+			mounted.delete(index);
+			onUnmount?.(node, entries[index], index);
+		}
+		function renderWindow() {
+			if (destroyed || !host) return;
+			if (!entries.length) {
+				mounted.forEach((_, index) => unmount(index));
+				host.replaceChildren();
+				return;
+			}
+			const metrics = getViewportMetrics();
+			const overscan = Math.max(metrics.height, metrics.height * Math.max(0, Number(overscanScreens) || 0));
+			let start = findIndexAtOffset(metrics.start - overscan);
+			let end = findIndexAtOffset(metrics.end + overscan) + 1;
+			if (start >= entries.length) start = Math.max(0, entries.length - 1);
+			end = Math.min(entries.length, Math.max(start + 1, end));
+			const pin = typeof isPinned === "function" ? isPinned : defaultPinned;
+			const desired = new Set();
+			for (let index = start; index < end; index += 1) desired.add(index);
+			if (forceIndex !== null && forceIndex >= 0 && forceIndex < entries.length) desired.add(forceIndex);
+			mounted.forEach((node, index) => {
+				if (pin(node, entries[index], index)) desired.add(index);
+			});
+			mounted.forEach((_, index) => {
+				if (!desired.has(index)) unmount(index);
+			});
+			const newlyMounted = [];
+			Array.from(desired).sort((a, b) => a - b).forEach((index) => {
+				if (mounted.has(index)) return;
+				const node = renderItem?.(entries[index], index);
+				if (!node) return;
+				mounted.set(index, node);
+				newlyMounted.push({
+					index,
+					node
+				});
+			});
+			const fragment = documentObj.createDocumentFragment();
+			let cursor = 0;
+			Array.from(desired).sort((a, b) => a - b).forEach((index) => {
+				if (index > cursor) fragment.appendChild(createSpacer(sumHeights(cursor, index)));
+				const node = mounted.get(index);
+				if (node) fragment.appendChild(node);
+				cursor = index + 1;
+			});
+			if (cursor < entries.length) fragment.appendChild(createSpacer(sumHeights(cursor, entries.length)));
+			host.replaceChildren(fragment);
+			newlyMounted.forEach(({ index, node }) => {
+				resizeObserver?.observe(node);
+				onMount?.(node, entries[index], index);
+				const height = measureNode(node);
+				const key = keyOf(entries[index]);
+				if (Math.abs((heights.get(key) || 0) - height) > 1) heights.set(key, height);
+			});
+		}
+		function bindViewport(nextViewport) {
+			if (nextViewport === viewport) return;
+			if (viewport?.removeEventListener) {
+				viewport.removeEventListener("scroll", scheduleRender);
+				viewport.removeEventListener("load", scheduleRender, true);
+				viewport.removeEventListener("error", scheduleRender, true);
+			}
+			viewport = nextViewport || windowObj;
+			viewport?.addEventListener?.("scroll", scheduleRender, { passive: true });
+			viewport?.addEventListener?.("load", scheduleRender, true);
+			viewport?.addEventListener?.("error", scheduleRender, true);
+		}
+		function setEntries(nextEntries, options = {}) {
+			if (destroyed) return;
+			if (typeof options.renderItem === "function") renderItem = options.renderItem;
+			if (typeof options.onMount === "function") onMount = options.onMount;
+			if (typeof options.onUnmount === "function") onUnmount = options.onUnmount;
+			if (typeof options.onUpdate === "function") onUpdate = options.onUpdate;
+			if (typeof options.isPinned === "function") isPinned = options.isPinned;
+			if (typeof options.getViewport === "function") getViewport = options.getViewport;
+			const normalized = Array.isArray(nextEntries) ? nextEntries.map((entry, index) => ({
+				...entry,
+				index
+			})) : [];
+			const nextKeys = new Set(normalized.map((entry) => keyOf(entry)));
+			mounted.forEach((_, index) => {
+				const oldKey = keyOf(entries[index]);
+				const nextKey = keyOf(normalized[index]);
+				if (!nextKeys.has(oldKey) || oldKey !== nextKey) unmount(index);
+			});
+			entries = normalized;
+			mounted.forEach((node, index) => onUpdate?.(node, entries[index], index));
+			host?.classList.add("xns-virtual-list");
+			host?.setAttribute("data-xns-virtual-count", String(entries.length));
+			renderWindow();
+		}
+		function mount(nextHost, options = {}) {
+			if (destroyed) return api;
+			host = nextHost;
+			if (typeof options.renderItem === "function") renderItem = options.renderItem;
+			if (typeof options.onMount === "function") onMount = options.onMount;
+			if (typeof options.onUnmount === "function") onUnmount = options.onUnmount;
+			if (typeof options.onUpdate === "function") onUpdate = options.onUpdate;
+			if (typeof options.isPinned === "function") isPinned = options.isPinned;
+			if (typeof options.getViewport === "function") getViewport = options.getViewport;
+			host?.classList.add("xns-virtual-list");
+			host?.setAttribute("data-xns-virtual-count", String(entries.length));
+			if (host) host.__xnsVirtualizer = api;
+			renderWindow();
+			return api;
+		}
+		function scrollToIndex(index, behavior = "smooth") {
+			if (!host || index < 0 || index >= entries.length) return null;
+			forceIndex = index;
+			renderWindow();
+			const nextViewport = resolveViewport();
+			const offset = sumHeights(0, index);
+			if (isWindowViewport(nextViewport)) {
+				const top = getHostOffset(nextViewport) + offset;
+				windowObj.scrollTo?.({
+					top,
+					behavior
+				});
+			} else nextViewport.scrollTo?.({
+				top: getHostOffset(nextViewport) + offset,
+				behavior
+			});
+			forceIndex = null;
+			scheduleRender();
+			return mounted.get(index) || null;
+		}
+		function scrollToFloor(floor) {
+			const index = entries.findIndex((entry) => String(entry.record?.floor) === String(floor));
+			return index < 0 ? null : scrollToIndex(index, "auto");
+		}
+		function destroy() {
+			if (destroyed) return;
+			destroyed = true;
+			if (frame) windowObj.cancelAnimationFrame(frame);
+			if (viewport?.removeEventListener) {
+				viewport.removeEventListener("scroll", scheduleRender);
+				viewport.removeEventListener("load", scheduleRender, true);
+				viewport.removeEventListener("error", scheduleRender, true);
+			}
+			resizeObserver?.disconnect();
+			mounted.forEach((_, index) => unmount(index));
+			mounted.clear();
+			if (host?.__xnsVirtualizer === api) delete host.__xnsVirtualizer;
+			host?.classList.remove("xns-virtual-list");
+			host?.removeAttribute("data-xns-virtual-count");
+			host?.replaceChildren();
+		}
+		const api = Object.freeze({
+			mount,
+			setEntries,
+			scrollToIndex,
+			scrollToFloor,
+			destroy
+		});
+		return api;
+	}
+	function destroyVirtualLists(root) {
+		if (!root) return;
+		root.querySelectorAll(".xns-virtual-list").forEach((host) => {
+			host.__xnsVirtualizer?.destroy();
+		});
+	}
+	function createPreviewModalUi({ windowObj, documentObj, state, createElement, closeImageLightbox }) {
+		function removeBodyLock() {
+			if (!state.modal) documentObj.documentElement.style.removeProperty("overflow");
+		}
+		function createScrollArrow(points) {
+			const svg = documentObj.createElementNS("http://www.w3.org/2000/svg", "svg");
+			svg.setAttribute("viewBox", "0 0 24 24");
+			svg.setAttribute("aria-hidden", "true");
+			const polyline = documentObj.createElementNS("http://www.w3.org/2000/svg", "polyline");
+			polyline.setAttribute("points", points);
+			svg.appendChild(polyline);
+			return svg;
+		}
+		function createRefreshArrow() {
+			const svg = documentObj.createElementNS("http://www.w3.org/2000/svg", "svg");
+			svg.setAttribute("viewBox", "0 0 24 24");
+			svg.setAttribute("aria-hidden", "true");
+			const path = documentObj.createElementNS("http://www.w3.org/2000/svg", "path");
+			path.setAttribute("d", "M20 11a8 8 0 1 1-2.34-5.66");
+			const polyline = documentObj.createElementNS("http://www.w3.org/2000/svg", "polyline");
+			polyline.setAttribute("points", "20 4 20 11 13 11");
+			svg.append(path, polyline);
+			return svg;
+		}
+		function createRefreshButton(onClick) {
+			const button = createElement("button", "xns-modal-tool xns-refresh-post");
+			button.type = "button";
+			button.title = "刷新帖子";
+			button.setAttribute("aria-label", "刷新帖子");
+			button.append(createRefreshArrow(), createElement("span", "xns-modal-tool-label", "刷新"));
+			button.addEventListener("click", onClick);
+			return button;
+		}
+		function createShareButton(onClick) {
+			const button = createElement("button", "xns-modal-tool xns-modal-share");
+			button.type = "button";
+			button.title = "复制帖子链接";
+			button.setAttribute("aria-label", "复制帖子链接");
+			const label = createElement("span", "xns-modal-tool-label", "分享");
+			button.append(createCopyIcon(), label);
+			button.addEventListener("click", () => {
+				onClick?.({ setLabel: (value) => {
+					label.textContent = value;
+				} });
+			});
+			return button;
+		}
+		function createCopyIcon() {
+			const svg = documentObj.createElementNS("http://www.w3.org/2000/svg", "svg");
+			svg.setAttribute("viewBox", "0 0 24 24");
+			svg.setAttribute("aria-hidden", "true");
+			const back = documentObj.createElementNS("http://www.w3.org/2000/svg", "rect");
+			back.setAttribute("x", "5");
+			back.setAttribute("y", "5");
+			back.setAttribute("width", "11");
+			back.setAttribute("height", "13");
+			back.setAttribute("rx", "2");
+			const front = documentObj.createElementNS("http://www.w3.org/2000/svg", "path");
+			front.setAttribute("d", "M9 5V4a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2");
+			svg.append(back, front);
+			return svg;
+		}
+		function installPreviewScrollButtons(dialog, body) {
+			const group = createElement("div", "xns-preview-scroll-btns");
+			group.setAttribute("role", "toolbar");
+			group.setAttribute("aria-label", "阅读导航");
+			const top = createElement("button", "xns-scroll-btn xns-to-top");
+			top.type = "button";
+			top.title = "回到顶部";
+			top.setAttribute("aria-label", "回到顶部");
+			top.setAttribute("data-xns-tip", "回到顶部");
+			top.appendChild(createScrollArrow("18 15 12 9 6 15"));
+			const bottom = createElement("button", "xns-scroll-btn xns-to-bottom");
+			bottom.type = "button";
+			bottom.title = "回到底部";
+			bottom.setAttribute("aria-label", "回到底部");
+			bottom.setAttribute("data-xns-tip", "回到底部");
+			bottom.appendChild(createScrollArrow("6 9 12 15 18 9"));
+			const scrollTo = (edge) => {
+				const topPosition = edge === "bottom" ? Math.max(0, body.scrollHeight - body.clientHeight) : 0;
+				body.scrollTo({
+					top: topPosition,
+					behavior: "smooth"
+				});
+			};
+			top.addEventListener("click", () => scrollTo("top"));
+			bottom.addEventListener("click", () => scrollTo("bottom"));
+			group.append(top, bottom);
+			dialog.appendChild(group);
+			const update = () => {
+				const distanceFromBottom = body.scrollHeight - (body.scrollTop + body.clientHeight);
+				top.classList.toggle("hidden", body.scrollTop <= 300);
+				bottom.classList.toggle("hidden", distanceFromBottom <= 300);
+			};
+			const cleanup = () => {
+				body.removeEventListener("scroll", update);
+				windowObj.removeEventListener("resize", update);
+				mutationObserver?.disconnect();
+				resizeObserver?.disconnect();
+				group.remove();
+			};
+			const mutationObserver = windowObj.MutationObserver ? new windowObj.MutationObserver(update) : null;
+			const resizeObserver = windowObj.ResizeObserver ? new windowObj.ResizeObserver(update) : null;
+			body.addEventListener("scroll", update, { passive: true });
+			windowObj.addEventListener("resize", update, { passive: true });
+			mutationObserver?.observe(body, {
+				childList: true,
+				subtree: true
+			});
+			resizeObserver?.observe(body);
+			windowObj.setTimeout(update, 0);
+			update();
+			return cleanup;
+		}
+		function closeModal() {
+			closeImageLightbox();
+			const modal = state.modal;
+			modal?.requestController?.abort();
+			modal?.replySyncController?.abort();
+			modal?.refreshScrollCleanup?.();
+			modal?.scrollCleanup?.();
+			if (modal?.body) destroyVirtualLists(modal.body);
+			modal?.overlay?.remove();
+			state.modal = null;
+			removeBodyLock();
+		}
+		function createCloseButton(onClick) {
+			const button = createElement("button", "xns-modal-close", "×");
+			button.type = "button";
+			button.setAttribute("aria-label", "关闭");
+			button.title = "关闭预览（Esc）";
+			button.addEventListener("click", onClick);
+			return button;
+		}
+		return Object.freeze({
+			removeBodyLock,
+			installPreviewScrollButtons,
+			closeModal,
+			createCloseButton,
+			createRefreshButton,
+			createShareButton
+		});
+	}
+	var xnsPreviewModalUi = createPreviewModalUi({
+		windowObj: window,
+		documentObj: document,
+		state,
+		createElement,
+		closeImageLightbox
+	});
+	var closeModal = () => xnsPreviewModalUi.closeModal();
+	var createCloseButton = (onClick) => xnsPreviewModalUi.createCloseButton(onClick);
+	var createRefreshButton = (onClick) => xnsPreviewModalUi.createRefreshButton(onClick);
+	var createShareButton = (onClick) => xnsPreviewModalUi.createShareButton(onClick);
+	var installPreviewScrollButtons = (dialog, body) => xnsPreviewModalUi.installPreviewScrollButtons(dialog, body);
+	function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPreviewAction, closeImageLightbox, closeModal }) {
+		function handlePreviewActionClick(event) {
+			const menuItem = event.target?.closest?.(".xns-preview-menu > .menu-item") || null;
+			if (!menuItem) return;
+			const inPreview = Boolean(menuItem.closest(".xns-overlay .xns-preview-content"));
+			const inPost = Boolean(menuItem.closest(".comment-container"));
+			if (!inPreview && !inPost) return;
+			const comment = menuItem.closest(".content-item");
+			const action = menuItem.dataset.xnsAction || getMenuActionKey(menuItem);
+			if (!comment) return;
+			if (inPost && !action && (menuItem.textContent || "").trim() === "编辑") {
+				if (state.post?.prepareNativeEdit?.(comment)) {
+					event.preventDefault();
+					event.stopImmediatePropagation();
+				}
+				return;
+			}
+			if (!action) return;
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			runPreviewAction(action, menuItem, comment, getActionContext(menuItem));
+		}
+		function handleKeydown(event) {
+			const eventTarget = event.target;
+			const menuItem = eventTarget?.closest?.(".xns-preview-menu > .menu-item") || null;
+			if (menuItem && (event.key === "Enter" || event.key === " ")) {
+				event.preventDefault();
+				menuItem.click();
+				return;
+			}
+			const inEditor = eventTarget?.closest?.("textarea, input, [contenteditable=\"true\"]");
+			if (event.key !== "Escape") return;
+			if (inEditor) return;
+			if (state.settingsPanel) {
+				event.preventDefault();
+				state.settingsPanel.close?.();
+				return;
+			}
+			if (state.lightbox) {
+				event.preventDefault();
+				closeImageLightbox();
+			} else if (state.modal) closeModal();
+		}
+		return Object.freeze({
+			handlePreviewActionClick,
+			handleKeydown
+		});
+	}
+	var xnsAppEvents = createAppEvents({
+		state,
+		qsa,
+		getMenuActionKey,
+		getActionContext,
+		runPreviewAction,
+		closeImageLightbox,
+		closeModal
+	});
+	var handlePreviewActionClick = (event) => xnsAppEvents.handlePreviewActionClick(event);
+	var handleKeydown = (event) => xnsAppEvents.handleKeydown(event);
+	function createVoteFeature({ windowObj, documentObj, qs, qsa, createElement, parseSameOriginUrl, safePositiveInt, dynamicSign, postAction, getActionContext, fetchFn }) {
+		function getVoteIdFromLink(link) {
+			const href = link.getAttribute("data-href") || link.getAttribute("href") || "";
+			const match = /nsapp:\/\/vote\?id=(\d+)/.exec(href);
+			return match ? safePositiveInt(match[1]) : null;
+		}
+		async function fetchVoteInfo(voteId) {
+			const endpoint = parseSameOriginUrl(`/api/vote/info/${voteId}`);
+			if (!endpoint) throw new Error("投票地址非法");
+			const headers = {
+				Accept: "application/json",
+				"X-Requested-With": "XMLHttpRequest"
+			};
+			if (windowObj.crypto?.subtle) headers["x-dynamic-sign"] = await dynamicSign("GET", endpoint.href, "");
+			const response = await fetchFn(endpoint.href, {
+				method: "GET",
+				credentials: "same-origin",
+				cache: "no-store",
+				redirect: "error",
+				referrerPolicy: "same-origin",
+				headers
+			});
+			const text = await response.text();
+			let data = null;
+			try {
+				data = text ? JSON.parse(text) : null;
+			} catch {}
+			if (!response.ok || !data || data.success === false) throw new Error(data?.message || `HTTP ${response.status}`);
+			return data;
+		}
+		function hasVoteResults(vote) {
+			return (vote.items || []).some((item) => typeof item.count === "number");
+		}
+		function buildVoteResults(vote) {
+			const items = vote.items || [];
+			const total = items.reduce((sum, item) => sum + (typeof item.count === "number" ? item.count : 0), 0);
+			const box = createElement("div", "xns-vote-results");
+			items.forEach((item) => {
+				const count = typeof item.count === "number" ? item.count : 0;
+				const percent = total > 0 ? Math.round(count / total * 100) : 0;
+				const row = createElement("div", `xns-vote-result${item.voted ? " xns-vote-mine" : ""}`);
+				row.appendChild(createElement("div", "vote-item-text", item.text || ""));
+				const barWrap = createElement("div", "xns-vote-bar-wrap");
+				const bar = createElement("div", "xns-vote-bar");
+				bar.style.width = `${percent}%`;
+				bar.appendChild(documentObj.createTextNode(`${percent}%`));
+				barWrap.appendChild(bar);
+				row.appendChild(barWrap);
+				row.appendChild(createElement("div", "xns-vote-result-meta", `${count} 票${item.voted ? "（已选）" : ""}`));
+				box.appendChild(row);
+			});
+			box.appendChild(createElement("div", "xns-vote-total", `共 ${total} 票${vote.locked ? " · 已结束" : ""}`));
+			return box;
+		}
+		function buildVotePanel(vote) {
+			const panel = createElement("div", "vote-panel xns-vote-panel");
+			panel.dataset.xnsVoteId = String(vote.id);
+			const title = createElement("h2", "xns-vote-title", vote.title || "投票");
+			title.style.textAlign = "center";
+			title.style.fontSize = "1.2rem";
+			panel.appendChild(title);
+			if (hasVoteResults(vote)) {
+				panel.appendChild(buildVoteResults(vote));
+				panel.appendChild(createElement("div", "xns-vote-note", `nsapp://vote?id=${vote.id}${vote.isPublic ? " (公开投票)" : ""}${vote.locked ? " · 已结束" : ""}`));
+				return panel;
+			}
+			const single = vote.multiple !== true;
+			const wrapper = createElement("fieldset", "vote-stat-wrapper");
+			(vote.items || []).forEach((item) => {
+				const stat = createElement("div", `vote-stat${item.voted ? " voted" : " not-voted"}`);
+				const input = documentObj.createElement("input");
+				input.type = single ? "radio" : "checkbox";
+				input.name = "vote-item";
+				input.value = String(item.vote_item_id);
+				if (item.voted) input.checked = true;
+				const label = createElement("label", "pure-checkbox");
+				label.appendChild(input);
+				label.appendChild(createElement("div", "vote-item-text", item.text || ""));
+				stat.appendChild(label);
+				wrapper.appendChild(stat);
+			});
+			panel.appendChild(wrapper);
+			const buttons = createElement("fieldset", "op-buttons");
+			const submit = createElement("button", "pure-button pure-button-primary add-margin", vote.locked ? "已结束" : "投票");
+			submit.type = "button";
+			if (vote.locked) submit.setAttribute("disabled", "");
+			buttons.appendChild(submit);
+			panel.appendChild(buttons);
+			panel.appendChild(createElement("div", "xns-vote-note", `nsapp://vote?id=${vote.id}${vote.isPublic ? " (公开投票)" : ""}`));
+			return panel;
+		}
+		function mountVotePanel(link, data) {
+			if (!link.isConnected) return;
+			const vote = data?.vote;
+			if (!vote || !Array.isArray(vote.items)) return;
+			link.replaceWith(buildVotePanel(vote));
+		}
+		function scheduleVoteInfo(link, voteId) {
+			const load = () => {
+				if (!link.isConnected) return;
+				fetchVoteInfo(voteId).then((data) => mountVotePanel(link, data)).catch(() => {
+					if (link.isConnected) link.textContent = link.textContent || `投票 #${voteId}（需登录）`;
+				});
+			};
+			if (typeof windowObj.IntersectionObserver === "function") {
+				let observer = null;
+				observer = new windowObj.IntersectionObserver((entries) => {
+					if (!entries.some((entry) => entry.isIntersecting)) return;
+					observer?.disconnect();
+					load();
+				}, { rootMargin: "600px 0px" });
+				observer.observe(link);
+				return;
+			}
+			if (typeof windowObj.requestIdleCallback === "function") windowObj.requestIdleCallback(load, { timeout: 1e3 });
+			else windowObj.setTimeout(load, 0);
+		}
+		function installPreviewVotePanels(root, options = {}) {
+			const selector = ".xns-preview-content a[data-href^=\"nsapp://vote\"], .xns-preview-content a[href^=\"nsapp://vote\"]";
+			const relativeSelector = root?.matches?.(".xns-preview-content") || root?.closest?.(".xns-preview-content") ? "a[data-href^=\"nsapp://vote\"], a[href^=\"nsapp://vote\"]" : selector;
+			const owner = root?.matches?.(".content-item") ? root : null;
+			const links = [];
+			if (root?.matches?.(selector)) links.push(root);
+			links.push(...qsa(root, relativeSelector));
+			links.filter((link) => {
+				if (owner && link.closest?.(".content-item") !== owner) return false;
+				if (options.skipRemote && (link.matches?.("[data-xns-remote]") || link.closest?.("[data-xns-remote]"))) return false;
+				return true;
+			}).forEach((link) => {
+				if (link.dataset.xnsVoteBound === "true") return;
+				const voteId = getVoteIdFromLink(link);
+				if (voteId === null) return;
+				link.dataset.xnsVoteBound = "true";
+				scheduleVoteInfo(link, voteId);
+			});
+		}
+		function getVoteStatus(panel) {
+			let status = qs(panel, ".xns-vote-status");
+			if (!status) {
+				status = createElement("div", "xns-vote-status");
+				panel.appendChild(status);
+			}
+			return status;
+		}
+		function handleVoteClick(event) {
+			const button = event.target?.closest?.(".xns-vote-panel button") || null;
+			if (!button || button.disabled) return;
+			const panel = button.closest(".xns-vote-panel");
+			if (!panel || panel.dataset.xnsVotePending === "true") return;
+			const inPreview = Boolean(panel.closest(".xns-overlay .xns-preview-content"));
+			const inRemote = Boolean(panel.closest("[data-xns-remote]"));
+			if (!inPreview && !inRemote) return;
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			const selected = qsa(panel, "input[name=\"vote-item\"]:checked").map((input) => input.value);
+			const status = getVoteStatus(panel);
+			if (!selected.length) {
+				status.textContent = "请先选择选项。";
+				return;
+			}
+			panel.dataset.xnsVotePending = "true";
+			button.setAttribute("disabled", "");
+			status.textContent = "正在投票…";
+			const voteId = safePositiveInt(panel.dataset.xnsVoteId || "");
+			postAction("/api/vote/voteforitem", { ids: selected.map((value) => Number(value)) }, { context: getActionContext(button) }).then(async () => {
+				let refreshed = null;
+				if (voteId !== null) try {
+					refreshed = await fetchVoteInfo(voteId);
+				} catch {}
+				if (!panel.isConnected) return;
+				if (refreshed?.vote) panel.replaceWith(buildVotePanel(refreshed.vote));
+				else {
+					status.textContent = "投票成功，感谢参与。";
+					button.textContent = "已投票";
+				}
+			}).catch((error) => {
+				status.textContent = `投票失败：${error?.message || "网络错误"}`;
+				button.removeAttribute("disabled");
+				panel.dataset.xnsVotePending = "";
+			});
+		}
+		return Object.freeze({
+			installPreviewVotePanels,
+			handleVoteClick,
+			fetchVoteInfo
+		});
+	}
+	var xnsVoteFeature = createVoteFeature({
+		windowObj: window,
+		documentObj: document,
+		qs,
+		qsa,
+		createElement,
+		parseSameOriginUrl,
+		safePositiveInt,
+		dynamicSign,
+		postAction,
+		getActionContext,
+		fetchFn: window.fetch.bind(window)
+	});
+	var installPreviewVotePanels = (root, options) => xnsVoteFeature.installPreviewVotePanels(root, options);
+	var handleVoteClick = (event) => xnsVoteFeature.handleVoteClick(event);
 	function buildReplyTree(records) {
 		const byFloor = new Map(records.map((record) => [record.floor, record]));
 		records.forEach((record) => {
@@ -3128,383 +4520,6 @@
 		getCurrentUserUid,
 		buildPostUrl
 	});
-	function createPreviewLightbox({ documentObj, state, qsa, createElement, getSafeUrlAttribute }) {
-		function getPreviewImageSource(image) {
-			const link = image?.closest("a[href]");
-			const candidates = [
-				image?.currentSrc,
-				image?.getAttribute("src"),
-				image?.getAttribute("data-src"),
-				image?.getAttribute("data-original"),
-				link?.getAttribute("href")
-			];
-			for (const candidate of candidates) {
-				const safe = getSafeUrlAttribute("src", candidate);
-				if (safe) return safe;
-			}
-			return null;
-		}
-		function closeImageLightbox() {
-			const lightbox = state.lightbox;
-			if (!lightbox) return;
-			lightbox.cleanup?.();
-			lightbox.overlay?.remove();
-			state.lightbox = null;
-		}
-		function openImageLightbox(image) {
-			const source = getPreviewImageSource(image);
-			if (!source) return;
-			closeImageLightbox();
-			const overlay = createElement("div", "xns-lightbox");
-			overlay.tabIndex = -1;
-			overlay.setAttribute("role", "dialog");
-			overlay.setAttribute("aria-modal", "true");
-			overlay.setAttribute("aria-label", "图片预览");
-			const stage = createElement("div", "xns-lightbox-stage");
-			const preview = documentObj.createElement("img");
-			preview.className = "xns-lightbox-image";
-			preview.src = source;
-			preview.alt = image.getAttribute("alt") || "图片预览";
-			preview.setAttribute("referrerpolicy", "origin");
-			preview.setAttribute("draggable", "false");
-			const close = createElement("button", "xns-lightbox-close", "×");
-			close.type = "button";
-			close.setAttribute("aria-label", "关闭图片预览");
-			const original = createElement("a", "xns-lightbox-open", "打开原图");
-			original.href = source;
-			original.target = "_blank";
-			original.rel = "noopener noreferrer";
-			stage.appendChild(preview);
-			overlay.append(stage, close, original);
-			let scale = 1;
-			let offsetX = 0;
-			let offsetY = 0;
-			let dragging = false;
-			let pointerId = null;
-			let startX = 0;
-			let startY = 0;
-			let startOffsetX = 0;
-			let startOffsetY = 0;
-			const render = () => {
-				preview.style.transform = `translate3d(${offsetX}px, ${offsetY}px, 0) scale(${scale})`;
-			};
-			const onWheel = (event) => {
-				event.preventDefault();
-				scale = Math.min(4, Math.max(.5, scale * (event.deltaY < 0 ? 1.12 : .89)));
-				if (scale <= 1) {
-					scale = 1;
-					offsetX = 0;
-					offsetY = 0;
-				}
-				render();
-			};
-			const onPointerDown = (event) => {
-				if (event.button !== 0) return;
-				dragging = true;
-				pointerId = event.pointerId;
-				startX = event.clientX;
-				startY = event.clientY;
-				startOffsetX = offsetX;
-				startOffsetY = offsetY;
-				stage.classList.add("xns-dragging");
-				stage.setPointerCapture?.(event.pointerId);
-				event.preventDefault();
-			};
-			const onPointerMove = (event) => {
-				if (!dragging || event.pointerId !== pointerId) return;
-				offsetX = startOffsetX + event.clientX - startX;
-				offsetY = startOffsetY + event.clientY - startY;
-				render();
-			};
-			const onPointerUp = (event) => {
-				if (event.pointerId !== pointerId) return;
-				dragging = false;
-				pointerId = null;
-				stage.classList.remove("xns-dragging");
-				stage.releasePointerCapture?.(event.pointerId);
-			};
-			const cleanup = () => {
-				stage.removeEventListener("wheel", onWheel);
-				stage.removeEventListener("pointerdown", onPointerDown);
-				stage.removeEventListener("pointermove", onPointerMove);
-				stage.removeEventListener("pointerup", onPointerUp);
-				stage.removeEventListener("pointercancel", onPointerUp);
-			};
-			stage.addEventListener("wheel", onWheel, { passive: false });
-			stage.addEventListener("pointerdown", onPointerDown);
-			stage.addEventListener("pointermove", onPointerMove);
-			stage.addEventListener("pointerup", onPointerUp);
-			stage.addEventListener("pointercancel", onPointerUp);
-			stage.addEventListener("click", (event) => {
-				if (event.target === stage) closeImageLightbox();
-			});
-			preview.addEventListener("click", (event) => event.stopPropagation());
-			close.addEventListener("click", closeImageLightbox);
-			overlay.addEventListener("click", (event) => {
-				if (event.target === overlay) closeImageLightbox();
-			});
-			documentObj.body.appendChild(overlay);
-			state.lightbox = {
-				overlay,
-				cleanup
-			};
-			render();
-			overlay.focus();
-		}
-		function installPreviewImageFallback(root, options = {}) {
-			const selector = Boolean(root?.matches(".xns-preview-content") || root?.closest(".xns-preview-content")) ? "img" : ".xns-preview-content img";
-			const images = [];
-			if (root && root.matches(".xns-preview-content img")) images.push(root);
-			const owner = root?.matches(".content-item") ? root : null;
-			images.push(...qsa(root, selector));
-			images.filter((image) => {
-				if (owner && image.closest(".content-item") !== owner) return false;
-				if (options.skipRemote && (image.matches("[data-xns-remote]") || image.closest("[data-xns-remote]"))) return false;
-				return true;
-			}).forEach((image) => {
-				const deferredSource = image.getAttribute("data-xns-deferred-src");
-				if (deferredSource) {
-					if (!image.getAttribute("src")) image.setAttribute("src", deferredSource);
-					image.removeAttribute("data-xns-deferred-src");
-				}
-				if (image.dataset.xnsImageBound === "true") return;
-				image.dataset.xnsImageBound = "true";
-				image.setAttribute("tabindex", "0");
-				image.setAttribute("role", "button");
-				image.setAttribute("title", "点击放大图片");
-				const open = (event) => {
-					event.preventDefault();
-					event.stopPropagation();
-					openImageLightbox(image);
-				};
-				image.addEventListener("click", open);
-				image.addEventListener("keydown", (event) => {
-					if (event.key === "Enter" || event.key === " ") open(event);
-				});
-				image.addEventListener("error", () => {
-					if (image.nextElementSibling?.matches(".xns-image-error")) return;
-					const message = createElement("span", "xns-image-error", "图片加载失败：图片站拒绝了当前嵌入来源。仍可点击“打开原图”尝试查看。");
-					image.insertAdjacentElement("afterend", message);
-				}, { once: true });
-			});
-		}
-		return Object.freeze({
-			closeImageLightbox,
-			openImageLightbox,
-			installPreviewImageFallback
-		});
-	}
-	var xnsPreviewLightbox = createPreviewLightbox({
-		documentObj: document,
-		state,
-		qsa,
-		createElement,
-		getSafeUrlAttribute
-	});
-	var closeImageLightbox = () => xnsPreviewLightbox.closeImageLightbox();
-	var installPreviewImageFallback = (root, options) => xnsPreviewLightbox.installPreviewImageFallback(root, options);
-	function createVoteFeature({ windowObj, documentObj, qs, qsa, createElement, parseSameOriginUrl, safePositiveInt, dynamicSign, postAction, getActionContext, fetchFn }) {
-		function getVoteIdFromLink(link) {
-			const href = link.getAttribute("data-href") || link.getAttribute("href") || "";
-			const match = /nsapp:\/\/vote\?id=(\d+)/.exec(href);
-			return match ? safePositiveInt(match[1]) : null;
-		}
-		async function fetchVoteInfo(voteId) {
-			const endpoint = parseSameOriginUrl(`/api/vote/info/${voteId}`);
-			if (!endpoint) throw new Error("投票地址非法");
-			const headers = {
-				Accept: "application/json",
-				"X-Requested-With": "XMLHttpRequest"
-			};
-			if (windowObj.crypto?.subtle) headers["x-dynamic-sign"] = await dynamicSign("GET", endpoint.href, "");
-			const response = await fetchFn(endpoint.href, {
-				method: "GET",
-				credentials: "same-origin",
-				cache: "no-store",
-				redirect: "error",
-				referrerPolicy: "same-origin",
-				headers
-			});
-			const text = await response.text();
-			let data = null;
-			try {
-				data = text ? JSON.parse(text) : null;
-			} catch {}
-			if (!response.ok || !data || data.success === false) throw new Error(data?.message || `HTTP ${response.status}`);
-			return data;
-		}
-		function hasVoteResults(vote) {
-			return (vote.items || []).some((item) => typeof item.count === "number");
-		}
-		function buildVoteResults(vote) {
-			const items = vote.items || [];
-			const total = items.reduce((sum, item) => sum + (typeof item.count === "number" ? item.count : 0), 0);
-			const box = createElement("div", "xns-vote-results");
-			items.forEach((item) => {
-				const count = typeof item.count === "number" ? item.count : 0;
-				const percent = total > 0 ? Math.round(count / total * 100) : 0;
-				const row = createElement("div", `xns-vote-result${item.voted ? " xns-vote-mine" : ""}`);
-				row.appendChild(createElement("div", "vote-item-text", item.text || ""));
-				const barWrap = createElement("div", "xns-vote-bar-wrap");
-				const bar = createElement("div", "xns-vote-bar");
-				bar.style.width = `${percent}%`;
-				bar.appendChild(documentObj.createTextNode(`${percent}%`));
-				barWrap.appendChild(bar);
-				row.appendChild(barWrap);
-				row.appendChild(createElement("div", "xns-vote-result-meta", `${count} 票${item.voted ? "（已选）" : ""}`));
-				box.appendChild(row);
-			});
-			box.appendChild(createElement("div", "xns-vote-total", `共 ${total} 票${vote.locked ? " · 已结束" : ""}`));
-			return box;
-		}
-		function buildVotePanel(vote) {
-			const panel = createElement("div", "vote-panel xns-vote-panel");
-			panel.dataset.xnsVoteId = String(vote.id);
-			const title = createElement("h2", "xns-vote-title", vote.title || "投票");
-			title.style.textAlign = "center";
-			title.style.fontSize = "1.2rem";
-			panel.appendChild(title);
-			if (hasVoteResults(vote)) {
-				panel.appendChild(buildVoteResults(vote));
-				panel.appendChild(createElement("div", "xns-vote-note", `nsapp://vote?id=${vote.id}${vote.isPublic ? " (公开投票)" : ""}${vote.locked ? " · 已结束" : ""}`));
-				return panel;
-			}
-			const single = vote.multiple !== true;
-			const wrapper = createElement("fieldset", "vote-stat-wrapper");
-			(vote.items || []).forEach((item) => {
-				const stat = createElement("div", `vote-stat${item.voted ? " voted" : " not-voted"}`);
-				const input = documentObj.createElement("input");
-				input.type = single ? "radio" : "checkbox";
-				input.name = "vote-item";
-				input.value = String(item.vote_item_id);
-				if (item.voted) input.checked = true;
-				const label = createElement("label", "pure-checkbox");
-				label.appendChild(input);
-				label.appendChild(createElement("div", "vote-item-text", item.text || ""));
-				stat.appendChild(label);
-				wrapper.appendChild(stat);
-			});
-			panel.appendChild(wrapper);
-			const buttons = createElement("fieldset", "op-buttons");
-			const submit = createElement("button", "pure-button pure-button-primary add-margin", vote.locked ? "已结束" : "投票");
-			submit.type = "button";
-			if (vote.locked) submit.setAttribute("disabled", "");
-			buttons.appendChild(submit);
-			panel.appendChild(buttons);
-			panel.appendChild(createElement("div", "xns-vote-note", `nsapp://vote?id=${vote.id}${vote.isPublic ? " (公开投票)" : ""}`));
-			return panel;
-		}
-		function mountVotePanel(link, data) {
-			if (!link.isConnected) return;
-			const vote = data?.vote;
-			if (!vote || !Array.isArray(vote.items)) return;
-			link.replaceWith(buildVotePanel(vote));
-		}
-		function scheduleVoteInfo(link, voteId) {
-			const load = () => {
-				if (!link.isConnected) return;
-				fetchVoteInfo(voteId).then((data) => mountVotePanel(link, data)).catch(() => {
-					if (link.isConnected) link.textContent = link.textContent || `投票 #${voteId}（需登录）`;
-				});
-			};
-			if (typeof windowObj.IntersectionObserver === "function") {
-				let observer = null;
-				observer = new windowObj.IntersectionObserver((entries) => {
-					if (!entries.some((entry) => entry.isIntersecting)) return;
-					observer?.disconnect();
-					load();
-				}, { rootMargin: "600px 0px" });
-				observer.observe(link);
-				return;
-			}
-			if (typeof windowObj.requestIdleCallback === "function") windowObj.requestIdleCallback(load, { timeout: 1e3 });
-			else windowObj.setTimeout(load, 0);
-		}
-		function installPreviewVotePanels(root, options = {}) {
-			const selector = ".xns-preview-content a[data-href^=\"nsapp://vote\"], .xns-preview-content a[href^=\"nsapp://vote\"]";
-			const relativeSelector = root?.matches?.(".xns-preview-content") || root?.closest?.(".xns-preview-content") ? "a[data-href^=\"nsapp://vote\"], a[href^=\"nsapp://vote\"]" : selector;
-			const owner = root?.matches?.(".content-item") ? root : null;
-			const links = [];
-			if (root?.matches?.(selector)) links.push(root);
-			links.push(...qsa(root, relativeSelector));
-			links.filter((link) => {
-				if (owner && link.closest?.(".content-item") !== owner) return false;
-				if (options.skipRemote && (link.matches?.("[data-xns-remote]") || link.closest?.("[data-xns-remote]"))) return false;
-				return true;
-			}).forEach((link) => {
-				if (link.dataset.xnsVoteBound === "true") return;
-				const voteId = getVoteIdFromLink(link);
-				if (voteId === null) return;
-				link.dataset.xnsVoteBound = "true";
-				scheduleVoteInfo(link, voteId);
-			});
-		}
-		function getVoteStatus(panel) {
-			let status = qs(panel, ".xns-vote-status");
-			if (!status) {
-				status = createElement("div", "xns-vote-status");
-				panel.appendChild(status);
-			}
-			return status;
-		}
-		function handleVoteClick(event) {
-			const button = event.target?.closest?.(".xns-vote-panel button") || null;
-			if (!button || button.disabled) return;
-			const panel = button.closest(".xns-vote-panel");
-			if (!panel || panel.dataset.xnsVotePending === "true") return;
-			const inPreview = Boolean(panel.closest(".xns-overlay .xns-preview-content"));
-			const inRemote = Boolean(panel.closest("[data-xns-remote]"));
-			if (!inPreview && !inRemote) return;
-			event.preventDefault();
-			event.stopImmediatePropagation();
-			const selected = qsa(panel, "input[name=\"vote-item\"]:checked").map((input) => input.value);
-			const status = getVoteStatus(panel);
-			if (!selected.length) {
-				status.textContent = "请先选择选项。";
-				return;
-			}
-			panel.dataset.xnsVotePending = "true";
-			button.setAttribute("disabled", "");
-			status.textContent = "正在投票…";
-			const voteId = safePositiveInt(panel.dataset.xnsVoteId || "");
-			postAction("/api/vote/voteforitem", { ids: selected.map((value) => Number(value)) }, { context: getActionContext(button) }).then(async () => {
-				let refreshed = null;
-				if (voteId !== null) try {
-					refreshed = await fetchVoteInfo(voteId);
-				} catch {}
-				if (!panel.isConnected) return;
-				if (refreshed?.vote) panel.replaceWith(buildVotePanel(refreshed.vote));
-				else {
-					status.textContent = "投票成功，感谢参与。";
-					button.textContent = "已投票";
-				}
-			}).catch((error) => {
-				status.textContent = `投票失败：${error?.message || "网络错误"}`;
-				button.removeAttribute("disabled");
-				panel.dataset.xnsVotePending = "";
-			});
-		}
-		return Object.freeze({
-			installPreviewVotePanels,
-			handleVoteClick,
-			fetchVoteInfo
-		});
-	}
-	var xnsVoteFeature = createVoteFeature({
-		windowObj: window,
-		documentObj: document,
-		qs,
-		qsa,
-		createElement,
-		parseSameOriginUrl,
-		safePositiveInt,
-		dynamicSign,
-		postAction,
-		getActionContext,
-		fetchFn: window.fetch.bind(window)
-	});
-	var installPreviewVotePanels = (root, options) => xnsVoteFeature.installPreviewVotePanels(root, options);
-	var handleVoteClick = (event) => xnsVoteFeature.handleVoteClick(event);
 	function createContentFeatures({ windowObj, documentObj, navigatorObj, qs, qsa, createElement, clearElement, installPreviewImageFallback, installPreviewVotePanels }) {
 		const ANSI_COLORS = [
 			"black",
@@ -3837,485 +4852,6 @@
 		installPreviewVotePanels
 	});
 	var installPreviewFeatures = (root, options) => xnsContentFeatures.installPreviewFeatures(root, options);
-	function createCommentVirtualizer({ windowObj, documentObj, createElement, estimatedHeight = 150, overscanScreens = 2 }) {
-		let host = null;
-		let entries = [];
-		let renderItem = null;
-		let onMount = null;
-		let onUnmount = null;
-		let onUpdate = null;
-		let isPinned = null;
-		let getViewport = null;
-		let viewport = null;
-		let frame = 0;
-		let destroyed = false;
-		let forceIndex = null;
-		const mounted = new Map();
-		const heights = new Map();
-		const keyOf = (entry) => {
-			const record = entry?.record || entry;
-			return `${record?.postId || ""}:${record?.floor ?? ""}`;
-		};
-		const isWindowViewport = (value) => !value || value === windowObj || value === windowObj.window;
-		function getHeight(index) {
-			return Math.max(1, Number(heights.get(keyOf(entries[index]))) || Number(estimatedHeight) || 1);
-		}
-		function sumHeights(start, end) {
-			let total = 0;
-			for (let index = Math.max(0, start); index < Math.min(entries.length, end); index += 1) total += getHeight(index);
-			return total;
-		}
-		function findIndexAtOffset(offset) {
-			const target = Math.max(0, Number(offset) || 0);
-			let passed = 0;
-			for (let index = 0; index < entries.length; index += 1) {
-				const next = passed + getHeight(index);
-				if (target < next) return index;
-				passed = next;
-			}
-			return entries.length;
-		}
-		function resolveViewport() {
-			return (typeof getViewport === "function" ? getViewport() : viewport) || windowObj;
-		}
-		function getHostOffset(nextViewport) {
-			if (isWindowViewport(nextViewport)) return (host?.getBoundingClientRect?.().top || 0) + (Number(windowObj.scrollY) || 0);
-			const scrollTop = Math.max(0, Number(nextViewport.scrollTop) || 0);
-			const hostRect = host?.getBoundingClientRect?.();
-			const viewportRect = nextViewport.getBoundingClientRect?.();
-			if (!hostRect || !viewportRect) return Math.max(0, Number(host?.offsetTop) || 0);
-			return Math.max(0, hostRect.top - viewportRect.top - (Number(nextViewport.clientTop) || 0) + scrollTop);
-		}
-		function getViewportMetrics() {
-			const nextViewport = resolveViewport();
-			if (nextViewport !== viewport) bindViewport(nextViewport);
-			if (isWindowViewport(nextViewport)) {
-				const scrollTop = Number(windowObj.scrollY) || 0;
-				const hostTop = getHostOffset(nextViewport);
-				const height = Math.max(1, Number(windowObj.innerHeight) || 800);
-				return {
-					start: Math.max(0, scrollTop - hostTop),
-					end: Math.max(0, scrollTop - hostTop) + height,
-					height
-				};
-			}
-			const height = Math.max(1, Number(nextViewport.clientHeight) || 800);
-			const scrollTop = Math.max(0, Number(nextViewport.scrollTop) || 0);
-			const start = Math.max(0, scrollTop - getHostOffset(nextViewport));
-			return {
-				start,
-				end: start + height,
-				height
-			};
-		}
-		function createSpacer(height) {
-			const spacer = createElement("li", "xns-virtual-spacer");
-			spacer.setAttribute("aria-hidden", "true");
-			spacer.style.height = `${Math.max(0, Math.round(height))}px`;
-			return spacer;
-		}
-		function defaultPinned(node) {
-			if (!node) return false;
-			if (node.hasAttribute("data-xns-pinned")) return true;
-			if (node.querySelector(".xns-preview-composer, [aria-expanded=\"true\"]")) return true;
-			return Array.from(node.querySelectorAll("video")).some((video) => !video.paused);
-		}
-		function scheduleRender() {
-			if (destroyed || frame) return;
-			frame = windowObj.requestAnimationFrame(() => {
-				frame = 0;
-				renderWindow();
-			});
-		}
-		function measureNode(node) {
-			if (!node?.getBoundingClientRect) return 0;
-			let height = node.getBoundingClientRect().height;
-			try {
-				const style = windowObj.getComputedStyle(node);
-				height += Number.parseFloat(style.marginTop) || 0;
-				height += Number.parseFloat(style.marginBottom) || 0;
-			} catch {}
-			return Math.max(1, height);
-		}
-		const resizeObserver = typeof windowObj.ResizeObserver === "function" ? new windowObj.ResizeObserver((observations) => {
-			let changed = false;
-			observations.forEach((observation) => {
-				const index = Array.from(mounted.entries()).find(([, node]) => node === observation.target)?.[0];
-				if (index === void 0) return;
-				const key = keyOf(entries[index]);
-				const height = measureNode(observation.target);
-				if (Math.abs((heights.get(key) || 0) - height) > 1) {
-					heights.set(key, height);
-					changed = true;
-				}
-			});
-			if (changed) scheduleRender();
-		}) : null;
-		function unmount(index) {
-			const node = mounted.get(index);
-			if (!node) return;
-			resizeObserver?.unobserve(node);
-			mounted.delete(index);
-			onUnmount?.(node, entries[index], index);
-		}
-		function renderWindow() {
-			if (destroyed || !host) return;
-			if (!entries.length) {
-				mounted.forEach((_, index) => unmount(index));
-				host.replaceChildren();
-				return;
-			}
-			const metrics = getViewportMetrics();
-			const overscan = Math.max(metrics.height, metrics.height * Math.max(0, Number(overscanScreens) || 0));
-			let start = findIndexAtOffset(metrics.start - overscan);
-			let end = findIndexAtOffset(metrics.end + overscan) + 1;
-			if (start >= entries.length) start = Math.max(0, entries.length - 1);
-			end = Math.min(entries.length, Math.max(start + 1, end));
-			const pin = typeof isPinned === "function" ? isPinned : defaultPinned;
-			const desired = new Set();
-			for (let index = start; index < end; index += 1) desired.add(index);
-			if (forceIndex !== null && forceIndex >= 0 && forceIndex < entries.length) desired.add(forceIndex);
-			mounted.forEach((node, index) => {
-				if (pin(node, entries[index], index)) desired.add(index);
-			});
-			mounted.forEach((_, index) => {
-				if (!desired.has(index)) unmount(index);
-			});
-			const newlyMounted = [];
-			Array.from(desired).sort((a, b) => a - b).forEach((index) => {
-				if (mounted.has(index)) return;
-				const node = renderItem?.(entries[index], index);
-				if (!node) return;
-				mounted.set(index, node);
-				newlyMounted.push({
-					index,
-					node
-				});
-			});
-			const fragment = documentObj.createDocumentFragment();
-			let cursor = 0;
-			Array.from(desired).sort((a, b) => a - b).forEach((index) => {
-				if (index > cursor) fragment.appendChild(createSpacer(sumHeights(cursor, index)));
-				const node = mounted.get(index);
-				if (node) fragment.appendChild(node);
-				cursor = index + 1;
-			});
-			if (cursor < entries.length) fragment.appendChild(createSpacer(sumHeights(cursor, entries.length)));
-			host.replaceChildren(fragment);
-			newlyMounted.forEach(({ index, node }) => {
-				resizeObserver?.observe(node);
-				onMount?.(node, entries[index], index);
-				const height = measureNode(node);
-				const key = keyOf(entries[index]);
-				if (Math.abs((heights.get(key) || 0) - height) > 1) heights.set(key, height);
-			});
-		}
-		function bindViewport(nextViewport) {
-			if (nextViewport === viewport) return;
-			if (viewport?.removeEventListener) {
-				viewport.removeEventListener("scroll", scheduleRender);
-				viewport.removeEventListener("load", scheduleRender, true);
-				viewport.removeEventListener("error", scheduleRender, true);
-			}
-			viewport = nextViewport || windowObj;
-			viewport?.addEventListener?.("scroll", scheduleRender, { passive: true });
-			viewport?.addEventListener?.("load", scheduleRender, true);
-			viewport?.addEventListener?.("error", scheduleRender, true);
-		}
-		function setEntries(nextEntries, options = {}) {
-			if (destroyed) return;
-			if (typeof options.renderItem === "function") renderItem = options.renderItem;
-			if (typeof options.onMount === "function") onMount = options.onMount;
-			if (typeof options.onUnmount === "function") onUnmount = options.onUnmount;
-			if (typeof options.onUpdate === "function") onUpdate = options.onUpdate;
-			if (typeof options.isPinned === "function") isPinned = options.isPinned;
-			if (typeof options.getViewport === "function") getViewport = options.getViewport;
-			const normalized = Array.isArray(nextEntries) ? nextEntries.map((entry, index) => ({
-				...entry,
-				index
-			})) : [];
-			const nextKeys = new Set(normalized.map((entry) => keyOf(entry)));
-			mounted.forEach((_, index) => {
-				const oldKey = keyOf(entries[index]);
-				const nextKey = keyOf(normalized[index]);
-				if (!nextKeys.has(oldKey) || oldKey !== nextKey) unmount(index);
-			});
-			entries = normalized;
-			mounted.forEach((node, index) => onUpdate?.(node, entries[index], index));
-			host?.classList.add("xns-virtual-list");
-			host?.setAttribute("data-xns-virtual-count", String(entries.length));
-			renderWindow();
-		}
-		function mount(nextHost, options = {}) {
-			if (destroyed) return api;
-			host = nextHost;
-			if (typeof options.renderItem === "function") renderItem = options.renderItem;
-			if (typeof options.onMount === "function") onMount = options.onMount;
-			if (typeof options.onUnmount === "function") onUnmount = options.onUnmount;
-			if (typeof options.onUpdate === "function") onUpdate = options.onUpdate;
-			if (typeof options.isPinned === "function") isPinned = options.isPinned;
-			if (typeof options.getViewport === "function") getViewport = options.getViewport;
-			host?.classList.add("xns-virtual-list");
-			host?.setAttribute("data-xns-virtual-count", String(entries.length));
-			if (host) host.__xnsVirtualizer = api;
-			renderWindow();
-			return api;
-		}
-		function scrollToIndex(index, behavior = "smooth") {
-			if (!host || index < 0 || index >= entries.length) return null;
-			forceIndex = index;
-			renderWindow();
-			const nextViewport = resolveViewport();
-			const offset = sumHeights(0, index);
-			if (isWindowViewport(nextViewport)) {
-				const top = getHostOffset(nextViewport) + offset;
-				windowObj.scrollTo?.({
-					top,
-					behavior
-				});
-			} else nextViewport.scrollTo?.({
-				top: getHostOffset(nextViewport) + offset,
-				behavior
-			});
-			forceIndex = null;
-			scheduleRender();
-			return mounted.get(index) || null;
-		}
-		function scrollToFloor(floor) {
-			const index = entries.findIndex((entry) => String(entry.record?.floor) === String(floor));
-			return index < 0 ? null : scrollToIndex(index, "auto");
-		}
-		function destroy() {
-			if (destroyed) return;
-			destroyed = true;
-			if (frame) windowObj.cancelAnimationFrame(frame);
-			if (viewport?.removeEventListener) {
-				viewport.removeEventListener("scroll", scheduleRender);
-				viewport.removeEventListener("load", scheduleRender, true);
-				viewport.removeEventListener("error", scheduleRender, true);
-			}
-			resizeObserver?.disconnect();
-			mounted.forEach((_, index) => unmount(index));
-			mounted.clear();
-			if (host?.__xnsVirtualizer === api) delete host.__xnsVirtualizer;
-			host?.classList.remove("xns-virtual-list");
-			host?.removeAttribute("data-xns-virtual-count");
-			host?.replaceChildren();
-		}
-		const api = Object.freeze({
-			mount,
-			setEntries,
-			scrollToIndex,
-			scrollToFloor,
-			destroy
-		});
-		return api;
-	}
-	function destroyVirtualLists(root) {
-		if (!root) return;
-		root.querySelectorAll(".xns-virtual-list").forEach((host) => {
-			host.__xnsVirtualizer?.destroy();
-		});
-	}
-	function createPreviewModalUi({ windowObj, documentObj, state, createElement, closeImageLightbox }) {
-		function removeBodyLock() {
-			if (!state.modal) documentObj.documentElement.style.removeProperty("overflow");
-		}
-		function createScrollArrow(points) {
-			const svg = documentObj.createElementNS("http://www.w3.org/2000/svg", "svg");
-			svg.setAttribute("viewBox", "0 0 24 24");
-			svg.setAttribute("aria-hidden", "true");
-			const polyline = documentObj.createElementNS("http://www.w3.org/2000/svg", "polyline");
-			polyline.setAttribute("points", points);
-			svg.appendChild(polyline);
-			return svg;
-		}
-		function createRefreshArrow() {
-			const svg = documentObj.createElementNS("http://www.w3.org/2000/svg", "svg");
-			svg.setAttribute("viewBox", "0 0 24 24");
-			svg.setAttribute("aria-hidden", "true");
-			const path = documentObj.createElementNS("http://www.w3.org/2000/svg", "path");
-			path.setAttribute("d", "M20 11a8 8 0 1 1-2.34-5.66");
-			const polyline = documentObj.createElementNS("http://www.w3.org/2000/svg", "polyline");
-			polyline.setAttribute("points", "20 4 20 11 13 11");
-			svg.append(path, polyline);
-			return svg;
-		}
-		function createRefreshButton(onClick) {
-			const button = createElement("button", "xns-modal-tool xns-refresh-post");
-			button.type = "button";
-			button.title = "刷新帖子";
-			button.setAttribute("aria-label", "刷新帖子");
-			button.append(createRefreshArrow(), createElement("span", "xns-modal-tool-label", "刷新"));
-			button.addEventListener("click", onClick);
-			return button;
-		}
-		function createShareButton(onClick) {
-			const button = createElement("button", "xns-modal-tool xns-modal-share");
-			button.type = "button";
-			button.title = "复制帖子链接";
-			button.setAttribute("aria-label", "复制帖子链接");
-			const label = createElement("span", "xns-modal-tool-label", "分享");
-			button.append(createCopyIcon(), label);
-			button.addEventListener("click", () => {
-				onClick?.({ setLabel: (value) => {
-					label.textContent = value;
-				} });
-			});
-			return button;
-		}
-		function createCopyIcon() {
-			const svg = documentObj.createElementNS("http://www.w3.org/2000/svg", "svg");
-			svg.setAttribute("viewBox", "0 0 24 24");
-			svg.setAttribute("aria-hidden", "true");
-			const back = documentObj.createElementNS("http://www.w3.org/2000/svg", "rect");
-			back.setAttribute("x", "5");
-			back.setAttribute("y", "5");
-			back.setAttribute("width", "11");
-			back.setAttribute("height", "13");
-			back.setAttribute("rx", "2");
-			const front = documentObj.createElementNS("http://www.w3.org/2000/svg", "path");
-			front.setAttribute("d", "M9 5V4a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2");
-			svg.append(back, front);
-			return svg;
-		}
-		function installPreviewScrollButtons(dialog, body) {
-			const group = createElement("div", "xns-preview-scroll-btns");
-			group.setAttribute("role", "toolbar");
-			group.setAttribute("aria-label", "阅读导航");
-			const top = createElement("button", "xns-scroll-btn xns-to-top");
-			top.type = "button";
-			top.title = "回到顶部";
-			top.setAttribute("aria-label", "回到顶部");
-			top.setAttribute("data-xns-tip", "回到顶部");
-			top.appendChild(createScrollArrow("18 15 12 9 6 15"));
-			const bottom = createElement("button", "xns-scroll-btn xns-to-bottom");
-			bottom.type = "button";
-			bottom.title = "回到底部";
-			bottom.setAttribute("aria-label", "回到底部");
-			bottom.setAttribute("data-xns-tip", "回到底部");
-			bottom.appendChild(createScrollArrow("6 9 12 15 18 9"));
-			const scrollTo = (edge) => {
-				const topPosition = edge === "bottom" ? Math.max(0, body.scrollHeight - body.clientHeight) : 0;
-				body.scrollTo({
-					top: topPosition,
-					behavior: "smooth"
-				});
-			};
-			top.addEventListener("click", () => scrollTo("top"));
-			bottom.addEventListener("click", () => scrollTo("bottom"));
-			group.append(top, bottom);
-			dialog.appendChild(group);
-			const update = () => {
-				const distanceFromBottom = body.scrollHeight - (body.scrollTop + body.clientHeight);
-				top.classList.toggle("hidden", body.scrollTop <= 300);
-				bottom.classList.toggle("hidden", distanceFromBottom <= 300);
-			};
-			const cleanup = () => {
-				body.removeEventListener("scroll", update);
-				windowObj.removeEventListener("resize", update);
-				mutationObserver?.disconnect();
-				resizeObserver?.disconnect();
-				group.remove();
-			};
-			const mutationObserver = windowObj.MutationObserver ? new windowObj.MutationObserver(update) : null;
-			const resizeObserver = windowObj.ResizeObserver ? new windowObj.ResizeObserver(update) : null;
-			body.addEventListener("scroll", update, { passive: true });
-			windowObj.addEventListener("resize", update, { passive: true });
-			mutationObserver?.observe(body, {
-				childList: true,
-				subtree: true
-			});
-			resizeObserver?.observe(body);
-			windowObj.setTimeout(update, 0);
-			update();
-			return cleanup;
-		}
-		function closeModal() {
-			closeImageLightbox();
-			const modal = state.modal;
-			modal?.requestController?.abort();
-			modal?.replySyncController?.abort();
-			modal?.refreshScrollCleanup?.();
-			modal?.scrollCleanup?.();
-			if (modal?.body) destroyVirtualLists(modal.body);
-			modal?.overlay?.remove();
-			state.modal = null;
-			removeBodyLock();
-		}
-		function createCloseButton(onClick) {
-			const button = createElement("button", "xns-modal-close", "×");
-			button.type = "button";
-			button.setAttribute("aria-label", "关闭");
-			button.title = "关闭预览（Esc）";
-			button.addEventListener("click", onClick);
-			return button;
-		}
-		return Object.freeze({
-			removeBodyLock,
-			installPreviewScrollButtons,
-			closeModal,
-			createCloseButton,
-			createRefreshButton,
-			createShareButton
-		});
-	}
-	var xnsPreviewModalUi = createPreviewModalUi({
-		windowObj: window,
-		documentObj: document,
-		state,
-		createElement,
-		closeImageLightbox
-	});
-	var closeModal = () => xnsPreviewModalUi.closeModal();
-	var createCloseButton = (onClick) => xnsPreviewModalUi.createCloseButton(onClick);
-	var createRefreshButton = (onClick) => xnsPreviewModalUi.createRefreshButton(onClick);
-	var createShareButton = (onClick) => xnsPreviewModalUi.createShareButton(onClick);
-	var installPreviewScrollButtons = (dialog, body) => xnsPreviewModalUi.installPreviewScrollButtons(dialog, body);
-	function createPageStatusFormatter({ maxPage, getMaxPage }) {
-		function format(options = {}) {
-			const configuredLimit = Number(options.pageLimit) || Number(getMaxPage?.()) || maxPage;
-			const pageLimit = Math.min(maxPage, Math.max(1, configuredLimit));
-			const totalPages = Number(options.totalPages) || 0;
-			const loadedPages = Math.max(0, Number(options.loadedPages) || 0);
-			const failedCount = Array.isArray(options.failedPages) ? options.failedPages.length : 0;
-			const targetPages = Math.min(pageLimit, totalPages || loadedPages);
-			const pageProgress = targetPages ? `已读取 ${loadedPages}/${targetPages} 页` : "";
-			const stage = options.loading ? pageProgress ? `正在读取其他分页 · ${pageProgress}` : "正在读取其他分页…" : pageProgress;
-			const failed = failedCount ? `${failedCount} 页读取失败` : "";
-			const challengeCount = Array.isArray(options.challengePages) ? options.challengePages.length : 0;
-			const challenge = challengeCount ? `${challengeCount} 页被 Cloudflare 验证拦截，请完成验证后重试` : "";
-			const truncated = options.truncated ? `帖子共 ${totalPages || pageLimit} 页，仅读取前 ${pageLimit} 页，后面的内容没有显示` : "";
-			const detail = [
-				stage,
-				failed,
-				challenge,
-				truncated
-			].filter(Boolean).join(" · ");
-			return {
-				targetPages,
-				loadedPages,
-				failedCount,
-				stage,
-				failed,
-				challenge,
-				challengeCount,
-				truncated,
-				detail,
-				compact: [
-					Number.isFinite(options.commentCount) ? `${options.commentCount} 条回复` : "",
-					failedCount ? `${failedCount} 页失败` : "",
-					challengeCount ? `${challengeCount} 页需验证` : ""
-				].filter(Boolean).join(" · ") || detail,
-				tone: failedCount ? "is-failed" : ""
-			};
-		}
-		return Object.freeze({ format });
-	}
-	var formatPageStatus = createPageStatusFormatter({
-		maxPage: 50,
-		getMaxPage
-	}).format;
 	function createPreviewRenderUtils({ qs, qsa, createElement, buildPostUrl }) {
 		function stripRenderArtifacts(item) {
 			if (!item?.classList) return;
@@ -4381,6 +4917,50 @@
 	});
 	var stripRenderArtifacts = (item) => xnsPreviewRenderUtils.stripRenderArtifacts(item);
 	var addRemoteNote = (record, postId, remote) => xnsPreviewRenderUtils.addRemoteNote(record, postId, remote);
+	function createPageStatusFormatter({ maxPage, getMaxPage }) {
+		function format(options = {}) {
+			const configuredLimit = Number(options.pageLimit) || Number(getMaxPage?.()) || maxPage;
+			const pageLimit = Math.min(maxPage, Math.max(1, configuredLimit));
+			const totalPages = Number(options.totalPages) || 0;
+			const loadedPages = Math.max(0, Number(options.loadedPages) || 0);
+			const failedCount = Array.isArray(options.failedPages) ? options.failedPages.length : 0;
+			const targetPages = Math.min(pageLimit, totalPages || loadedPages);
+			const pageProgress = targetPages ? `已读取 ${loadedPages}/${targetPages} 页` : "";
+			const stage = options.loading ? pageProgress ? `正在读取其他分页 · ${pageProgress}` : "正在读取其他分页…" : pageProgress;
+			const failed = failedCount ? `${failedCount} 页读取失败` : "";
+			const challengeCount = Array.isArray(options.challengePages) ? options.challengePages.length : 0;
+			const challenge = challengeCount ? `${challengeCount} 页被 Cloudflare 验证拦截，请完成验证后重试` : "";
+			const truncated = options.truncated ? `帖子共 ${totalPages || pageLimit} 页，仅读取前 ${pageLimit} 页，后面的内容没有显示` : "";
+			const detail = [
+				stage,
+				failed,
+				challenge,
+				truncated
+			].filter(Boolean).join(" · ");
+			return {
+				targetPages,
+				loadedPages,
+				failedCount,
+				stage,
+				failed,
+				challenge,
+				challengeCount,
+				truncated,
+				detail,
+				compact: [
+					Number.isFinite(options.commentCount) ? `${options.commentCount} 条回复` : "",
+					failedCount ? `${failedCount} 页失败` : "",
+					challengeCount ? `${challengeCount} 页需验证` : ""
+				].filter(Boolean).join(" · ") || detail,
+				tone: failedCount ? "is-failed" : ""
+			};
+		}
+		return Object.freeze({ format });
+	}
+	var formatPageStatus = createPageStatusFormatter({
+		maxPage: 50,
+		getMaxPage
+	}).format;
 	var THREAD_STEP = 18;
 	var THREAD_LINE_WIDTH = 3;
 	var THREAD_LEVEL_LIMIT = 8;
@@ -4640,6 +5220,510 @@
 	var prepareCommentRecord = (record, depth, thread) => xnsPreviewRenderer.prepareCommentRecord(record, depth, thread);
 	var updateThreadGeometry = (node, entry) => xnsPreviewRenderer.updateThreadGeometry(node, entry);
 	var renderPreviewRecords = (section, info, records, options) => xnsPreviewRenderer.renderPreviewRecords(section, info, records, options);
+	function createPostPageController({ documentObj, windowObj, appState, selectors, maxPage, findCommentList, createElement, qs, qsa, fetchHtml, parseHtml, getFloor, getCommentItems, sanitizeImportedNode, releaseCommentNode, getSsrState, getCurrentUserUid, getCommentRecord, fetchPostPages, flattenReplyTree, createCommentVirtualizer, prepareCommentRecord, updateThreadGeometry, addRemoteNote, installPreviewFeatures, formatPageStatus, updateSettings, getMaxPage, buildPostUrl }) {
+		const NATIVE_EDIT_REQUEST_KEY = "xns-comment-preview-native-edit";
+		return class PostPageController {
+			info;
+			list;
+			originalChildren;
+			records;
+			loadedPages;
+			failedPages;
+			challengePages;
+			truncated;
+			totalPages;
+			toolbar;
+			statusNode;
+			loadingNode;
+			toolbarStatusText;
+			toolbarStatusTone;
+			toolbarStatusDetail;
+			loading;
+			hasRemotePages;
+			virtualizer;
+			generation;
+			progressiveTimer;
+			progressiveRendered;
+			composer;
+			requestController;
+			constructor(info) {
+				this.info = info;
+				this.list = null;
+				this.originalChildren = [];
+				this.records = [];
+				this.loadedPages = 0;
+				this.failedPages = [];
+				this.challengePages = [];
+				this.truncated = false;
+				this.totalPages = null;
+				this.toolbar = null;
+				this.statusNode = null;
+				this.loadingNode = null;
+				this.toolbarStatusText = "";
+				this.toolbarStatusTone = "";
+				this.toolbarStatusDetail = "";
+				this.loading = false;
+				this.hasRemotePages = false;
+				this.virtualizer = null;
+				this.generation = 0;
+				this.progressiveTimer = 0;
+				this.progressiveRendered = false;
+				this.composer = null;
+				this.requestController = null;
+			}
+			consumeNativeEditRequest() {
+				try {
+					const raw = windowObj.sessionStorage?.getItem(NATIVE_EDIT_REQUEST_KEY);
+					windowObj.sessionStorage?.removeItem(NATIVE_EDIT_REQUEST_KEY);
+					const request = raw ? JSON.parse(raw) : null;
+					if (!request || String(request.postId) !== String(this.info.postId)) return null;
+					if (!/^\d{1,15}$/.test(String(request.floor))) return null;
+					return String(request.floor);
+				} catch {
+					return null;
+				}
+			}
+			openNativeEditAfterReload(floor) {
+				if (this.applyNativeEdit(this.getSsrCommentIndex(null, floor))) return;
+				const started = Date.now();
+				const findEdit = () => {
+					const comment = Array.from(this.list?.children || []).find((node) => node.nodeType === 1 && String(node.id) === String(floor));
+					return Array.from(comment?.querySelectorAll?.(":scope > .comment-menu > .menu-item, :scope > .comment-actions > .menu-item") || []).find((item) => (item.textContent || "").trim() === "编辑");
+				};
+				const check = () => {
+					const edit = findEdit();
+					if (edit) {
+						edit.click();
+						return;
+					}
+					if (Date.now() - started < 12e3) windowObj.setTimeout(check, 80);
+				};
+				check();
+			}
+			rememberNativeEditRequest(floor) {
+				try {
+					windowObj.sessionStorage?.setItem(NATIVE_EDIT_REQUEST_KEY, JSON.stringify({
+						postId: this.info.postId,
+						floor: String(floor)
+					}));
+					return true;
+				} catch {
+					return false;
+				}
+			}
+			getSsrCommentIndex(commentId, floor) {
+				const comments = getSsrState(documentObj)?.postData?.comments;
+				if (!Array.isArray(comments)) return -1;
+				if (commentId !== null && commentId !== void 0) {
+					const byCommentId = comments.findIndex((item) => String(item?.commentId) === String(commentId));
+					if (byCommentId >= 0) return byCommentId;
+				}
+				if (floor === null || floor === void 0) return -1;
+				return comments.findIndex((item) => String(item?.floorIndex) === String(floor));
+			}
+			applyNativeEdit(index) {
+				if (!Number.isInteger(index) || index < 0) return false;
+				const editor = windowObj.editor;
+				if (typeof editor?.edit !== "function") return false;
+				editor.edit(index);
+				return true;
+			}
+			async init() {
+				this.list = await this.waitForCommentList();
+				if (!this.list) return;
+				this.originalChildren = Array.from(this.list.childNodes);
+				this.createToolbar();
+				const nativeEditFloor = this.consumeNativeEditRequest();
+				if (nativeEditFloor) {
+					await this.reloadPages();
+					this.openNativeEditAfterReload(nativeEditFloor);
+					return;
+				}
+				await this.reloadPages();
+			}
+			waitForCommentList() {
+				return new Promise((resolve) => {
+					const started = Date.now();
+					const check = () => {
+						const list = findCommentList();
+						if (list || Date.now() - started > 12e3) resolve(list);
+						else windowObj.setTimeout(check, 80);
+					};
+					check();
+				});
+			}
+			createToolbar() {
+				if (this.toolbar || !this.list) return;
+				const list = this.list;
+				const toolbar = createElement("nav", "xns-post-toolbar");
+				toolbar.setAttribute("aria-label", "评论布局");
+				const modeSwitch = createElement("span", "xns-post-mode-switch");
+				modeSwitch.setAttribute("role", "group");
+				modeSwitch.setAttribute("aria-label", "评论布局");
+				[[
+					"thread",
+					"楼中楼",
+					"切换到楼中楼布局"
+				], [
+					"original",
+					"原版",
+					"恢复官方评论布局"
+				]].forEach(([mode, text, title]) => {
+					const button = createElement("button", "", text);
+					button.type = "button";
+					button.dataset.mode = mode;
+					button.title = title;
+					button.setAttribute("aria-label", title);
+					button.addEventListener("click", () => this.setMode(mode));
+					modeSwitch.appendChild(button);
+				});
+				toolbar.appendChild(modeSwitch);
+				toolbar.appendChild(createElement("span", "xns-toolbar-status"));
+				const refresh = createElement("button", "xns-post-refresh", "刷新");
+				refresh.type = "button";
+				refresh.title = "重新读取当前页和评论分页";
+				refresh.setAttribute("aria-label", "重新读取当前页和评论分页");
+				refresh.addEventListener("click", () => {
+					if (this.loading) return;
+					if (this.failedPages.length) this.reloadPages({
+						onlyPages: [...this.failedPages],
+						initialChallengePages: [...this.challengePages]
+					});
+					else this.reloadPages({ refreshCurrentPage: true });
+				});
+				toolbar.appendChild(refresh);
+				list.closest(selectors.commentContainer)?.insertBefore(toolbar, list);
+				this.toolbar = toolbar;
+				this.updateToolbar();
+			}
+			updateToolbar() {
+				const toolbar = this.toolbar;
+				if (!toolbar) return;
+				qsa(toolbar, "[data-mode]").forEach((button) => {
+					button.setAttribute("aria-pressed", String(button.dataset.mode === appState.mode));
+				});
+				const refresh = qs(toolbar, ".xns-post-refresh");
+				if (refresh) {
+					refresh.disabled = this.loading;
+					refresh.setAttribute("aria-busy", String(this.loading));
+					const retrying = !this.loading && this.failedPages.length > 0;
+					refresh.textContent = retrying ? "重试" : "刷新";
+					refresh.title = retrying ? "重新读取分页" : "重新读取当前页和评论分页";
+					refresh.setAttribute("aria-label", retrying ? "重新读取分页" : "重新读取当前页和评论分页");
+				}
+				const status = qs(toolbar, ".xns-toolbar-status");
+				if (!status) return;
+				const text = this.toolbarStatusText || (this.records.length ? `${this.records.length} 条评论` : "读取中…");
+				status.className = `xns-toolbar-status${this.toolbarStatusTone ? ` ${this.toolbarStatusTone}` : ""}`;
+				status.textContent = text;
+				const detail = this.toolbarStatusDetail || (text.length > 24 ? text : "");
+				if (detail && detail !== text) status.title = detail;
+				else if (text.length > 24) status.title = text;
+				else status.removeAttribute("title");
+			}
+			async reloadPages(options = {}) {
+				if (!this.list) return;
+				const pageLimit = Math.min(maxPage, Math.max(1, Number(getMaxPage?.()) || maxPage));
+				const retryPages = Array.isArray(options.onlyPages) ? [...new Set(options.onlyPages.map((page) => Number(page)).filter((page) => Number.isInteger(page) && page >= 1 && page <= pageLimit))] : [];
+				const retryOnly = retryPages.length > 0;
+				const generation = ++this.generation;
+				this.clearProgressiveRender();
+				this.progressiveRendered = false;
+				this.requestController?.abort();
+				const requestController = windowObj.AbortController ? new windowObj.AbortController() : null;
+				this.requestController = requestController;
+				this.loading = true;
+				this.showLoading(retryOnly ? `正在重试 ${retryPages.length} 个失败分页…` : "正在读取评论分页…");
+				try {
+					if (options.refreshCurrentPage) await this.adoptNewReplies(generation, requestController?.signal);
+					if (generation !== this.generation) return;
+					if (!retryOnly) this.loadCurrentPage();
+					if (appState.mode === "thread") this.render({ progressive: true });
+					await this.loadPages(generation, {
+						...options,
+						onlyPages: retryOnly ? retryPages : void 0
+					}, requestController?.signal);
+					if (generation !== this.generation) return;
+					this.clearProgressiveRender();
+					this.loading = false;
+					if (appState.mode === "thread") this.render();
+					else this.showStatus("原版评论已刷新。");
+				} catch (error) {
+					if (generation !== this.generation) return;
+					this.restoreOriginal();
+					this.showStatus(`楼中楼读取失败：${error.message || "网络错误"}，已保留原版布局。`);
+				} finally {
+					if (this.requestController === requestController) this.requestController = null;
+					if (generation === this.generation) {
+						this.clearProgressiveRender();
+						this.loading = false;
+						this.loadingNode?.remove();
+						this.loadingNode = null;
+						this.updateToolbar();
+					}
+				}
+			}
+			loadCurrentPage() {
+				const state = getSsrState(documentObj);
+				const records = [];
+				this.originalChildren.forEach((item, index) => {
+					if (item.nodeType !== 1) return;
+					const record = getCommentRecord(item, this.info.postId, this.info.page, index, true, {
+						keepCommentMenu: true,
+						state,
+						getCurrentUserUid
+					});
+					if (record) records.push(record);
+				});
+				this.records = records;
+				this.loadedPages = 1;
+				this.failedPages = [];
+				this.challengePages = [];
+				const discovered = getPageNumbers(documentObj, this.info.postId);
+				this.totalPages = discovered.size ? Math.max(...discovered, this.info.page) : this.info.page;
+				this.truncated = this.totalPages > getMaxPage();
+				this.hasRemotePages = this.totalPages > 1 || this.info.page > 1;
+			}
+			async adoptNewReplies(generation, signal) {
+				const list = this.list;
+				if (!list) return;
+				try {
+					const response = await fetchHtml(buildPostUrl(this.info.postId, this.info.page), {
+						noStore: true,
+						signal
+					});
+					if (generation !== this.generation) return;
+					const parsed = parseHtml(response.html);
+					const knownFloors = new Set(this.originalChildren.filter((node) => node.nodeType === Node.ELEMENT_NODE).map((node) => getFloor(node)).filter((floor) => floor !== null));
+					getCommentItems(parsed).forEach((item) => {
+						const floor = getFloor(item);
+						if (floor === null || knownFloors.has(floor)) return;
+						const imported = sanitizeImportedNode(item, { keepCommentMenu: true });
+						if (!imported) return;
+						knownFloors.add(floor);
+						list.appendChild(imported);
+						this.originalChildren.push(imported);
+					});
+				} catch {}
+			}
+			async loadPages(generation, options = {}, signal) {
+				const retryPages = Array.isArray(options.onlyPages) ? options.onlyPages : [];
+				const retryOnly = retryPages.length > 0;
+				this.failedPages = retryOnly ? [...retryPages] : [];
+				this.challengePages = retryOnly ? (options.initialChallengePages || []).filter((page) => retryPages.includes(Number(page))).map(Number) : [];
+				const remoteRecords = [];
+				const updateProgress = (progress) => {
+					if (!progress || generation !== this.generation) return;
+					this.loadedPages = progress.loadedPages;
+					this.failedPages = [...progress.failedPages];
+					this.challengePages = [...progress.challengePages || []];
+					this.truncated = progress.truncated;
+					this.totalPages = progress.totalPages;
+					this.records = mergeCommentRecords(this.records, remoteRecords);
+					this.scheduleProgressiveRender(generation);
+				};
+				const fresh = options.noStore === true || options.refreshCurrentPage === true;
+				const pageLimit = Math.min(maxPage, Math.max(1, Number(getMaxPage?.()) || maxPage));
+				const knownTotalPages = Math.max(1, Number(this.totalPages) || pageLimit);
+				const initialLoadedPages = retryOnly ? Array.from({ length: Math.min(pageLimit, knownTotalPages) }, (_, index) => index + 1).filter((page) => !retryPages.includes(page)) : void 0;
+				const { loadedPages, failedPages, challengePages, truncated, totalPages } = await fetchPostPages(this.info, documentObj, {
+					noStore: fresh,
+					allowCache: !fresh,
+					retainDocuments: false,
+					...retryOnly ? {
+						onlyPages: retryPages,
+						initialLoadedPages,
+						initialFailedPages: retryPages,
+						initialChallengePages: (options.initialChallengePages || []).filter((page) => retryPages.includes(Number(page)))
+					} : {},
+					signal,
+					onPageLoaded: (page, root, progress) => {
+						if (page !== this.info.page) {
+							remoteRecords.push(...this.collectRemoteRecords(root, page));
+							updateProgress(progress);
+						}
+					},
+					onPageFailed: (_page, progress) => updateProgress(progress),
+					isAborted: () => generation !== this.generation
+				});
+				if (generation !== this.generation) return;
+				this.loadedPages = loadedPages;
+				this.failedPages = failedPages;
+				this.challengePages = challengePages;
+				this.truncated = truncated;
+				this.totalPages = totalPages;
+				this.records = mergeCommentRecords(this.records, remoteRecords);
+			}
+			scheduleProgressiveRender(generation) {
+				if (generation !== this.generation || appState.mode !== "thread" || this.progressiveTimer) return;
+				const delay = this.progressiveRendered ? 500 : 300;
+				this.progressiveTimer = windowObj.setTimeout(() => {
+					this.progressiveTimer = 0;
+					if (generation !== this.generation || !this.loading || appState.mode !== "thread") return;
+					this.progressiveRendered = true;
+					this.render({ progressive: true });
+				}, delay);
+			}
+			clearProgressiveRender() {
+				if (this.progressiveTimer) windowObj.clearTimeout(this.progressiveTimer);
+				this.progressiveTimer = 0;
+			}
+			collectRemoteRecords(root, page) {
+				const state = getSsrState(root);
+				return getCommentItems(root).map((item, index) => getCommentRecord(item, this.info.postId, page, index, false, {
+					keepCommentMenu: true,
+					state,
+					getCurrentUserUid
+				})).filter((record) => Boolean(record));
+			}
+			setMode(mode) {
+				if (!["thread", "original"].includes(mode)) return;
+				appState.mode = mode;
+				this.updateToolbar();
+				if (mode === "original") this.restoreOriginal();
+				else if (this.records.length) {
+					if (this.records.some((record) => !record.current && !record.node && !record.html)) this.reloadPages();
+					else this.render();
+				} else this.reloadPages();
+				updateSettings({ mode });
+			}
+			prepareNativeEdit(comment) {
+				if (!this.virtualizer || !this.originalChildren.includes(comment)) return false;
+				const floor = Number(comment.getAttribute("data-xns-floor") ?? comment.id);
+				const index = this.getSsrCommentIndex(getCommentId(comment), Number.isInteger(floor) ? floor : null);
+				if (this.applyNativeEdit(index)) return true;
+				if (!Number.isInteger(floor) || floor < 0 || !this.rememberNativeEditRequest(floor)) return false;
+				windowObj.location.reload();
+				return true;
+			}
+			requestNativeEdit(record) {
+				const floor = Number(record?.floor);
+				const page = Number(record?.page) || 1;
+				if (!Number.isInteger(floor) || floor < 0 || !this.rememberNativeEditRequest(floor)) return false;
+				const url = buildPostUrl(this.info.postId, page, floor);
+				if (!url) return false;
+				windowObj.location.assign(url.href);
+				return true;
+			}
+			showLoading(text) {
+				this.loadingNode?.remove();
+				this.loadingNode = null;
+				this.toolbarStatusText = this.records.length ? `${this.records.length} 条评论` : text;
+				this.toolbarStatusTone = "is-loading";
+				this.toolbarStatusDetail = text;
+				this.updateToolbar();
+			}
+			showStatus(text, tone = "", visibleText = "") {
+				this.statusNode?.remove();
+				this.statusNode = null;
+				this.toolbarStatusText = visibleText || (this.records.length ? `${this.records.length} 条评论` : text);
+				this.toolbarStatusTone = tone;
+				this.toolbarStatusDetail = text;
+				this.updateToolbar();
+			}
+			render(options = {}) {
+				if (!this.list || appState.mode !== "thread") return;
+				const virtualizerOptions = {
+					getViewport: () => windowObj,
+					renderItem: (entry) => entry.record ? prepareCommentRecord(entry.record, entry.depth ?? 0, entry.thread) : null,
+					onMount: (node, entry) => {
+						const record = entry.record;
+						if (!record || record.current) return;
+						addRemoteNote(record, this.info.postId);
+						node.classList.add("xns-preview-content");
+						installPreviewFeatures(node);
+					},
+					onUnmount: (node, entry) => {
+						const record = entry.record;
+						if (record && !record.current) releaseCommentNode(record);
+					},
+					onUpdate: updateThreadGeometry
+				};
+				if (!this.virtualizer) {
+					this.restoreOriginal({ releaseRemote: false });
+					this.list.classList.add("xns-preview-thread");
+					this.virtualizer = createCommentVirtualizer({
+						windowObj,
+						documentObj,
+						createElement,
+						estimatedHeight: 135,
+						overscanScreens: 2
+					}).mount(this.list, virtualizerOptions);
+				}
+				this.virtualizer.setEntries(flattenReplyTree(this.records), virtualizerOptions);
+				const loadedPages = this.loadedPages;
+				const loading = this.loading || options.progressive;
+				const pagination = formatPageStatus({
+					loadedPages,
+					totalPages: this.totalPages,
+					failedPages: this.failedPages,
+					challengePages: this.challengePages,
+					truncated: this.truncated,
+					loading: Boolean(loading) && this.hasRemotePages,
+					commentCount: this.records.length
+				});
+				const detail = pagination.detail || "暂无分页信息";
+				this.showStatus(`楼中楼已整理 · ${detail}`, pagination.tone, pagination.compact);
+			}
+			restoreOriginal(options = {}) {
+				const list = this.list;
+				if (!list) return;
+				this.virtualizer?.destroy();
+				this.virtualizer = null;
+				list.classList.remove("xns-preview-thread");
+				qsa(list, ".xns-reply-list, .xns-remote-note").forEach((node) => node.remove());
+				this.originalChildren.forEach((node) => stripRenderArtifacts(node));
+				while (list.firstChild) list.removeChild(list.firstChild);
+				this.originalChildren.forEach((node) => list.appendChild(node));
+				if (options.releaseRemote !== false) this.records.forEach(releaseCommentNode);
+				this.statusNode?.remove();
+				this.statusNode = null;
+				this.loadingNode?.remove();
+				this.loadingNode = null;
+				if (appState.mode === "original") {
+					this.toolbarStatusText = "原版评论";
+					this.toolbarStatusTone = "";
+					this.toolbarStatusDetail = "";
+				} else {
+					this.toolbarStatusText = "";
+					this.toolbarStatusTone = "";
+					this.toolbarStatusDetail = "";
+				}
+				this.updateToolbar();
+			}
+		};
+	}
+	var PostEnhancer = createPostPageController({
+		documentObj: document,
+		windowObj: window,
+		appState: state,
+		selectors: SELECTORS,
+		maxPage: 50,
+		findCommentList,
+		createElement,
+		qs,
+		qsa,
+		fetchHtml,
+		parseHtml,
+		getFloor,
+		getCommentItems,
+		sanitizeImportedNode,
+		releaseCommentNode,
+		getSsrState,
+		getCurrentUserUid,
+		getCommentRecord,
+		fetchPostPages,
+		flattenReplyTree,
+		createCommentVirtualizer,
+		prepareCommentRecord,
+		updateThreadGeometry,
+		addRemoteNote,
+		installPreviewFeatures,
+		formatPageStatus,
+		updateSettings,
+		getMaxPage,
+		buildPostUrl
+	});
 	function createPreviewController({ windowObj, documentObj, state, selectors, maxPage, qs, qsa, createElement, clearElement, getPostInfo, buildPostUrl, sanitizeImportedNode, parseHtml, fetchHtml, getPageNumbers, collectPageRecords, loadPreviewRecords, buildPreviewPostNode, renderPreviewRecords, installPreviewFeatures, installPreviewScrollButtons, closeImageLightbox, closeModal, createCloseButton, createRefreshButton, createShareButton, openPreviewComposer }) {
 		function currentModal() {
 			return state.modal || null;
@@ -5310,7 +6394,7 @@
 			overlay.appendChild(dialog);
 			documentObj.body.appendChild(overlay);
 			documentObj.documentElement.style.overflow = "hidden";
-			state.modal = {
+			const modalState = {
 				overlay,
 				dialog,
 				body,
@@ -5337,8 +6421,11 @@
 				challengePages: [],
 				truncated: false,
 				totalPages: null,
-				pageLimit: maxPage
+				pageLimit: maxPage,
+				refresh: () => refreshPreviewModal(),
+				syncReply: () => syncPreviewReply(modalState)
 			};
+			state.modal = modalState;
 			overlay.focus();
 			loadPreviewModal(currentModal(), "正在读取帖子内容…");
 		}
@@ -5379,1101 +6466,9 @@
 		createShareButton,
 		openPreviewComposer
 	});
-	function syncPreviewReply(modal) {
-		return xnsPreviewController.syncPreviewReply(modal);
-	}
-	function refreshPreviewModal(...args) {
-		return xnsPreviewController.refreshPreviewModal(...args);
-	}
 	function openPreviewModal(...args) {
 		return xnsPreviewController.openPreviewModal(...args);
 	}
-	function isInteractionAction(action) {
-		return action === "like" || action === "chicken" || action === "dislike" || action === "favorite";
-	}
-	function createCommentActions({ windowObj, documentObj, state, pageInfo, qs, qsa, createElement, getPostInfo, buildPostUrl, parseSameOriginUrl, safeCount, safePositiveInt, getFloor, getCommentId, getAuthorName, getPostContent, findCommentList, postAction, syncPreviewReply, refreshPreviewModal }) {
-		const PREVIEW_ACTIONS = [
-			[
-				"like",
-				"点赞",
-				"♡",
-				true
-			],
-			[
-				"chicken",
-				"加鸡腿",
-				"🍗",
-				true
-			],
-			[
-				"dislike",
-				"反对",
-				"♧",
-				true
-			],
-			[
-				"favorite",
-				"收藏",
-				"☆",
-				true
-			],
-			[
-				"quote",
-				"引用",
-				"❝",
-				false
-			],
-			[
-				"reply",
-				"回复",
-				"↩",
-				false
-			]
-		];
-		const MENU_ITEMS_SELECTOR = ":scope > .menu-item";
-		const ACTION_FLAGS = {
-			like: "liked",
-			chicken: "chickened",
-			dislike: "disliked",
-			favorite: "collected"
-		};
-		const ACTION_COUNTS = {
-			like: "like",
-			chicken: "chicken",
-			dislike: "dislike",
-			favorite: "favorite"
-		};
-		const interactionStates = new Map();
-		function getInteractionKey(action, comment) {
-			if (action === "favorite") {
-				const modal = state.modal;
-				const postId = safePositiveInt(comment?.getAttribute?.("data-xns-post-id") || "") || safePositiveInt(modal?.postId || "") || safePositiveInt(pageInfo?.postId || "");
-				return postId === null ? null : `post:${postId}`;
-			}
-			const commentId = comment ? getCommentId(comment) : null;
-			return commentId === null ? null : `comment:${commentId}:${action}`;
-		}
-		function getInteractionState(action, comment, counts = null) {
-			const key = getInteractionKey(action, comment);
-			if (!key) return null;
-			let entry = interactionStates.get(key);
-			if (!entry) {
-				entry = {
-					done: Boolean(counts?.[ACTION_FLAGS[action]]),
-					count: safeCount(counts ? counts[ACTION_COUNTS[action]] : null)
-				};
-				interactionStates.set(key, entry);
-			}
-			return entry;
-		}
-		function updateInteractionState(action, comment, patch = {}) {
-			const entry = getInteractionState(action, comment);
-			if (!entry) return null;
-			if (typeof patch.done === "boolean") entry.done = patch.done;
-			const nextCount = safeCount(patch.count);
-			if (nextCount !== null) entry.count = nextCount;
-			return entry;
-		}
-		function applyInteractionState(menuItem, entry) {
-			menuItem.classList.toggle("xns-action-done", Boolean(entry?.done));
-			const countNode = qs(menuItem, ":scope > .xns-action-count") || getMenuCountElement(menuItem);
-			const count = entry && typeof entry.count === "number" && Number.isFinite(entry.count) && entry.count >= 0 ? entry.count : null;
-			if (countNode && count !== null) countNode.textContent = String(count);
-		}
-		function getDirectCommentMenu(comment) {
-			return Array.from(comment?.children || []).find((child) => child.matches?.(".comment-menu, .comment-actions")) || null;
-		}
-		function getMenuActionKey(menuItem) {
-			const node = menuItem;
-			const values = [
-				node?.dataset?.action,
-				node?.dataset?.type,
-				menuItem?.getAttribute?.("title"),
-				menuItem?.getAttribute?.("aria-label"),
-				menuItem?.textContent
-			].filter(Boolean).join(" ").toLowerCase();
-			if (/\b(like|upvote)\b|点赞/.test(values)) return "like";
-			if (/\b(chicken|freelike)\b|鸡腿|投喂/.test(values)) return "chicken";
-			if (/\b(dislike|downvote)\b|反对|踩/.test(values)) return "dislike";
-			if (/\b(favorite|favourite|collection)\b|收藏/.test(values)) return "favorite";
-			if (/\bquote\b|引用/.test(values)) return "quote";
-			if (/\breply\b|回复/.test(values)) return "reply";
-			return "";
-		}
-		function createPreviewMenuItem([key, label, icon, withCount]) {
-			const item = createElement("span", "menu-item");
-			item.dataset.xnsAction = key;
-			item.title = label;
-			item.setAttribute("role", "button");
-			item.tabIndex = 0;
-			const iconNode = createElement("span", "xns-action-icon", icon);
-			iconNode.setAttribute("aria-hidden", "true");
-			item.appendChild(iconNode);
-			if (withCount) item.appendChild(createElement("span", "xns-action-count", "0"));
-			item.appendChild(createElement("span", "xns-action-label", label));
-			item.setAttribute("aria-label", label);
-			return item;
-		}
-		function createPreviewMenu(includeFavorite = true) {
-			const menu = createElement("div", "comment-menu xns-preview-menu");
-			PREVIEW_ACTIONS.filter(([key]) => includeFavorite || key !== "favorite").forEach((action) => menu.appendChild(createPreviewMenuItem(action)));
-			return menu;
-		}
-		function getMenuCountElement(menuItem) {
-			return qsa(menuItem, ":scope > span").find((node) => /^\d+$/.test((node.textContent || "").trim())) || null;
-		}
-		function ensurePreviewMenu(comment, options = {}) {
-			const includeFavorite = options.includeFavorite !== false;
-			let menu = getDirectCommentMenu(comment);
-			if (!menu) {
-				menu = createPreviewMenu(includeFavorite);
-				comment.appendChild(menu);
-			}
-			menu.classList.add("comment-menu", "xns-preview-menu");
-			let menuItems = qsa(menu, MENU_ITEMS_SELECTOR);
-			if (!includeFavorite) menuItems = menuItems.filter((item) => {
-				if (getMenuActionKey(item) === "favorite") {
-					item.remove();
-					return false;
-				}
-				return true;
-			});
-			const existingActions = new Set(menuItems.map(getMenuActionKey).filter(Boolean));
-			PREVIEW_ACTIONS.filter(([key]) => includeFavorite || key !== "favorite").filter(([key]) => !existingActions.has(key)).forEach((action) => {
-				const item = createPreviewMenuItem(action);
-				menu.appendChild(item);
-				menuItems.push(item);
-			});
-			menuItems.forEach((item) => {
-				const action = getMenuActionKey(item);
-				if (action) {
-					item.dataset.xnsAction = action;
-					const actionMeta = PREVIEW_ACTIONS.find(([key]) => key === action);
-					if (!item.hasAttribute("aria-label")) item.setAttribute("aria-label", actionMeta?.[1] || action);
-				}
-				if (!item.hasAttribute("role")) item.setAttribute("role", "button");
-				if (!item.hasAttribute("tabindex")) item.tabIndex = 0;
-			});
-			const counts = options.counts || null;
-			menuItems.forEach((item) => {
-				const action = getMenuActionKey(item);
-				if (!action || !isInteractionAction(action)) return;
-				applyInteractionState(item, getInteractionState(action, comment, counts));
-			});
-			return menu;
-		}
-		function getDisplayFloor(comment) {
-			if ((comment?.getAttribute("data-xns-floor") || comment?.getAttribute("id") || "") === "0") return 0;
-			return getFloor(comment);
-		}
-		function getActionTargetId(comment) {
-			const modal = state.modal;
-			const commentId = getCommentId(comment);
-			if (commentId !== null) return commentId;
-			if (comment?.getAttribute("data-xns-target-type") === "post") return safePositiveInt(comment.getAttribute("data-xns-post-id") || "") || safePositiveInt(modal?.postId || "");
-			return null;
-		}
-		function getPageActionContext() {
-			return {
-				modal: null,
-				postId: (pageInfo || getPostInfo(windowObj.location.href))?.postId || "",
-				url: parseSameOriginUrl(windowObj.location.href)
-			};
-		}
-		function getActionContext(menuItem) {
-			const modal = menuItem?.closest?.(".xns-overlay") ? state.modal : null;
-			if (modal) return {
-				modal,
-				postId: modal.postId,
-				url: modal.url
-			};
-			return getPageActionContext();
-		}
-		function setActionState(menuItem, text, failed = false) {
-			menuItem.classList.toggle("xns-action-failed", failed);
-			let stateNode = qs(menuItem, ":scope > .xns-action-state");
-			if (!stateNode) {
-				stateNode = createElement("span", "xns-action-state");
-				menuItem.appendChild(stateNode);
-			}
-			stateNode.textContent = text;
-		}
-		function getPreviewCommentText(comment) {
-			const content = getPostContent(comment);
-			if (!content) return "";
-			const copy = content.cloneNode(true);
-			qsa(copy, ".xns-remote-floor-link, .floor-link-wrapper").forEach((node) => node.remove());
-			return (copy.innerText || copy.textContent || "").trim().slice(0, 12e3);
-		}
-		function getPreviewSourceUrl(comment, context = null) {
-			const modal = state.modal;
-			const contextUrl = context?.url?.href || modal?.url?.href || windowObj.location.href;
-			if (!comment) return contextUrl;
-			const contextInfo = getPostInfo(contextUrl);
-			const modalInfo = context?.postId ? {
-				postId: String(context.postId),
-				page: contextInfo?.page || 1
-			} : contextInfo || (modal?.postId ? {
-				postId: modal.postId,
-				page: 1
-			} : null);
-			if (!modalInfo) return contextUrl;
-			const page = safePositiveInt(comment?.getAttribute("data-xns-source-page")) || modalInfo.page;
-			const floor = getDisplayFloor(comment);
-			return buildPostUrl(modalInfo.postId, page, floor)?.href || contextUrl;
-		}
-		function getDirectComposer(comment) {
-			return Array.from(comment?.children || []).find((child) => child.matches?.(":scope.xns-preview-composer")) || null;
-		}
-		function openPreviewEditor(comment, record, context = null) {
-			if (!comment || !record) return;
-			const commentId = getCommentId(comment);
-			if (commentId === null) return;
-			const actionContext = context || {
-				modal: state.modal,
-				postId: pageInfo?.postId || "",
-				url: state.modal?.url
-			};
-			getDirectComposer(comment)?.remove();
-			const composer = createElement("section", "xns-preview-composer xns-preview-editor");
-			composer.appendChild(createElement("h3", "xns-preview-composer-title", `编辑 #${getDisplayFloor(comment)} · ${getAuthorName(comment)}`));
-			const textarea = documentObj.createElement("textarea");
-			textarea.setAttribute("aria-label", "编辑评论内容");
-			textarea.value = typeof record.markdown === "string" ? record.markdown : "";
-			composer.appendChild(textarea);
-			const actions = createElement("div", "xns-preview-composer-actions");
-			const submit = createElement("button", "", "保存修改");
-			submit.type = "button";
-			const cancel = createElement("button", "", "取消");
-			cancel.type = "button";
-			const status = createElement("span", "xns-preview-composer-status");
-			actions.append(submit, cancel, status);
-			composer.appendChild(actions);
-			const menu = qs(comment, ":scope > .xns-preview-menu") || getDirectCommentMenu(comment);
-			if (menu) menu.insertAdjacentElement("afterend", composer);
-			else comment.appendChild(composer);
-			textarea.focus();
-			composer.scrollIntoView({
-				behavior: "smooth",
-				block: "nearest"
-			});
-			cancel.addEventListener("click", () => composer.remove());
-			submit.addEventListener("click", async () => {
-				const content = textarea.value.trim();
-				if (!content) {
-					status.textContent = "请输入内容。";
-					textarea.focus();
-					return;
-				}
-				if (content === (record.markdown || "").trim()) {
-					status.textContent = "内容没有变化。";
-					return;
-				}
-				submit.disabled = true;
-				status.textContent = "正在保存…";
-				try {
-					await postAction("/api/content/edit-comment", {
-						content,
-						commentId
-					}, { context: actionContext });
-					record.markdown = content;
-					status.textContent = "已保存，正在刷新…";
-					textarea.readOnly = true;
-					submit.remove();
-					if (actionContext.modal && state.modal === actionContext.modal) refreshPreviewModal?.();
-					else composer.remove();
-				} catch (error) {
-					status.textContent = `保存失败：${error.message || "网络错误"}`;
-					submit.disabled = false;
-				}
-			});
-		}
-		function openPreviewComposer(action, comment, context = null) {
-			const modal = context?.modal || state.modal || null;
-			const actionContext = context || {
-				modal,
-				postId: modal?.postId || pageInfo?.postId || "",
-				url: modal?.url || parseSameOriginUrl(windowObj.location.href)
-			};
-			const isPostReply = !comment || action === "post-reply";
-			const host = isPostReply ? modal?.composerHost || modal?.body || findCommentList() : comment || findCommentList();
-			if (!host) return;
-			const post = state.post;
-			(isPostReply ? modal?.composer || post?.composer : getDirectComposer(comment))?.remove();
-			const floor = isPostReply ? null : getDisplayFloor(comment);
-			const author = isPostReply ? "" : getAuthorName(comment);
-			const isReply = action === "reply" && !isPostReply;
-			const composer = createElement("section", "xns-preview-composer");
-			const floorLabel = floor === null ? "" : floor;
-			const composerTitle = isPostReply ? "回复帖子" : `${isReply ? "回复" : "引用"} #${floorLabel} · ${author}`;
-			composer.appendChild(createElement("h3", "xns-preview-composer-title", composerTitle));
-			const textarea = documentObj.createElement("textarea");
-			textarea.setAttribute("aria-label", isPostReply || isReply ? "回复内容" : "引用内容");
-			const sourceUrl = isPostReply ? actionContext.url?.href || windowObj.location.href : getPreviewSourceUrl(comment, actionContext);
-			if (isPostReply) {
-				textarea.placeholder = "输入对帖子的回复内容…";
-				textarea.value = "";
-			} else {
-				const replyToken = `@${author} [#${floorLabel}](${sourceUrl})`;
-				const quoted = getPreviewCommentText(comment).split(/\r?\n/).slice(0, 80).map((line) => `> ${line}`).join("\n");
-				textarea.value = isReply ? `${replyToken} ` : `> ${replyToken}\n${quoted}\n\n`;
-			}
-			composer.appendChild(textarea);
-			const actions = createElement("div", "xns-preview-composer-actions");
-			const submit = createElement("button", "", "发送回复");
-			submit.type = "button";
-			const original = createElement("a", "", "打开原帖回复");
-			original.href = getPreviewSourceUrl(comment, actionContext);
-			original.target = "_blank";
-			original.rel = "noopener noreferrer";
-			const cancel = createElement("button", "", "取消");
-			cancel.type = "button";
-			const status = createElement("span", "xns-preview-composer-status");
-			actions.append(submit, original, cancel, status);
-			composer.appendChild(actions);
-			if (isPostReply && modal?.composerHost) {
-				modal.composerHost.hidden = false;
-				modal.composerHost.classList.add("is-open");
-				modal.composerHost.appendChild(composer);
-				modal.composer = composer;
-			} else {
-				const menu = qs(comment, ".xns-preview-menu");
-				if (menu) menu.insertAdjacentElement("afterend", composer);
-				else host.appendChild(composer);
-				const postHandle = state.post;
-				if (isPostReply && postHandle) postHandle.composer = composer;
-			}
-			textarea.focus();
-			if (!isPostReply || !modal?.composerHost) composer.scrollIntoView({
-				behavior: "smooth",
-				block: "nearest"
-			});
-			cancel.addEventListener("click", () => {
-				composer.remove();
-				if (modal?.composer === composer) {
-					modal.composer = null;
-					modal.composerHost?.classList.remove("is-open");
-					if (modal.composerHost) modal.composerHost.hidden = true;
-				}
-				const postHandle = state.post;
-				if (!modal && postHandle?.composer === composer) postHandle.composer = null;
-			});
-			submit.addEventListener("click", async () => {
-				const content = textarea.value.trim();
-				if (!content) {
-					status.textContent = "请输入内容。";
-					textarea.focus();
-					return;
-				}
-				submit.disabled = true;
-				status.textContent = "正在发送…";
-				try {
-					await postAction("/api/content/new-comment", {
-						content,
-						mode: "new-comment",
-						postId: Number(actionContext.postId)
-					}, { context: actionContext });
-					status.textContent = "回复已发送，正在更新楼中楼…";
-					textarea.readOnly = true;
-					submit.remove();
-					if (actionContext.modal && state.modal === actionContext.modal) {
-						const postModal = actionContext.modal;
-						if (postModal.composer === composer) {
-							postModal.composer = null;
-							postModal.composerHost?.classList.remove("is-open");
-							if (postModal.composerHost) postModal.composerHost.hidden = true;
-						}
-						composer.remove();
-						syncPreviewReply?.(postModal);
-					} else if (state.post) {
-						const postHandle = state.post;
-						if (postHandle.composer === composer) postHandle.composer = null;
-						composer.remove();
-						await postHandle.reloadPages?.({ refreshCurrentPage: true });
-					}
-				} catch (error) {
-					status.textContent = `发送失败：${error.message || "网络错误"}`;
-					submit.disabled = false;
-				}
-			});
-		}
-		async function runPreviewAction(action, menuItem, comment, context = null) {
-			const actionContext = context || getActionContext(menuItem);
-			if (action === "quote" || action === "reply") {
-				openPreviewComposer(action, comment, actionContext);
-				return;
-			}
-			const postId = safePositiveInt(actionContext?.postId || "");
-			const targetId = getActionTargetId(comment);
-			if (action !== "favorite" && targetId === null || action === "favorite" && postId === null) {
-				setActionState(menuItem, action === "favorite" ? "缺少帖子ID" : "缺少目标ID", true);
-				return;
-			}
-			const stateEntry = getInteractionState(action, comment);
-			if (action !== "favorite" && stateEntry?.done) {
-				setActionState(menuItem, "已操作");
-				return;
-			}
-			if (menuItem.classList.contains("xns-action-pending")) return;
-			if (action === "chicken" && !windowObj.confirm("确认给这条评论加鸡腿？NodeSeek 可能会消耗鸡腿。")) return;
-			if (action === "dislike" && !windowObj.confirm("确认反对这条评论？NodeSeek 可能会消耗两个鸡腿。")) return;
-			const isFavoriteRemoval = action === "favorite" && Boolean(stateEntry?.done);
-			menuItem.classList.add("xns-action-pending");
-			menuItem.classList.remove("xns-action-failed");
-			setActionState(menuItem, "处理中…");
-			try {
-				let response = null;
-				if (action === "like") response = await postAction("/api/statistics/upvote", {
-					commentId: targetId,
-					action: "add"
-				}, { context: actionContext });
-				else if (action === "chicken") response = await postAction("/api/statistics/like", {
-					commentId: targetId,
-					action: "add"
-				}, { context: actionContext });
-				else if (action === "dislike") response = await postAction("/api/statistics/dislike", {
-					commentId: targetId,
-					action: "add"
-				}, { context: actionContext });
-				else if (action === "favorite") response = await postAction("/api/statistics/collection", {
-					postId,
-					action: isFavoriteRemoval ? "remove" : "add"
-				}, { context: actionContext });
-				const payload = response;
-				const previousCount = stateEntry?.count ?? null;
-				const fallbackCount = Number.isFinite(previousCount) && previousCount !== null ? previousCount + (isFavoriteRemoval ? -1 : 1) : null;
-				const responseCount = safeCount(action === "favorite" ? payload?.postCollectionCount : payload?.current);
-				updateInteractionState(action, comment, {
-					done: !isFavoriteRemoval,
-					count: responseCount === null ? fallbackCount : responseCount
-				});
-				applyInteractionState(menuItem, getInteractionState(action, comment));
-				setActionState(menuItem, "✓");
-				windowObj.setTimeout(() => {
-					if (menuItem.isConnected && !menuItem.classList.contains("xns-action-failed")) qs(menuItem, ":scope > .xns-action-state")?.remove();
-				}, 1800);
-			} catch (error) {
-				setActionState(menuItem, `失败：${error.message || "操作未完成"}`, true);
-			} finally {
-				menuItem.classList.remove("xns-action-pending");
-			}
-		}
-		return Object.freeze({
-			getDirectCommentMenu,
-			getMenuActionKey,
-			ensurePreviewMenu,
-			getActionContext,
-			openPreviewComposer,
-			openPreviewEditor,
-			runPreviewAction
-		});
-	}
-	var xnsCommentActions = createCommentActions({
-		windowObj: window,
-		documentObj: document,
-		state,
-		pageInfo,
-		qs,
-		qsa,
-		createElement,
-		getPostInfo,
-		buildPostUrl,
-		parseSameOriginUrl,
-		safeCount,
-		safePositiveInt,
-		getFloor,
-		getCommentId,
-		getAuthorName,
-		getPostContent,
-		findCommentList,
-		postAction,
-		syncPreviewReply: (...args) => syncPreviewReply(...args),
-		refreshPreviewModal: (...args) => refreshPreviewModal(...args)
-	});
-	function getDirectCommentMenu(comment) {
-		return xnsCommentActions.getDirectCommentMenu(comment);
-	}
-	function getMenuActionKey(menuItem) {
-		return xnsCommentActions.getMenuActionKey(menuItem);
-	}
-	function ensurePreviewMenu(comment, options = {}) {
-		return xnsCommentActions.ensurePreviewMenu(comment, options);
-	}
-	function getActionContext(menuItem) {
-		return xnsCommentActions.getActionContext(menuItem);
-	}
-	function openPreviewComposer(action, comment, context) {
-		return xnsCommentActions.openPreviewComposer(action, comment, context);
-	}
-	function openPreviewEditor(comment, record, context) {
-		return xnsCommentActions.openPreviewEditor(comment, record, context);
-	}
-	function runPreviewAction(action, menuItem, comment, context) {
-		return xnsCommentActions.runPreviewAction(action, menuItem, comment, context);
-	}
-	function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPreviewAction, closeImageLightbox, closeModal }) {
-		function handlePreviewActionClick(event) {
-			const menuItem = event.target?.closest?.(".xns-preview-menu > .menu-item") || null;
-			if (!menuItem) return;
-			const inPreview = Boolean(menuItem.closest(".xns-overlay .xns-preview-content"));
-			const inPost = Boolean(menuItem.closest(".comment-container"));
-			if (!inPreview && !inPost) return;
-			const comment = menuItem.closest(".content-item");
-			const action = menuItem.dataset.xnsAction || getMenuActionKey(menuItem);
-			if (!comment) return;
-			if (inPost && !action && (menuItem.textContent || "").trim() === "编辑") {
-				if (state.post?.prepareNativeEdit?.(comment)) {
-					event.preventDefault();
-					event.stopImmediatePropagation();
-				}
-				return;
-			}
-			if (!action) return;
-			event.preventDefault();
-			event.stopImmediatePropagation();
-			runPreviewAction(action, menuItem, comment, getActionContext(menuItem));
-		}
-		function handleKeydown(event) {
-			const eventTarget = event.target;
-			const menuItem = eventTarget?.closest?.(".xns-preview-menu > .menu-item") || null;
-			if (menuItem && (event.key === "Enter" || event.key === " ")) {
-				event.preventDefault();
-				menuItem.click();
-				return;
-			}
-			const inEditor = eventTarget?.closest?.("textarea, input, [contenteditable=\"true\"]");
-			if (event.key !== "Escape") return;
-			if (inEditor) return;
-			if (state.settingsPanel) {
-				event.preventDefault();
-				state.settingsPanel.close?.();
-				return;
-			}
-			if (state.lightbox) {
-				event.preventDefault();
-				closeImageLightbox();
-			} else if (state.modal) closeModal();
-		}
-		return Object.freeze({
-			handlePreviewActionClick,
-			handleKeydown
-		});
-	}
-	var xnsAppEvents = createAppEvents({
-		state,
-		qsa,
-		getMenuActionKey,
-		getActionContext,
-		runPreviewAction,
-		closeImageLightbox,
-		closeModal
-	});
-	var handlePreviewActionClick = (event) => xnsAppEvents.handlePreviewActionClick(event);
-	var handleKeydown = (event) => xnsAppEvents.handleKeydown(event);
-	function createPostPageController({ documentObj, windowObj, appState, selectors, maxPage, findCommentList, createElement, qs, qsa, fetchHtml, parseHtml, getFloor, getCommentItems, sanitizeImportedNode, releaseCommentNode, getSsrState, getCurrentUserUid, getCommentRecord, fetchPostPages, flattenReplyTree, createCommentVirtualizer, prepareCommentRecord, updateThreadGeometry, addRemoteNote, installPreviewFeatures, formatPageStatus, updateSettings, getMaxPage, buildPostUrl }) {
-		const NATIVE_EDIT_REQUEST_KEY = "xns-comment-preview-native-edit";
-		return class PostPageController {
-			info;
-			list;
-			originalChildren;
-			records;
-			loadedPages;
-			failedPages;
-			challengePages;
-			truncated;
-			totalPages;
-			toolbar;
-			statusNode;
-			loadingNode;
-			toolbarStatusText;
-			toolbarStatusTone;
-			toolbarStatusDetail;
-			loading;
-			hasRemotePages;
-			virtualizer;
-			generation;
-			progressiveTimer;
-			progressiveRendered;
-			composer;
-			requestController;
-			constructor(info) {
-				this.info = info;
-				this.list = null;
-				this.originalChildren = [];
-				this.records = [];
-				this.loadedPages = 0;
-				this.failedPages = [];
-				this.challengePages = [];
-				this.truncated = false;
-				this.totalPages = null;
-				this.toolbar = null;
-				this.statusNode = null;
-				this.loadingNode = null;
-				this.toolbarStatusText = "";
-				this.toolbarStatusTone = "";
-				this.toolbarStatusDetail = "";
-				this.loading = false;
-				this.hasRemotePages = false;
-				this.virtualizer = null;
-				this.generation = 0;
-				this.progressiveTimer = 0;
-				this.progressiveRendered = false;
-				this.composer = null;
-				this.requestController = null;
-			}
-			consumeNativeEditRequest() {
-				try {
-					const raw = windowObj.sessionStorage?.getItem(NATIVE_EDIT_REQUEST_KEY);
-					windowObj.sessionStorage?.removeItem(NATIVE_EDIT_REQUEST_KEY);
-					const request = raw ? JSON.parse(raw) : null;
-					if (!request || String(request.postId) !== String(this.info.postId)) return null;
-					if (!/^\d{1,15}$/.test(String(request.floor))) return null;
-					return String(request.floor);
-				} catch {
-					return null;
-				}
-			}
-			openNativeEditAfterReload(floor) {
-				if (this.applyNativeEdit(this.getSsrCommentIndex(null, floor))) return;
-				const started = Date.now();
-				const findEdit = () => {
-					const comment = Array.from(this.list?.children || []).find((node) => node.nodeType === 1 && String(node.id) === String(floor));
-					return Array.from(comment?.querySelectorAll?.(":scope > .comment-menu > .menu-item, :scope > .comment-actions > .menu-item") || []).find((item) => (item.textContent || "").trim() === "编辑");
-				};
-				const check = () => {
-					const edit = findEdit();
-					if (edit) {
-						edit.click();
-						return;
-					}
-					if (Date.now() - started < 12e3) windowObj.setTimeout(check, 80);
-				};
-				check();
-			}
-			rememberNativeEditRequest(floor) {
-				try {
-					windowObj.sessionStorage?.setItem(NATIVE_EDIT_REQUEST_KEY, JSON.stringify({
-						postId: this.info.postId,
-						floor: String(floor)
-					}));
-					return true;
-				} catch {
-					return false;
-				}
-			}
-			getSsrCommentIndex(commentId, floor) {
-				const comments = getSsrState(documentObj)?.postData?.comments;
-				if (!Array.isArray(comments)) return -1;
-				if (commentId !== null && commentId !== void 0) {
-					const byCommentId = comments.findIndex((item) => String(item?.commentId) === String(commentId));
-					if (byCommentId >= 0) return byCommentId;
-				}
-				if (floor === null || floor === void 0) return -1;
-				return comments.findIndex((item) => String(item?.floorIndex) === String(floor));
-			}
-			applyNativeEdit(index) {
-				if (!Number.isInteger(index) || index < 0) return false;
-				const editor = windowObj.editor;
-				if (typeof editor?.edit !== "function") return false;
-				editor.edit(index);
-				return true;
-			}
-			async init() {
-				this.list = await this.waitForCommentList();
-				if (!this.list) return;
-				this.originalChildren = Array.from(this.list.childNodes);
-				this.createToolbar();
-				const nativeEditFloor = this.consumeNativeEditRequest();
-				if (nativeEditFloor) {
-					await this.reloadPages();
-					this.openNativeEditAfterReload(nativeEditFloor);
-					return;
-				}
-				await this.reloadPages();
-			}
-			waitForCommentList() {
-				return new Promise((resolve) => {
-					const started = Date.now();
-					const check = () => {
-						const list = findCommentList();
-						if (list || Date.now() - started > 12e3) resolve(list);
-						else windowObj.setTimeout(check, 80);
-					};
-					check();
-				});
-			}
-			createToolbar() {
-				if (this.toolbar || !this.list) return;
-				const list = this.list;
-				const toolbar = createElement("nav", "xns-post-toolbar");
-				toolbar.setAttribute("aria-label", "评论布局");
-				const modeSwitch = createElement("span", "xns-post-mode-switch");
-				modeSwitch.setAttribute("role", "group");
-				modeSwitch.setAttribute("aria-label", "评论布局");
-				[[
-					"thread",
-					"楼中楼",
-					"切换到楼中楼布局"
-				], [
-					"original",
-					"原版",
-					"恢复官方评论布局"
-				]].forEach(([mode, text, title]) => {
-					const button = createElement("button", "", text);
-					button.type = "button";
-					button.dataset.mode = mode;
-					button.title = title;
-					button.setAttribute("aria-label", title);
-					button.addEventListener("click", () => this.setMode(mode));
-					modeSwitch.appendChild(button);
-				});
-				toolbar.appendChild(modeSwitch);
-				toolbar.appendChild(createElement("span", "xns-toolbar-status"));
-				const refresh = createElement("button", "xns-post-refresh", "刷新");
-				refresh.type = "button";
-				refresh.title = "重新读取当前页和评论分页";
-				refresh.setAttribute("aria-label", "重新读取当前页和评论分页");
-				refresh.addEventListener("click", () => {
-					if (this.loading) return;
-					if (this.failedPages.length) this.reloadPages({
-						onlyPages: [...this.failedPages],
-						initialChallengePages: [...this.challengePages]
-					});
-					else this.reloadPages({ refreshCurrentPage: true });
-				});
-				toolbar.appendChild(refresh);
-				list.closest(selectors.commentContainer)?.insertBefore(toolbar, list);
-				this.toolbar = toolbar;
-				this.updateToolbar();
-			}
-			updateToolbar() {
-				const toolbar = this.toolbar;
-				if (!toolbar) return;
-				qsa(toolbar, "[data-mode]").forEach((button) => {
-					button.setAttribute("aria-pressed", String(button.dataset.mode === appState.mode));
-				});
-				const refresh = qs(toolbar, ".xns-post-refresh");
-				if (refresh) {
-					refresh.disabled = this.loading;
-					refresh.setAttribute("aria-busy", String(this.loading));
-					const retrying = !this.loading && this.failedPages.length > 0;
-					refresh.textContent = retrying ? "重试" : "刷新";
-					refresh.title = retrying ? "重新读取分页" : "重新读取当前页和评论分页";
-					refresh.setAttribute("aria-label", retrying ? "重新读取分页" : "重新读取当前页和评论分页");
-				}
-				const status = qs(toolbar, ".xns-toolbar-status");
-				if (!status) return;
-				const text = this.toolbarStatusText || (this.records.length ? `${this.records.length} 条评论` : "读取中…");
-				status.className = `xns-toolbar-status${this.toolbarStatusTone ? ` ${this.toolbarStatusTone}` : ""}`;
-				status.textContent = text;
-				const detail = this.toolbarStatusDetail || (text.length > 24 ? text : "");
-				if (detail && detail !== text) status.title = detail;
-				else if (text.length > 24) status.title = text;
-				else status.removeAttribute("title");
-			}
-			async reloadPages(options = {}) {
-				if (!this.list) return;
-				const pageLimit = Math.min(maxPage, Math.max(1, Number(getMaxPage?.()) || maxPage));
-				const retryPages = Array.isArray(options.onlyPages) ? [...new Set(options.onlyPages.map((page) => Number(page)).filter((page) => Number.isInteger(page) && page >= 1 && page <= pageLimit))] : [];
-				const retryOnly = retryPages.length > 0;
-				const generation = ++this.generation;
-				this.clearProgressiveRender();
-				this.progressiveRendered = false;
-				this.requestController?.abort();
-				const requestController = windowObj.AbortController ? new windowObj.AbortController() : null;
-				this.requestController = requestController;
-				this.loading = true;
-				this.showLoading(retryOnly ? `正在重试 ${retryPages.length} 个失败分页…` : "正在读取评论分页…");
-				try {
-					if (options.refreshCurrentPage) await this.adoptNewReplies(generation, requestController?.signal);
-					if (generation !== this.generation) return;
-					if (!retryOnly) this.loadCurrentPage();
-					if (appState.mode === "thread") this.render({ progressive: true });
-					await this.loadPages(generation, {
-						...options,
-						onlyPages: retryOnly ? retryPages : void 0
-					}, requestController?.signal);
-					if (generation !== this.generation) return;
-					this.clearProgressiveRender();
-					this.loading = false;
-					if (appState.mode === "thread") this.render();
-					else this.showStatus("原版评论已刷新。");
-				} catch (error) {
-					if (generation !== this.generation) return;
-					this.restoreOriginal();
-					this.showStatus(`楼中楼读取失败：${error.message || "网络错误"}，已保留原版布局。`);
-				} finally {
-					if (this.requestController === requestController) this.requestController = null;
-					if (generation === this.generation) {
-						this.clearProgressiveRender();
-						this.loading = false;
-						this.loadingNode?.remove();
-						this.loadingNode = null;
-						this.updateToolbar();
-					}
-				}
-			}
-			loadCurrentPage() {
-				const state = getSsrState(documentObj);
-				const records = [];
-				this.originalChildren.forEach((item, index) => {
-					if (item.nodeType !== 1) return;
-					const record = getCommentRecord(item, this.info.postId, this.info.page, index, true, {
-						keepCommentMenu: true,
-						state,
-						getCurrentUserUid
-					});
-					if (record) records.push(record);
-				});
-				this.records = records;
-				this.loadedPages = 1;
-				this.failedPages = [];
-				this.challengePages = [];
-				const discovered = getPageNumbers(documentObj, this.info.postId);
-				this.totalPages = discovered.size ? Math.max(...discovered, this.info.page) : this.info.page;
-				this.truncated = this.totalPages > getMaxPage();
-				this.hasRemotePages = this.totalPages > 1 || this.info.page > 1;
-			}
-			async adoptNewReplies(generation, signal) {
-				const list = this.list;
-				if (!list) return;
-				try {
-					const response = await fetchHtml(buildPostUrl(this.info.postId, this.info.page), {
-						noStore: true,
-						signal
-					});
-					if (generation !== this.generation) return;
-					const parsed = parseHtml(response.html);
-					const knownFloors = new Set(this.originalChildren.filter((node) => node.nodeType === Node.ELEMENT_NODE).map((node) => getFloor(node)).filter((floor) => floor !== null));
-					getCommentItems(parsed).forEach((item) => {
-						const floor = getFloor(item);
-						if (floor === null || knownFloors.has(floor)) return;
-						const imported = sanitizeImportedNode(item, { keepCommentMenu: true });
-						if (!imported) return;
-						knownFloors.add(floor);
-						list.appendChild(imported);
-						this.originalChildren.push(imported);
-					});
-				} catch {}
-			}
-			async loadPages(generation, options = {}, signal) {
-				const retryPages = Array.isArray(options.onlyPages) ? options.onlyPages : [];
-				const retryOnly = retryPages.length > 0;
-				this.failedPages = retryOnly ? [...retryPages] : [];
-				this.challengePages = retryOnly ? (options.initialChallengePages || []).filter((page) => retryPages.includes(Number(page))).map(Number) : [];
-				const remoteRecords = [];
-				const updateProgress = (progress) => {
-					if (!progress || generation !== this.generation) return;
-					this.loadedPages = progress.loadedPages;
-					this.failedPages = [...progress.failedPages];
-					this.challengePages = [...progress.challengePages || []];
-					this.truncated = progress.truncated;
-					this.totalPages = progress.totalPages;
-					this.records = mergeCommentRecords(this.records, remoteRecords);
-					this.scheduleProgressiveRender(generation);
-				};
-				const fresh = options.noStore === true || options.refreshCurrentPage === true;
-				const pageLimit = Math.min(maxPage, Math.max(1, Number(getMaxPage?.()) || maxPage));
-				const knownTotalPages = Math.max(1, Number(this.totalPages) || pageLimit);
-				const initialLoadedPages = retryOnly ? Array.from({ length: Math.min(pageLimit, knownTotalPages) }, (_, index) => index + 1).filter((page) => !retryPages.includes(page)) : void 0;
-				const { loadedPages, failedPages, challengePages, truncated, totalPages } = await fetchPostPages(this.info, documentObj, {
-					noStore: fresh,
-					allowCache: !fresh,
-					retainDocuments: false,
-					...retryOnly ? {
-						onlyPages: retryPages,
-						initialLoadedPages,
-						initialFailedPages: retryPages,
-						initialChallengePages: (options.initialChallengePages || []).filter((page) => retryPages.includes(Number(page)))
-					} : {},
-					signal,
-					onPageLoaded: (page, root, progress) => {
-						if (page !== this.info.page) {
-							remoteRecords.push(...this.collectRemoteRecords(root, page));
-							updateProgress(progress);
-						}
-					},
-					onPageFailed: (_page, progress) => updateProgress(progress),
-					isAborted: () => generation !== this.generation
-				});
-				if (generation !== this.generation) return;
-				this.loadedPages = loadedPages;
-				this.failedPages = failedPages;
-				this.challengePages = challengePages;
-				this.truncated = truncated;
-				this.totalPages = totalPages;
-				this.records = mergeCommentRecords(this.records, remoteRecords);
-			}
-			scheduleProgressiveRender(generation) {
-				if (generation !== this.generation || appState.mode !== "thread" || this.progressiveTimer) return;
-				const delay = this.progressiveRendered ? 500 : 300;
-				this.progressiveTimer = windowObj.setTimeout(() => {
-					this.progressiveTimer = 0;
-					if (generation !== this.generation || !this.loading || appState.mode !== "thread") return;
-					this.progressiveRendered = true;
-					this.render({ progressive: true });
-				}, delay);
-			}
-			clearProgressiveRender() {
-				if (this.progressiveTimer) windowObj.clearTimeout(this.progressiveTimer);
-				this.progressiveTimer = 0;
-			}
-			collectRemoteRecords(root, page) {
-				const state = getSsrState(root);
-				return getCommentItems(root).map((item, index) => getCommentRecord(item, this.info.postId, page, index, false, {
-					keepCommentMenu: true,
-					state,
-					getCurrentUserUid
-				})).filter((record) => Boolean(record));
-			}
-			setMode(mode) {
-				if (!["thread", "original"].includes(mode)) return;
-				appState.mode = mode;
-				this.updateToolbar();
-				if (mode === "original") this.restoreOriginal();
-				else if (this.records.length) {
-					if (this.records.some((record) => !record.current && !record.node && !record.html)) this.reloadPages();
-					else this.render();
-				} else this.reloadPages();
-				updateSettings({ mode });
-			}
-			prepareNativeEdit(comment) {
-				if (!this.virtualizer || !this.originalChildren.includes(comment)) return false;
-				const floor = Number(comment.getAttribute("data-xns-floor") ?? comment.id);
-				const index = this.getSsrCommentIndex(getCommentId(comment), Number.isInteger(floor) ? floor : null);
-				if (this.applyNativeEdit(index)) return true;
-				if (!Number.isInteger(floor) || floor < 0 || !this.rememberNativeEditRequest(floor)) return false;
-				windowObj.location.reload();
-				return true;
-			}
-			requestNativeEdit(record) {
-				const floor = Number(record?.floor);
-				const page = Number(record?.page) || 1;
-				if (!Number.isInteger(floor) || floor < 0 || !this.rememberNativeEditRequest(floor)) return false;
-				const url = buildPostUrl(this.info.postId, page, floor);
-				if (!url) return false;
-				windowObj.location.assign(url.href);
-				return true;
-			}
-			showLoading(text) {
-				this.loadingNode?.remove();
-				this.loadingNode = null;
-				this.toolbarStatusText = this.records.length ? `${this.records.length} 条评论` : text;
-				this.toolbarStatusTone = "is-loading";
-				this.toolbarStatusDetail = text;
-				this.updateToolbar();
-			}
-			showStatus(text, tone = "", visibleText = "") {
-				this.statusNode?.remove();
-				this.statusNode = null;
-				this.toolbarStatusText = visibleText || (this.records.length ? `${this.records.length} 条评论` : text);
-				this.toolbarStatusTone = tone;
-				this.toolbarStatusDetail = text;
-				this.updateToolbar();
-			}
-			render(options = {}) {
-				if (!this.list || appState.mode !== "thread") return;
-				const virtualizerOptions = {
-					getViewport: () => windowObj,
-					renderItem: (entry) => entry.record ? prepareCommentRecord(entry.record, entry.depth ?? 0, entry.thread) : null,
-					onMount: (node, entry) => {
-						const record = entry.record;
-						if (!record || record.current) return;
-						addRemoteNote(record, this.info.postId);
-						node.classList.add("xns-preview-content");
-						installPreviewFeatures(node);
-					},
-					onUnmount: (node, entry) => {
-						const record = entry.record;
-						if (record && !record.current) releaseCommentNode(record);
-					},
-					onUpdate: updateThreadGeometry
-				};
-				if (!this.virtualizer) {
-					this.restoreOriginal({ releaseRemote: false });
-					this.list.classList.add("xns-preview-thread");
-					this.virtualizer = createCommentVirtualizer({
-						windowObj,
-						documentObj,
-						createElement,
-						estimatedHeight: 135,
-						overscanScreens: 2
-					}).mount(this.list, virtualizerOptions);
-				}
-				this.virtualizer.setEntries(flattenReplyTree(this.records), virtualizerOptions);
-				const loadedPages = this.loadedPages;
-				const loading = this.loading || options.progressive;
-				const pagination = formatPageStatus({
-					loadedPages,
-					totalPages: this.totalPages,
-					failedPages: this.failedPages,
-					challengePages: this.challengePages,
-					truncated: this.truncated,
-					loading: Boolean(loading) && this.hasRemotePages,
-					commentCount: this.records.length
-				});
-				const detail = pagination.detail || "暂无分页信息";
-				this.showStatus(`楼中楼已整理 · ${detail}`, pagination.tone, pagination.compact);
-			}
-			restoreOriginal(options = {}) {
-				const list = this.list;
-				if (!list) return;
-				this.virtualizer?.destroy();
-				this.virtualizer = null;
-				list.classList.remove("xns-preview-thread");
-				qsa(list, ".xns-reply-list, .xns-remote-note").forEach((node) => node.remove());
-				this.originalChildren.forEach((node) => stripRenderArtifacts(node));
-				while (list.firstChild) list.removeChild(list.firstChild);
-				this.originalChildren.forEach((node) => list.appendChild(node));
-				if (options.releaseRemote !== false) this.records.forEach(releaseCommentNode);
-				this.statusNode?.remove();
-				this.statusNode = null;
-				this.loadingNode?.remove();
-				this.loadingNode = null;
-				if (appState.mode === "original") {
-					this.toolbarStatusText = "原版评论";
-					this.toolbarStatusTone = "";
-					this.toolbarStatusDetail = "";
-				} else {
-					this.toolbarStatusText = "";
-					this.toolbarStatusTone = "";
-					this.toolbarStatusDetail = "";
-				}
-				this.updateToolbar();
-			}
-		};
-	}
-	var PostEnhancer = createPostPageController({
-		documentObj: document,
-		windowObj: window,
-		appState: state,
-		selectors: SELECTORS,
-		maxPage: 50,
-		findCommentList,
-		createElement,
-		qs,
-		qsa,
-		fetchHtml,
-		parseHtml,
-		getFloor,
-		getCommentItems,
-		sanitizeImportedNode,
-		releaseCommentNode,
-		getSsrState,
-		getCurrentUserUid,
-		getCommentRecord,
-		fetchPostPages,
-		flattenReplyTree,
-		createCommentVirtualizer,
-		prepareCommentRecord,
-		updateThreadGeometry,
-		addRemoteNote,
-		installPreviewFeatures,
-		formatPageStatus,
-		updateSettings,
-		getMaxPage,
-		buildPostUrl
-	});
 	function createPreviewEntryController({ document, location, parseSameOriginUrl, getPostInfo, openPreviewModal }) {
 		const titleSelectors = [
 			"h3 a[href]",
