@@ -12,6 +12,8 @@ npm test
 
 测试会先执行兼容入口 `node work/build.mjs`，运行类型检查和 Vite 构建，因此测试的是当前 `src/` 构建出来的安装产物，而不是工作区里手工残留的旧输出文件。在 `work/test/` 目录内仍可执行 `npm test`。
 
+浏览器由脚本自行发现，按 Chrome → Edge → Chromium 的顺序逐个尝试，某个候选启动不起来（部分 Linux 机器上 Chromium 是 snap 包装脚本，进程能起但永远不打印调试端口）会自动换下一个；需要指定时用 `CHROME_PATH` 指向浏览器可执行文件或目录。
+
 ### 楼层关系线纯逻辑测试
 
 `thread-lines.test.mjs` 在浏览器场景之前先跑，直接 `import` `src/comments/thread.ts`（Node ≥ 23 原生剥离类型，该模块只有 `import type`，运行时零依赖），用小型树对拍 `flattenReplyTree` 输出的 `full/stop`：单链、多兄弟、末子节点带后代、非末子节点带后代、跨页追加兄弟后几何反转、超过缩进上限的深链与上限处分叉。

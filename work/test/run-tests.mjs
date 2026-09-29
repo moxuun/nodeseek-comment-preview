@@ -28,13 +28,21 @@ const { failures: treeLineFailures } = await import('./thread-lines.test.mjs');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function findChrome() {
+/**
+ * 按优先级列出候选浏览器。
+ * 同一台机器上可能同时装着“起不来”的那个：部分 Linux runner 的 /usr/bin/chromium 是 snap
+ * 包装脚本，进程能起来但永远不会打印 WS endpoint，所以 Linux 上优先用 Chrome，并保留多个候选。
+ */
+function findChromeCandidates() {
+  const candidates = [];
   const envPath = process.env.CHROME_PATH || process.env.CHROMIUM_PATH;
   if (envPath) {
-    if (fs.existsSync(envPath) && fs.statSync(envPath).isFile()) return envPath;
-    for (const name of ['chrome', 'chromium', 'msedge']) {
-      const candidate = path.join(envPath, name + (process.platform === 'win32' ? '.exe' : ''));
-      if (fs.existsSync(candidate)) return candidate;
+    if (fs.existsSync(envPath) && fs.statSync(envPath).isFile()) candidates.push(envPath);
+    else {
+      for (const name of ['chrome', 'chromium', 'msedge']) {
+        const candidate = path.join(envPath, name + (process.platform === 'win32' ? '.exe' : ''));
+        if (fs.existsSync(candidate)) candidates.push(candidate);
+      }
     }
   }
   const absolute = [
@@ -45,20 +53,49 @@ function findChrome() {
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
     '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/microsoft-edge',
     '/usr/bin/chromium',
     '/usr/bin/chromium-browser',
-    '/usr/bin/google-chrome',
-    '/usr/bin/microsoft-edge',
   ];
   for (const candidate of absolute) {
-    if (fs.existsSync(candidate)) return candidate;
+    if (fs.existsSync(candidate)) candidates.push(candidate);
   }
   const which = process.platform === 'win32' ? 'where' : 'which';
-  for (const name of ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable', 'microsoft-edge', 'microsoft-edge-stable', 'brave-browser', 'chrome']) {
+  for (const name of ['google-chrome', 'google-chrome-stable', 'microsoft-edge', 'microsoft-edge-stable', 'brave-browser', 'chromium', 'chromium-browser', 'chrome']) {
     const result = spawnSync(which, [name], { encoding: 'utf8' });
-    if (result.status === 0 && result.stdout.trim()) return result.stdout.trim().split(/\r?\n/)[0];
+    if (result.status === 0 && result.stdout.trim()) candidates.push(result.stdout.trim().split(/\r?\n/)[0]);
   }
-  return null;
+  return [...new Set(candidates)];
+}
+
+/** 逐个试候选浏览器，试出一个能启动的为止（单个候选也可能是坏的，例如 snap 包装脚本）。 */
+async function launchBrowser() {
+  const candidates = findChromeCandidates();
+  if (!candidates.length) {
+    console.error('未找到 Chromium/Chrome/Edge。请安装浏览器或设置 CHROME_PATH 指向浏览器可执行文件。');
+    process.exit(1);
+  }
+  const failures = [];
+  for (const candidate of candidates) {
+    try {
+      const instance = await puppeteer.launch({
+        executablePath: candidate,
+        headless: true,
+        timeout: 20_000,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      });
+      console.log(`浏览器：${candidate}`);
+      return instance;
+    } catch (error) {
+      const message = String(error?.message || error).split('\n')[0];
+      console.error(`浏览器启动失败，换下一个候选：${candidate}（${message}）`);
+      failures.push(`${candidate}: ${message}`);
+    }
+  }
+  console.error(`所有候选浏览器都无法启动：\n${failures.join('\n')}`);
+  process.exit(1);
 }
 
 function findFreePort() {
@@ -1978,13 +2015,6 @@ scenario('暗色模式跟随网站 dark-layout（0.5.12 回归）', async (ctx) 
 
 // ---------- 主流程 ----------
 
-const chromePath = findChrome();
-if (!chromePath) {
-  console.error('未找到 Chromium/Chrome/Edge。请安装浏览器或设置 CHROME_PATH 指向浏览器可执行文件。');
-  process.exit(1);
-}
-console.log(`浏览器：${chromePath}`);
-
 const port = await findFreePort();
 const base = `http://127.0.0.1:${port}`;
 const server = await startServer(port);
@@ -1993,11 +2023,7 @@ console.log(`fixture 服务器：${base}`);
 let browser;
 const reports = [];
 try {
-  browser = await puppeteer.launch({
-    executablePath: chromePath,
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-  });
+  browser = await launchBrowser();
   const ctx = createContext(browser, base);
   const selectedScenarios = process.env.XNS_TEST_FILTER
     ? scenarios.filter(({ name }) => name.includes(process.env.XNS_TEST_FILTER))
