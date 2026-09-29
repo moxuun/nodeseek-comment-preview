@@ -12,6 +12,8 @@ import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
+// 直接读源码里的常量：基础间隔调小/调大时，这条断言自动跟着走，不会写在暗处。
+import { PAGE_REQUEST_GAP } from '../../src/core/config.ts';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 
@@ -1196,7 +1198,7 @@ scenario('分页请求从首个请求开始遵守基础间隔', async (ctx) => {
   const starts = await page.evaluate(() => window.__xnsPageRequestStarts || []);
   assert(starts.length >= 2, `应至少记录两个分页请求，实际 ${JSON.stringify(starts)}`);
   const firstGap = starts[1].time - starts[0].time;
-  assert(firstGap >= 100, `前两个分页请求不应同时发出，实际间隔 ${firstGap.toFixed(1)}ms`);
+  assert(firstGap >= PAGE_REQUEST_GAP - 20, `前两个分页请求不应同时发出，实际间隔 ${firstGap.toFixed(1)}ms（基础间隔 ${PAGE_REQUEST_GAP}ms）`);
   await page.close();
 });
 

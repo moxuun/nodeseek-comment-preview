@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.91
+// @version      0.5.92
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -4551,8 +4551,8 @@
 		windowObj: window,
 		maxPage: 50,
 		getMaxPage,
-		concurrency: 2,
-		requestGapMs: 150,
+		concurrency: 4,
+		requestGapMs: 80,
 		fetchHtml,
 		parseHtml,
 		getPageNumbers,

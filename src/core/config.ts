@@ -6,9 +6,12 @@ const REQUEST_TIMEOUT = 8_000;
 const MAX_RESPONSE_BYTES = 2_000_000;
 const MAX_PAGE = 50;
 // NodeSeek 对连续分页请求有明显的限流；保留少量并发，避免长帖读取时成批 429。
-const PAGE_CONCURRENCY = 2;
-// 发生限流后，分页请求之间错开起始时间；正常情况下不人为降低吞吐。
-const PAGE_REQUEST_GAP = 150;
+// 实测（work/test/benchmark.mjs，50 页富内容帖子页 + 250ms 模拟延迟，各 3 次取中位数）：
+//   2 并发 + 150ms = 8.0s（旧值）／ 4 + 100ms = 5.6s ／ 4 + 80ms = 4.7s ／ 8 + 30ms = 2.8s；
+// 四档的首屏、DOM 规模与 JS 堆完全一致（首屏约 0.43s），差别只在全部读完的总时长。取中间档：峰值约 12 请求/秒。
+const PAGE_CONCURRENCY = 4;
+// 分页请求之间的最小起始间隔，同时也是被限流后退避的下限。
+const PAGE_REQUEST_GAP = 80;
 const HTML_CACHE_TTL = 30_000;
 const HTML_CACHE_MAX_ENTRIES = 16;
 const HTML_CACHE_MAX_BYTES = 4_000_000;

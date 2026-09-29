@@ -7,6 +7,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, 'xns-fixture');
 const outputRoot = path.join(here, '..', 'outputs');
 const port = Number(process.argv[2] || 8765);
+// 长帖富内容分页的模拟响应延迟（毫秒），给基准测试用；默认 0，单测行为不变。
+const RICH_PAGE_LATENCY = Math.max(0, Number(process.env.XNS_FIXTURE_LATENCY || 0));
 
 const fixturePath = (name) => path.join(root, name);
 const sendFile = (res, filePath, contentType) => {
@@ -323,7 +325,9 @@ const server = http.createServer((req, res) => {
       return;
     }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-    res.end(richLongPage(postId, page, pageCount));
+    // 长帖分页的真实响应是有延迟的；基准测试用 XNS_FIXTURE_LATENCY 模拟，默认 0 不影响单测。
+    if (RICH_PAGE_LATENCY) setTimeout(() => res.end(richLongPage(postId, page, pageCount)), RICH_PAGE_LATENCY);
+    else res.end(richLongPage(postId, page, pageCount));
     return;
   }
   if (pathname === '/test/retry-state') {
