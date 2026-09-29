@@ -80,4 +80,22 @@ checkColumnsLeftOfCard('深链', deepChain);
 checkColumnsLeftOfCard('上限处分叉', deepBranch);
 checkColumnsLeftOfCard('多兄弟与末子节点带后代', [record(1), record(2, 1), record(4, 2), record(5, 2), record(3, 1), record(6, 5)]);
 
+// 异常数据：两条楼层互相引用会形成没有根的环，环里的楼层会整条从展示结果里消失；现在把环上
+// 最早出现的那条楼层的父子边降级成根节点，保证每条记录都能被渲染。
+check('关系线：互相引用时降级成根节点，两条都保留', lines([record(1, 2), record(2, 1)]),
+  ['1:0 full=[] stop=-1', '2:1 full=[] stop=0']);
+check('关系线：三楼层成环时同样降级，不丢楼层', lines([record(1, 2), record(2, 3), record(3, 1)]),
+  ['1:0 full=[] stop=-1', '3:1 full=[] stop=0', '2:2 full=[] stop=1']);
+
+// 通用不变量：不管树里有环还是异常引用，展平结果都要包含每一条楼层。
+function checkKeepsEveryFloor(name, records) {
+  const floors = flattenReplyTree(records).map((entry) => entry.record.floor).sort((a, b) => a - b);
+  const expected = records.map((item) => item.floor).sort((a, b) => a - b);
+  check(`关系线：${name} 每条楼层都会出现在展平结果里`, floors, expected);
+}
+
+checkKeepsEveryFloor('互相引用', [record(1, 2), record(2, 1)]);
+checkKeepsEveryFloor('三楼层成环', [record(1, 2), record(2, 3), record(3, 1)]);
+checkKeepsEveryFloor('自引用加正常树', [record(1, 1), record(2, 1), record(3, 2), record(4, 99)]);
+
 export { failures };

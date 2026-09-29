@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.88
+// @version      0.5.89
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -1722,6 +1722,20 @@
 				record.parent = target;
 				target.children.push(record);
 			}
+		});
+		records.forEach((record) => {
+			if (!record.parent) return;
+			const seen = new Set([record]);
+			let ancestor = record.parent;
+			while (ancestor && !seen.has(ancestor)) {
+				seen.add(ancestor);
+				ancestor = ancestor.parent;
+			}
+			if (!ancestor) return;
+			const parent = record.parent;
+			const index = parent.children.indexOf(record);
+			if (index >= 0) parent.children.splice(index, 1);
+			record.parent = null;
 		});
 		const order = (record) => record.page * 1e5 + record.index;
 		records.forEach((record) => record.children.sort((a, b) => order(a) - order(b)));

@@ -14,6 +14,22 @@ function buildReplyTree(records: CommentRecord[]): CommentRecord[] {
       target.children.push(record);
     }
   });
+  // 异常数据（两条楼层互相引用、多楼层成环）会形成没有根的环：环里的楼层永远进不了展示结果。
+  // 沿 parent 链回看，一旦发现环就把当前这条楼层的父子边降级成根节点，保证每条记录都能被渲染。
+  records.forEach((record) => {
+    if (!record.parent) return;
+    const seen = new Set<CommentRecord>([record]);
+    let ancestor: CommentRecord | null = record.parent;
+    while (ancestor && !seen.has(ancestor)) {
+      seen.add(ancestor);
+      ancestor = ancestor.parent;
+    }
+    if (!ancestor) return;
+    const parent = record.parent;
+    const index = parent.children.indexOf(record);
+    if (index >= 0) parent.children.splice(index, 1);
+    record.parent = null;
+  });
   const order = (record: CommentRecord): number => record.page * 100_000 + record.index;
   records.forEach((record) => record.children.sort((a, b) => order(a) - order(b)));
   return records.filter((record) => !record.parent).sort((a, b) => {
