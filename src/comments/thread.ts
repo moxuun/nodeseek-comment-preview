@@ -1,6 +1,8 @@
+import type { CommentRecord } from '../nodeseek/content-parser.js';
+
 // 纯评论关系模型：不访问 DOM、不发请求，只根据楼层引用建立树。
-function buildReplyTree(records) {
-  const byFloor = new Map(records.map((record) => [record.floor, record]));
+function buildReplyTree(records: CommentRecord[]): CommentRecord[] {
+  const byFloor = new Map<number, CommentRecord>(records.map((record) => [record.floor, record]));
   records.forEach((record) => {
     record.parent = null;
     record.children = [];
@@ -12,7 +14,7 @@ function buildReplyTree(records) {
       target.children.push(record);
     }
   });
-  const order = (record) => record.page * 100_000 + record.index;
+  const order = (record: CommentRecord): number => record.page * 100_000 + record.index;
   records.forEach((record) => record.children.sort((a, b) => order(a) - order(b)));
   return records.filter((record) => !record.parent).sort((a, b) => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
@@ -20,20 +22,29 @@ function buildReplyTree(records) {
   });
 }
 
-function flattenReplyTree(records) {
-  const flat = [];
+/** 展平后的楼层条目，供虚拟列表逐层渲染。 */
+interface FlatEntry {
+  record: CommentRecord;
+  depth: number;
+}
+
+function flattenReplyTree(records: CommentRecord[]): FlatEntry[] {
+  const flat: FlatEntry[] = [];
   const roots = buildReplyTree(records);
-  const stack = roots.slice().reverse().map((record) => ({ record, depth: 0 }));
+  const stack: FlatEntry[] = roots.slice().reverse().map((record) => ({ record, depth: 0 }));
   while (stack.length) {
     const entry = stack.pop();
+    if (!entry) continue;
     flat.push(entry);
     entry.record.children.slice().reverse().forEach((child) => stack.push({ record: child, depth: entry.depth + 1 }));
   }
   return flat;
 }
 
-function mergeCommentRecords(...groups) {
-  const merged = new Map();
+function mergeCommentRecords<T extends { floor: number; current?: boolean }>(
+  ...groups: Array<ReadonlyArray<T | null | undefined> | null | undefined>
+): T[] {
+  const merged = new Map<string, T>();
   groups.forEach((records) => {
     if (!Array.isArray(records)) return;
     records.forEach((record) => {
@@ -47,3 +58,4 @@ function mergeCommentRecords(...groups) {
 }
 
 export { buildReplyTree, flattenReplyTree, mergeCommentRecords };
+export type { FlatEntry };

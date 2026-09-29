@@ -1,6 +1,7 @@
 import { getAuthorName, getCommentId, getFloor, getPostContent, qs, qsa, safeCount, safePositiveInt } from '../core/dom.js';
 import { getCurrentUserUid } from './identity.js';
 import { sanitizeImportedNode } from './sanitize';
+import type { SsrCommentEntry, SsrState } from './ssr-state.js';
 import { getPostInfo, parseSameOriginUrl } from './url.js';
 
 // NodeSeek 页面内容解析与安全克隆；输出供预览和帖子页共用的评论记录。
@@ -34,21 +35,6 @@ export interface CommentRecord {
   html: string | null;
   parent: CommentRecord | null;
   children: CommentRecord[];
-}
-
-interface SsrCommentEntry {
-  commentId?: string | number | null;
-  upvoteCount?: unknown;
-  likeCount?: unknown;
-  dislikeCount?: unknown;
-  upvoted?: unknown;
-  liked?: unknown;
-  disliked?: unknown;
-}
-
-export interface SsrState {
-  postData?: { comments?: SsrCommentEntry[] };
-  user?: Record<string, unknown>;
 }
 
 export interface CommentRecordOptions {
@@ -235,3 +221,4 @@ const xnsContentParser = createContentParser({
 const { getCommentRecord, getSsrCommentCounts, materializeCommentNode, releaseCommentNode } = xnsContentParser;
 
 export { getCommentRecord, getSsrCommentCounts, materializeCommentNode, releaseCommentNode, sanitizeImportedNode };
+export type { SsrCommentEntry, SsrState };

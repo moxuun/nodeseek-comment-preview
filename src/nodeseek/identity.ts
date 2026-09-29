@@ -1,23 +1,29 @@
 import { extractSsrState } from './ssr-state.js';
+import type { SsrState } from './ssr-state.js';
 
 // 当前用户身份读取服务。
 // 只读取页面已经提供的 SSR 状态或用户菜单，不读取 Cookie、Storage 或浏览器会话。
-function createIdentityService({ documentObj, extractSsrState }) {
-  let resolved = false;
-  let uid = null;
+interface IdentityDeps {
+  documentObj: Document;
+  extractSsrState: (doc: Document) => SsrState | null;
+}
 
-  function uidFromHref(href) {
+function createIdentityService({ documentObj, extractSsrState }: IdentityDeps) {
+  let resolved = false;
+  let uid: string | null = null;
+
+  function uidFromHref(href: unknown): string | null {
     const match = String(href || '').match(/\/space\/(\d+)/);
     return match ? String(match[1]) : null;
   }
 
-  function fromPageState() {
+  function fromPageState(): string | null {
     const user = extractSsrState(documentObj)?.user;
     const value = user && (user.id ?? user.uid ?? user.userId ?? user.memberId ?? user.member_id);
     return value === undefined || value === null ? null : String(value);
   }
 
-  function fromUserMenu() {
+  function fromUserMenu(): string | null {
     const selectors = [
       '[data-user-id]',
       '.user-menu a[href^="/space/"]',
@@ -37,7 +43,7 @@ function createIdentityService({ documentObj, extractSsrState }) {
     return null;
   }
 
-  function currentUserUid() {
+  function currentUserUid(): string | null {
     if (resolved) return uid;
     resolved = true;
     uid = fromPageState() || fromUserMenu();
@@ -51,6 +57,10 @@ const xnsIdentityService = createIdentityService({
   documentObj: document,
   extractSsrState,
 });
-function getCurrentUserUid() { return xnsIdentityService.currentUserUid(); }
+const { currentUserUid } = xnsIdentityService;
+
+function getCurrentUserUid(): string | null {
+  return currentUserUid();
+}
 
 export { getCurrentUserUid };

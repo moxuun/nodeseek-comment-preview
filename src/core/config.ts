@@ -27,7 +27,16 @@ const ANSI_BG_HEX = ['#111827', '#ef4444', '#22c55e', '#facc15', '#3b82f6', '#d9
 const ANSI_BRIGHT_HEX = ['#6b7280', '#f87171', '#4ade80', '#fde047', '#60a5fa', '#f0abfc', '#67e8f9', '#fff'];
 const ANSI_COLORS = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
 
-const state = {
+/** 跨模块共享的运行时状态槽；具体类型由各自的写入方决定。 */
+interface AppState {
+  post: unknown;
+  modal: unknown;
+  settingsPanel: unknown;
+  lightbox: unknown;
+  mode: string;
+}
+
+const state: AppState = {
   post: null,
   modal: null,
   settingsPanel: null,
@@ -36,3 +45,4 @@ const state = {
 };
 
 export { ANSI_BG_HEX, ANSI_BRIGHT_HEX, ANSI_COLORS, ANSI_FG_HEX, DEFAULT_MODE, HTML_CACHE_ITEM_MAX_BYTES, HTML_CACHE_MAX_BYTES, HTML_CACHE_MAX_ENTRIES, HTML_CACHE_TTL, MAX_PAGE, MAX_RESPONSE_BYTES, PAGE_CONCURRENCY, PAGE_REQUEST_GAP, REQUEST_TIMEOUT, SELECTORS, STYLE_ID, state };
+export type { AppState };

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.66
+// @version      0.5.67
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -159,51 +159,12 @@
 			getSafeUrlAttribute
 		});
 	}
-	var xnsDomTools = createDomTools({
+	var { safePositiveInt, safeCount, qs, qsa, createElement, clearElement, findCommentList, getCommentItems, getFloor, getCommentId, getAuthorName, getPostContent, getSafeUrlAttribute } = createDomTools({
 		documentObj: document,
 		windowObj: window,
 		selectors: SELECTORS,
 		URLCtor: URL
 	});
-	function safePositiveInt(...args) {
-		return xnsDomTools.safePositiveInt(...args);
-	}
-	function safeCount(...args) {
-		return xnsDomTools.safeCount(...args);
-	}
-	function qs(...args) {
-		return xnsDomTools.qs(...args);
-	}
-	function qsa(...args) {
-		return xnsDomTools.qsa(...args);
-	}
-	function createElement(...args) {
-		return xnsDomTools.createElement(...args);
-	}
-	function clearElement(...args) {
-		return xnsDomTools.clearElement(...args);
-	}
-	function findCommentList(...args) {
-		return xnsDomTools.findCommentList(...args);
-	}
-	function getCommentItems(...args) {
-		return xnsDomTools.getCommentItems(...args);
-	}
-	function getFloor(...args) {
-		return xnsDomTools.getFloor(...args);
-	}
-	function getCommentId(...args) {
-		return xnsDomTools.getCommentId(...args);
-	}
-	function getAuthorName(...args) {
-		return xnsDomTools.getAuthorName(...args);
-	}
-	function getPostContent(...args) {
-		return xnsDomTools.getPostContent(...args);
-	}
-	function getSafeUrlAttribute(...args) {
-		return xnsDomTools.getSafeUrlAttribute(...args);
-	}
 	function createNodeSeekUrlService({ windowObj, URLCtor, safePositiveInt }) {
 		function getPostInfo(rawUrl) {
 			try {
@@ -244,8 +205,10 @@
 				return null;
 			}
 		}
+		const isUrl = (value) => value instanceof URLCtor;
 		function isAllowedPostRequest(url) {
-			const info = url instanceof URLCtor ? getPostInfo(url.href) : null;
+			if (!isUrl(url)) return false;
+			const info = getPostInfo(url.href);
 			return Boolean(info && !url.search && !url.username && !url.password);
 		}
 		return Object.freeze({
@@ -255,23 +218,11 @@
 			isAllowedPostRequest
 		});
 	}
-	var xnsNodeSeekUrlService = createNodeSeekUrlService({
+	var { buildPostUrl, getPostInfo, parseSameOriginUrl, isAllowedPostRequest } = createNodeSeekUrlService({
 		windowObj: window,
 		URLCtor: URL,
 		safePositiveInt
 	});
-	function buildPostUrl(...args) {
-		return xnsNodeSeekUrlService.buildPostUrl(...args);
-	}
-	function getPostInfo(...args) {
-		return xnsNodeSeekUrlService.getPostInfo(...args);
-	}
-	function parseSameOriginUrl(...args) {
-		return xnsNodeSeekUrlService.parseSameOriginUrl(...args);
-	}
-	function isAllowedPostRequest(...args) {
-		return xnsNodeSeekUrlService.isAllowedPostRequest(...args);
-	}
 	var pageInfo = getPostInfo(window.location.href);
 	function createNodeSeekActionApi({ windowObj, navigatorObj, state, requestTimeout, parseSameOriginUrl, fetchFn, AbortControllerCtor }) {
 		const allowedPaths = new Set([
@@ -394,6 +345,7 @@
 		}));
 		while (stack.length) {
 			const entry = stack.pop();
+			if (!entry) continue;
 			flat.push(entry);
 			entry.record.children.slice().reverse().forEach((child) => stack.push({
 				record: child,
@@ -508,6 +460,9 @@
 	function getMaxPage(...args) {
 		return xnsPreferences.getMaxPage(...args);
 	}
+	function isRecord(value) {
+		return Boolean(value) && typeof value === "object";
+	}
 	function createSsrStateService({ documentObj, qs }) {
 		function extractSsrState(doc) {
 			try {
@@ -515,7 +470,11 @@
 				if (!encoded) return null;
 				const json = decodeURIComponent(escape(atob(encoded)));
 				const data = JSON.parse(json);
-				return data && typeof data === "object" && (data.user !== void 0 || data.postData && Array.isArray(data.postData.comments)) ? data : null;
+				if (!isRecord(data)) return null;
+				const postData = data.postData;
+				const hasComments = isRecord(postData) && Array.isArray(postData.comments);
+				if (data.user === void 0 && !hasComments) return null;
+				return data;
 			} catch {
 				return null;
 			}
@@ -528,16 +487,10 @@
 			getDocState
 		});
 	}
-	var xnsSsrStateService = createSsrStateService({
+	var { extractSsrState, getDocState } = createSsrStateService({
 		documentObj: document,
 		qs
 	});
-	function extractSsrState(...args) {
-		return xnsSsrStateService.extractSsrState(...args);
-	}
-	function getDocState(...args) {
-		return xnsSsrStateService.getDocState(...args);
-	}
 	function createIdentityService({ documentObj, extractSsrState }) {
 		let resolved = false;
 		let uid = null;
@@ -576,12 +529,12 @@
 		}
 		return Object.freeze({ currentUserUid });
 	}
-	var xnsIdentityService = createIdentityService({
+	var { currentUserUid } = createIdentityService({
 		documentObj: document,
 		extractSsrState
 	});
 	function getCurrentUserUid() {
-		return xnsIdentityService.currentUserUid();
+		return currentUserUid();
 	}
 	function _OverloadYield(e, d) {
 		this.v = e, this.k = d;
@@ -2954,15 +2907,12 @@
 		}
 		return Object.freeze({ getPageNumbers });
 	}
-	var xnsPaginationService = createPaginationService({
+	var { getPageNumbers } = createPaginationService({
 		windowObj: window,
 		qsa,
 		parseSameOriginUrl,
 		getPostInfo
 	});
-	function getPageNumbers(...args) {
-		return xnsPaginationService.getPageNumbers(...args);
-	}
 	function createPageLoader({ windowObj, maxPage, getMaxPage, concurrency, requestGapMs, fetchHtml, parseHtml, getPageNumbers, getCommentItems, getCommentRecord, getDocState, getCurrentUserUid, buildPostUrl }) {
 		function createRequestGate(gapMs) {
 			const cooldownGap = Number.isFinite(Number(gapMs)) ? Math.max(0, Number(gapMs)) : 0;
