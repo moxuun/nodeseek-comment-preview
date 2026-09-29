@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.68
+// @version      0.5.69
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -4387,13 +4387,10 @@
 		}
 		return Object.freeze({ format });
 	}
-	var xnsPageStatusFormatter = createPageStatusFormatter({
+	var formatPageStatus = createPageStatusFormatter({
 		maxPage: 50,
 		getMaxPage
-	});
-	function formatPageStatus(...args) {
-		return xnsPageStatusFormatter.format(...args);
-	}
+	}).format;
 	function createPreviewRenderer({ document, windowObj, state, pageInfo, selectors, maxPage, qs, qsa, createElement, clearElement, getPostInfo, buildPostUrl, getDocState, getCommentId, getSsrCommentCounts, safeCount, sanitizeImportedNode, materializeCommentNode, getDirectCommentMenu, ensurePreviewMenu, stripRenderArtifacts, buildReplyTree, flattenReplyTree, createCommentVirtualizer, addRemoteNote, formatPageStatus, openPreviewEditor }) {
 		function ensurePreviewEditOption(node, record) {
 			if (!node || !record?.isMine) return;
@@ -18022,8 +18019,9 @@
 		return () => root.unmount();
 	}
 	function closeSettings() {
-		state.settingsPanel?.unmount?.();
-		state.settingsPanel?.overlay?.remove();
+		const panel = state.settingsPanel;
+		panel?.unmount?.();
+		panel?.overlay?.remove();
 		state.settingsPanel = null;
 	}
 	function openSettings() {

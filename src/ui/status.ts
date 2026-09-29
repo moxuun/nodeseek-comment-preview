@@ -2,8 +2,38 @@ import { MAX_PAGE } from '../core/config.js';
 import { getMaxPage } from '../core/preferences.js';
 
 // 分页状态文案与语义统一；预览页和帖子页共享同一套用户可见反馈。
-function createPageStatusFormatter({ maxPage, getMaxPage }) {
-  function format(options = {}) {
+interface PageStatusOptions {
+  pageLimit?: number | string | null;
+  totalPages?: number | null;
+  loadedPages?: number | null;
+  failedPages?: unknown[] | null;
+  challengePages?: unknown[] | null;
+  loading?: boolean;
+  truncated?: boolean;
+  commentCount?: number | null;
+}
+
+interface PageStatus {
+  targetPages: number;
+  loadedPages: number;
+  failedCount: number;
+  stage: string;
+  failed: string;
+  challenge: string;
+  challengeCount: number;
+  truncated: string;
+  detail: string;
+  compact: string;
+  tone: string;
+}
+
+interface PageStatusDeps {
+  maxPage: number;
+  getMaxPage?: () => number;
+}
+
+function createPageStatusFormatter({ maxPage, getMaxPage }: PageStatusDeps) {
+  function format(options: PageStatusOptions = {}): PageStatus {
     const configuredLimit = Number(options.pageLimit) || Number(getMaxPage?.()) || maxPage;
     const pageLimit = Math.min(maxPage, Math.max(1, configuredLimit));
     const totalPages = Number(options.totalPages) || 0;
@@ -42,6 +72,7 @@ function createPageStatusFormatter({ maxPage, getMaxPage }) {
 }
 
 const xnsPageStatusFormatter = createPageStatusFormatter({ maxPage: MAX_PAGE, getMaxPage });
-function formatPageStatus(...args) { return xnsPageStatusFormatter.format(...args); }
+const formatPageStatus = xnsPageStatusFormatter.format;
 
 export { formatPageStatus };
+export type { PageStatus, PageStatusOptions };
