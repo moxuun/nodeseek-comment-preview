@@ -3,6 +3,7 @@ import type { ModalHandle, PostHandle } from '../core/config.js';
 import { createElement, findCommentList, getAuthorName, getCommentId, getFloor, getPostContent, qs, qsa, safeCount, safePositiveInt } from '../core/dom.js';
 import { pageInfo } from '../core/runtime.js';
 import { postAction } from '../nodeseek/action-api.js';
+import { isAbortError } from '../nodeseek/http.js';
 import { buildPostUrl, getPostInfo, parseSameOriginUrl } from '../nodeseek/url.js';
 import type { CommentRecord, SsrCommentCounts } from '../nodeseek/content-parser.js';
 
@@ -353,7 +354,8 @@ function createCommentActions({
         if (actionContext.modal && state.modal === actionContext.modal) actionContext.modal.refresh?.();
         else composer.remove();
       } catch (error) {
-        status.textContent = `保存失败：${(error as Error).message || '网络错误'}`;
+        // 关窗/切楼层导致的取消不提示失败：用户已经离开了这条回复的上下文。
+        if (!isAbortError(error)) status.textContent = `保存失败：${(error as Error).message || '网络错误'}`;
         submit.disabled = false;
       }
     });
@@ -459,7 +461,7 @@ function createCommentActions({
           await postHandle.reloadPages?.({ refreshCurrentPage: true });
         }
       } catch (error) {
-        status.textContent = `发送失败：${(error as Error).message || '网络错误'}`;
+        if (!isAbortError(error)) status.textContent = `发送失败：${(error as Error).message || '网络错误'}`;
         submit.disabled = false;
       }
     });
@@ -513,7 +515,8 @@ function createCommentActions({
         if (menuItem.isConnected && !menuItem.classList.contains('xns-action-failed')) qs(menuItem, ':scope > .xns-action-state')?.remove();
       }, 1_800);
     } catch (error) {
-      setActionState(menuItem, `失败：${(error as Error).message || '操作未完成'}`, true);
+      // 取消（关窗、切换楼层）不是操作失败，保持中性状态即可。
+      if (!isAbortError(error)) setActionState(menuItem, `失败：${(error as Error).message || '操作未完成'}`, true);
     } finally {
       menuItem.classList.remove('xns-action-pending');
     }

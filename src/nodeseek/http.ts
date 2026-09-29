@@ -138,6 +138,13 @@ function createHttpClient({
     return error;
   }
 
+  /** 请求超时：与调用方取消区分开，超时可以重试，也要能把原因提示给用户。 */
+  function createTimeoutError(): HttpError {
+    const error: HttpError = new Error(`请求超时（超过 ${Math.round(requestTimeout / 1000)} 秒）`);
+    error.name = 'TimeoutError';
+    return error;
+  }
+
   function wait(delay: number, signal?: AbortSignal | null): Promise<void> {
     if (signal?.aborted) return Promise.reject(abortError());
     return new Promise<void>((resolve, reject) => {
@@ -174,7 +181,12 @@ function createHttpClient({
       const controller = new AbortControllerCtor();
       const abortExternal = () => controller.abort();
       options.signal?.addEventListener('abort', abortExternal, { once: true });
-      const timer = windowObj.setTimeout(() => controller.abort(), requestTimeout);
+      // 超时和调用方取消都会让 fetch 抛 AbortError；用 timedOut 分开，超时按可重试处理。
+      let timedOut = false;
+      const timer = windowObj.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, requestTimeout);
       try {
         const response = await fetchFn(url.href, {
           method: 'GET', credentials: 'same-origin', cache: noStore ? 'no-store' : 'default', redirect: 'error',
@@ -202,8 +214,12 @@ function createHttpClient({
         if (allowCache) writeCachedHtml(responseUrl, html);
         return { html, url: responseUrl };
       } catch (error) {
-        const failure = error as HttpError;
+        let failure = error as HttpError;
         if (failure.code === 'CLOUDFLARE_CHALLENGE') throw failure;
+        // 调用方主动取消（关窗、切楼层、重新加载）：原样抛出，由调用方静默处理。
+        if (options.signal?.aborted) throw failure;
+        // 超时：换成可重试、可提示的错误，否则会被当成取消而默默丢弃。
+        if (timedOut && failure.name === 'AbortError') failure = createTimeoutError();
         if (attempt < 3 && failure.name !== 'AbortError') {
           await new Promise((resolve) => windowObj.setTimeout(resolve, 600 * attempt));
           continue;
@@ -226,6 +242,11 @@ function createHttpClient({
   return Object.freeze({ fetchHtml, parseHtml });
 }
 
+/** 调用方主动取消（关窗、切楼层、重新加载）产生的错误：不要当失败提示给用户。 */
+function isAbortError(error: unknown): boolean {
+  return (error as Error | null | undefined)?.name === 'AbortError';
+}
+
 const xnsHttpClient = createHttpClient({
   windowObj: window,
   fetchFn: window.fetch.bind(window),
@@ -244,5 +265,5 @@ const xnsHttpClient = createHttpClient({
 const fetchHtml = (url: URL | null, options?: FetchHtmlOptions): Promise<{ html: string; url: URL | null }> => xnsHttpClient.fetchHtml(url, options);
 const parseHtml = (html: string): Document => xnsHttpClient.parseHtml(html);
 
-export { fetchHtml, parseHtml };
+export { fetchHtml, isAbortError, parseHtml };
 export type { FetchHtmlOptions, HttpError };

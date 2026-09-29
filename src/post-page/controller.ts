@@ -6,7 +6,7 @@ import { getMaxPage, updateSettings } from '../core/preferences.js';
 import { fetchPostPages } from '../data/page-loader.js';
 import { installPreviewFeatures } from '../features/content.js';
 import { getCommentRecord, releaseCommentNode, sanitizeImportedNode } from '../nodeseek/content-parser.js';
-import { fetchHtml, parseHtml } from '../nodeseek/http.js';
+import { fetchHtml, isAbortError, parseHtml } from '../nodeseek/http.js';
 import { getCurrentUserUid } from '../nodeseek/identity.js';
 import { getPageNumbers } from '../nodeseek/pagination.js';
 import { getSsrState } from '../nodeseek/ssr-state.js';
@@ -348,6 +348,8 @@ function createPostPageController({
         if (appState.mode === 'thread') this.render();
         else this.showStatus('原版评论已刷新。');
       } catch (error) {
+        // 请求被更新一遗加载或页面切走时取消，不当作读取失败、也不回退布局。
+        if (isAbortError(error)) return;
         if (generation !== this.generation) return;
         this.restoreOriginal();
         this.showStatus(`楼中楼读取失败：${(error as Error).message || '网络错误'}，已保留原版布局。`);

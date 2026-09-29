@@ -5,7 +5,7 @@ import { collectPageRecords, loadPreviewRecords } from '../data/page-loader.js';
 import { openPreviewComposer } from '../features/comment-actions.js';
 import { installPreviewFeatures } from '../features/content.js';
 import { sanitizeImportedNode } from '../nodeseek/content-parser.js';
-import { fetchHtml, parseHtml } from '../nodeseek/http.js';
+import { fetchHtml, isAbortError, parseHtml } from '../nodeseek/http.js';
 import { getPageNumbers } from '../nodeseek/pagination.js';
 import { buildPostUrl, getPostInfo } from '../nodeseek/url.js';
 import { closeImageLightbox } from './lightbox.js';
@@ -673,6 +673,7 @@ function createPreviewController({
       });
       return true;
     } catch (error) {
+      if (isAbortError(error)) return false;
       if (currentModal() === modal) showPreviewRefreshError(modal, error);
       return false;
     } finally {
@@ -756,7 +757,8 @@ function createPreviewController({
       }
       if (preserveContent) stabilizePreviewScroll(modal, scrollSnapshot, generation);
     } catch (error) {
-      if (currentModal() === modal && modal.loadGeneration === generation) {
+      // 取消刷新不是失败，不要弹错误状态。
+      if (!isAbortError(error) && currentModal() === modal && modal.loadGeneration === generation) {
         if (preserveContent) showPreviewRefreshError(modal, error);
         else showPreviewLoadError(modal, error);
       }

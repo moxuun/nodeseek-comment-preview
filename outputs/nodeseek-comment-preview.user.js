@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.89
+// @version      0.5.90
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -318,6 +318,260 @@
 	});
 	var dynamicSign = (method, url, body) => xnsNodeSeekActionApi.dynamicSign(method, url, body);
 	var postAction = (apiPath, payload, options) => xnsNodeSeekActionApi.postAction(apiPath, payload, options);
+	function isRecord(value) {
+		return Boolean(value) && typeof value === "object";
+	}
+	function normalizeState(data) {
+		if (!isRecord(data)) return null;
+		const postData = data.postData;
+		const hasComments = isRecord(postData) && Array.isArray(postData.comments);
+		if (data.user === void 0 && !hasComments) return null;
+		return data;
+	}
+	function createSsrStateService({ documentObj, windowObj, qs }) {
+		let liveState = null;
+		function extractSsrState(doc) {
+			try {
+				const encoded = qs(doc, "#temp-script[type=\"application/json\"]")?.textContent?.trim();
+				if (!encoded) return null;
+				return normalizeState(JSON.parse(decodeURIComponent(escape(atob(encoded)))));
+			} catch {
+				return null;
+			}
+		}
+		function readLiveState() {
+			const runtime = normalizeState(windowObj.__config__);
+			if (runtime) {
+				liveState = runtime;
+				return runtime;
+			}
+			const inline = extractSsrState(documentObj);
+			if (inline) {
+				liveState = inline;
+				return inline;
+			}
+			return liveState;
+		}
+		function getDocState(root) {
+			return root && root !== documentObj ? root.__xnsState || null : null;
+		}
+		function getSsrState(root) {
+			if (!root) return null;
+			const stored = root.__xnsState;
+			if (stored) return stored;
+			return root === documentObj ? readLiveState() : extractSsrState(root);
+		}
+		return Object.freeze({
+			extractSsrState,
+			getDocState,
+			getSsrState
+		});
+	}
+	var { extractSsrState, getDocState, getSsrState } = createSsrStateService({
+		documentObj: document,
+		windowObj: window,
+		qs
+	});
+	function createHttpClient({ windowObj, fetchFn, AbortControllerCtor, DOMParserCtor, requestTimeout, maxResponseBytes, isAllowedPostRequest, parseSameOriginUrl, extractSsrState, cacheTtl, cacheMaxEntries, cacheMaxBytes, cacheItemMaxBytes }) {
+		const htmlCache = new Map();
+		let htmlCacheBytes = 0;
+		function removeCacheEntry(key) {
+			const entry = htmlCache.get(key);
+			if (!entry) return;
+			htmlCacheBytes -= entry.bytes;
+			htmlCache.delete(key);
+		}
+		function postIdFromUrl(url) {
+			return /^\/post-(\d+)-\d+(?:\/)?$/.exec(url.pathname)?.[1] || "";
+		}
+		function invalidatePostCache(url) {
+			const postId = postIdFromUrl(url);
+			if (!postId) {
+				removeCacheEntry(url.href);
+				return;
+			}
+			Array.from(htmlCache.entries()).forEach(([key, entry]) => {
+				if (entry.postId === postId) removeCacheEntry(key);
+			});
+		}
+		function readCachedHtml(url) {
+			const entry = htmlCache.get(url.href);
+			if (!entry) return null;
+			if (Date.now() - entry.createdAt > cacheTtl) {
+				removeCacheEntry(url.href);
+				return null;
+			}
+			htmlCache.delete(url.href);
+			htmlCache.set(url.href, entry);
+			return {
+				html: entry.html,
+				url: parseSameOriginUrl(entry.url)
+			};
+		}
+		function writeCachedHtml(url, html) {
+			const bytes = html.length;
+			if (bytes > cacheItemMaxBytes) return;
+			removeCacheEntry(url.href);
+			while (htmlCache.size >= cacheMaxEntries || htmlCacheBytes + bytes > cacheMaxBytes) {
+				const oldest = htmlCache.keys().next().value;
+				if (oldest === void 0) break;
+				removeCacheEntry(oldest);
+			}
+			htmlCache.set(url.href, {
+				html,
+				url: url.href,
+				postId: postIdFromUrl(url),
+				createdAt: Date.now(),
+				bytes
+			});
+			htmlCacheBytes += bytes;
+		}
+		function getRetryDelay(response, fallback) {
+			const value = response.headers?.get?.("retry-after")?.trim() || "";
+			if (!value) return fallback;
+			const seconds = Number(value);
+			if (Number.isFinite(seconds) && seconds >= 0) return Math.min(1e4, seconds * 1e3);
+			const timestamp = Date.parse(value);
+			if (!Number.isNaN(timestamp)) return Math.min(1e4, Math.max(0, timestamp - Date.now()));
+			return fallback;
+		}
+		function isCloudflareChallenge(response) {
+			return response.headers?.get?.("cf-mitigated")?.trim().toLowerCase() === "challenge";
+		}
+		function createHttpError(message, code, status) {
+			const error = new Error(message);
+			error.code = code;
+			if (Number.isFinite(status)) error.status = status;
+			return error;
+		}
+		function abortError() {
+			const error = new Error("请求已取消");
+			error.name = "AbortError";
+			return error;
+		}
+		function createTimeoutError() {
+			const error = new Error(`请求超时（超过 ${Math.round(requestTimeout / 1e3)} 秒）`);
+			error.name = "TimeoutError";
+			return error;
+		}
+		function wait(delay, signal) {
+			if (signal?.aborted) return Promise.reject(abortError());
+			return new Promise((resolve, reject) => {
+				const timer = windowObj.setTimeout(() => {
+					signal?.removeEventListener("abort", cancel);
+					resolve();
+				}, delay);
+				const cancel = () => {
+					windowObj.clearTimeout(timer);
+					signal?.removeEventListener("abort", cancel);
+					reject(abortError());
+				};
+				signal?.addEventListener("abort", cancel, { once: true });
+			});
+		}
+		function throwIfAborted(signal) {
+			if (signal?.aborted) throw abortError();
+		}
+		async function fetchHtml(url, options = {}) {
+			if (!url || !isAllowedPostRequest(url)) throw new Error("只允许读取同一站点的帖子页面");
+			const noStore = options.noStore === true;
+			const allowCache = options.allowCache === true && !noStore;
+			if (noStore) invalidatePostCache(url);
+			if (allowCache) {
+				const cached = readCachedHtml(url);
+				if (cached) return cached;
+			}
+			for (let attempt = 1; attempt <= 3; attempt += 1) {
+				throwIfAborted(options.signal);
+				if (typeof options.beforeRequest === "function") await options.beforeRequest();
+				throwIfAborted(options.signal);
+				const controller = new AbortControllerCtor();
+				const abortExternal = () => controller.abort();
+				options.signal?.addEventListener("abort", abortExternal, { once: true });
+				let timedOut = false;
+				const timer = windowObj.setTimeout(() => {
+					timedOut = true;
+					controller.abort();
+				}, requestTimeout);
+				try {
+					const response = await fetchFn(url.href, {
+						method: "GET",
+						credentials: "same-origin",
+						cache: noStore ? "no-store" : "default",
+						redirect: "error",
+						referrerPolicy: "same-origin",
+						headers: { Accept: "text/html,application/xhtml+xml" },
+						signal: controller.signal
+					});
+					if (typeof options.onResponse === "function") options.onResponse(response.status);
+					if (isCloudflareChallenge(response)) throw createHttpError("NodeSeek 的 Cloudflare 验证拦截了此分页，请完成验证后再点重试", "CLOUDFLARE_CHALLENGE", response.status);
+					if (response.status === 429 || response.status >= 500) {
+						if (attempt < 3) {
+							await wait(getRetryDelay(response, 600 * attempt), options.signal);
+							continue;
+						}
+						throw new Error(`HTTP ${response.status}`);
+					}
+					if (!response.ok) throw new Error(`HTTP ${response.status}`);
+					const responseUrl = parseSameOriginUrl(response.url);
+					const contentType = (response.headers.get("content-type") || "").toLowerCase();
+					const contentLength = Number(response.headers.get("content-length") || 0);
+					if (!responseUrl || !isAllowedPostRequest(responseUrl) || !contentType.includes("text/html")) throw new Error("响应不是同站帖子页面");
+					if (Number.isFinite(contentLength) && contentLength > maxResponseBytes) throw new Error("响应过大");
+					const html = await response.text();
+					if (!html || html.length > maxResponseBytes) throw new Error("响应过大或为空");
+					if (allowCache) writeCachedHtml(responseUrl, html);
+					return {
+						html,
+						url: responseUrl
+					};
+				} catch (error) {
+					let failure = error;
+					if (failure.code === "CLOUDFLARE_CHALLENGE") throw failure;
+					if (options.signal?.aborted) throw failure;
+					if (timedOut && failure.name === "AbortError") failure = createTimeoutError();
+					if (attempt < 3 && failure.name !== "AbortError") {
+						await new Promise((resolve) => windowObj.setTimeout(resolve, 600 * attempt));
+						continue;
+					}
+					throw failure;
+				} finally {
+					windowObj.clearTimeout(timer);
+					options.signal?.removeEventListener("abort", abortExternal);
+				}
+			}
+			throw new Error("抓取失败");
+		}
+		function parseHtml(html) {
+			const doc = new DOMParserCtor().parseFromString(html, "text/html");
+			doc.__xnsState = extractSsrState(doc);
+			return doc;
+		}
+		return Object.freeze({
+			fetchHtml,
+			parseHtml
+		});
+	}
+	function isAbortError(error) {
+		return error?.name === "AbortError";
+	}
+	var xnsHttpClient = createHttpClient({
+		windowObj: window,
+		fetchFn: window.fetch.bind(window),
+		AbortControllerCtor: window.AbortController,
+		DOMParserCtor: window.DOMParser,
+		requestTimeout: REQUEST_TIMEOUT,
+		maxResponseBytes: MAX_RESPONSE_BYTES,
+		cacheTtl: HTML_CACHE_TTL,
+		cacheMaxEntries: 16,
+		cacheMaxBytes: HTML_CACHE_MAX_BYTES,
+		cacheItemMaxBytes: HTML_CACHE_ITEM_MAX_BYTES,
+		isAllowedPostRequest,
+		parseSameOriginUrl,
+		extractSsrState
+	});
+	var fetchHtml = (url, options) => xnsHttpClient.fetchHtml(url, options);
+	var parseHtml = (html) => xnsHttpClient.parseHtml(html);
 	function isInteractionAction(action) {
 		return action === "like" || action === "chicken" || action === "dislike" || action === "favorite";
 	}
@@ -613,7 +867,7 @@
 					if (actionContext.modal && state.modal === actionContext.modal) actionContext.modal.refresh?.();
 					else composer.remove();
 				} catch (error) {
-					status.textContent = `保存失败：${error.message || "网络错误"}`;
+					if (!isAbortError(error)) status.textContent = `保存失败：${error.message || "网络错误"}`;
 					submit.disabled = false;
 				}
 			});
@@ -722,7 +976,7 @@
 						await postHandle.reloadPages?.({ refreshCurrentPage: true });
 					}
 				} catch (error) {
-					status.textContent = `发送失败：${error.message || "网络错误"}`;
+					if (!isAbortError(error)) status.textContent = `发送失败：${error.message || "网络错误"}`;
 					submit.disabled = false;
 				}
 			});
@@ -783,7 +1037,7 @@
 					if (menuItem.isConnected && !menuItem.classList.contains("xns-action-failed")) qs(menuItem, ":scope > .xns-action-state")?.remove();
 				}, 1800);
 			} catch (error) {
-				setActionState(menuItem, `失败：${error.message || "操作未完成"}`, true);
+				if (!isAbortError(error)) setActionState(menuItem, `失败：${error.message || "操作未完成"}`, true);
 			} finally {
 				menuItem.classList.remove("xns-action-pending");
 			}
@@ -1876,60 +2130,6 @@
 	var updateSettings = (patch) => xnsPreferences.update(patch);
 	var resetSettings = () => xnsPreferences.reset();
 	var getMaxPage = () => xnsPreferences.getMaxPage();
-	function isRecord(value) {
-		return Boolean(value) && typeof value === "object";
-	}
-	function normalizeState(data) {
-		if (!isRecord(data)) return null;
-		const postData = data.postData;
-		const hasComments = isRecord(postData) && Array.isArray(postData.comments);
-		if (data.user === void 0 && !hasComments) return null;
-		return data;
-	}
-	function createSsrStateService({ documentObj, windowObj, qs }) {
-		let liveState = null;
-		function extractSsrState(doc) {
-			try {
-				const encoded = qs(doc, "#temp-script[type=\"application/json\"]")?.textContent?.trim();
-				if (!encoded) return null;
-				return normalizeState(JSON.parse(decodeURIComponent(escape(atob(encoded)))));
-			} catch {
-				return null;
-			}
-		}
-		function readLiveState() {
-			const runtime = normalizeState(windowObj.__config__);
-			if (runtime) {
-				liveState = runtime;
-				return runtime;
-			}
-			const inline = extractSsrState(documentObj);
-			if (inline) {
-				liveState = inline;
-				return inline;
-			}
-			return liveState;
-		}
-		function getDocState(root) {
-			return root && root !== documentObj ? root.__xnsState || null : null;
-		}
-		function getSsrState(root) {
-			if (!root) return null;
-			const stored = root.__xnsState;
-			if (stored) return stored;
-			return root === documentObj ? readLiveState() : extractSsrState(root);
-		}
-		return Object.freeze({
-			extractSsrState,
-			getDocState,
-			getSsrState
-		});
-	}
-	var { extractSsrState, getDocState, getSsrState } = createSsrStateService({
-		documentObj: document,
-		windowObj: window,
-		qs
-	});
 	function createIdentityService({ documentObj, getSsrState }) {
 		let resolved = false;
 		let uid = null;
@@ -4148,192 +4348,6 @@
 		getPostContent,
 		getCurrentUserUid
 	});
-	function createHttpClient({ windowObj, fetchFn, AbortControllerCtor, DOMParserCtor, requestTimeout, maxResponseBytes, isAllowedPostRequest, parseSameOriginUrl, extractSsrState, cacheTtl, cacheMaxEntries, cacheMaxBytes, cacheItemMaxBytes }) {
-		const htmlCache = new Map();
-		let htmlCacheBytes = 0;
-		function removeCacheEntry(key) {
-			const entry = htmlCache.get(key);
-			if (!entry) return;
-			htmlCacheBytes -= entry.bytes;
-			htmlCache.delete(key);
-		}
-		function postIdFromUrl(url) {
-			return /^\/post-(\d+)-\d+(?:\/)?$/.exec(url.pathname)?.[1] || "";
-		}
-		function invalidatePostCache(url) {
-			const postId = postIdFromUrl(url);
-			if (!postId) {
-				removeCacheEntry(url.href);
-				return;
-			}
-			Array.from(htmlCache.entries()).forEach(([key, entry]) => {
-				if (entry.postId === postId) removeCacheEntry(key);
-			});
-		}
-		function readCachedHtml(url) {
-			const entry = htmlCache.get(url.href);
-			if (!entry) return null;
-			if (Date.now() - entry.createdAt > cacheTtl) {
-				removeCacheEntry(url.href);
-				return null;
-			}
-			htmlCache.delete(url.href);
-			htmlCache.set(url.href, entry);
-			return {
-				html: entry.html,
-				url: parseSameOriginUrl(entry.url)
-			};
-		}
-		function writeCachedHtml(url, html) {
-			const bytes = html.length;
-			if (bytes > cacheItemMaxBytes) return;
-			removeCacheEntry(url.href);
-			while (htmlCache.size >= cacheMaxEntries || htmlCacheBytes + bytes > cacheMaxBytes) {
-				const oldest = htmlCache.keys().next().value;
-				if (oldest === void 0) break;
-				removeCacheEntry(oldest);
-			}
-			htmlCache.set(url.href, {
-				html,
-				url: url.href,
-				postId: postIdFromUrl(url),
-				createdAt: Date.now(),
-				bytes
-			});
-			htmlCacheBytes += bytes;
-		}
-		function getRetryDelay(response, fallback) {
-			const value = response.headers?.get?.("retry-after")?.trim() || "";
-			if (!value) return fallback;
-			const seconds = Number(value);
-			if (Number.isFinite(seconds) && seconds >= 0) return Math.min(1e4, seconds * 1e3);
-			const timestamp = Date.parse(value);
-			if (!Number.isNaN(timestamp)) return Math.min(1e4, Math.max(0, timestamp - Date.now()));
-			return fallback;
-		}
-		function isCloudflareChallenge(response) {
-			return response.headers?.get?.("cf-mitigated")?.trim().toLowerCase() === "challenge";
-		}
-		function createHttpError(message, code, status) {
-			const error = new Error(message);
-			error.code = code;
-			if (Number.isFinite(status)) error.status = status;
-			return error;
-		}
-		function abortError() {
-			const error = new Error("请求已取消");
-			error.name = "AbortError";
-			return error;
-		}
-		function wait(delay, signal) {
-			if (signal?.aborted) return Promise.reject(abortError());
-			return new Promise((resolve, reject) => {
-				const timer = windowObj.setTimeout(() => {
-					signal?.removeEventListener("abort", cancel);
-					resolve();
-				}, delay);
-				const cancel = () => {
-					windowObj.clearTimeout(timer);
-					signal?.removeEventListener("abort", cancel);
-					reject(abortError());
-				};
-				signal?.addEventListener("abort", cancel, { once: true });
-			});
-		}
-		function throwIfAborted(signal) {
-			if (signal?.aborted) throw abortError();
-		}
-		async function fetchHtml(url, options = {}) {
-			if (!url || !isAllowedPostRequest(url)) throw new Error("只允许读取同一站点的帖子页面");
-			const noStore = options.noStore === true;
-			const allowCache = options.allowCache === true && !noStore;
-			if (noStore) invalidatePostCache(url);
-			if (allowCache) {
-				const cached = readCachedHtml(url);
-				if (cached) return cached;
-			}
-			for (let attempt = 1; attempt <= 3; attempt += 1) {
-				throwIfAborted(options.signal);
-				if (typeof options.beforeRequest === "function") await options.beforeRequest();
-				throwIfAborted(options.signal);
-				const controller = new AbortControllerCtor();
-				const abortExternal = () => controller.abort();
-				options.signal?.addEventListener("abort", abortExternal, { once: true });
-				const timer = windowObj.setTimeout(() => controller.abort(), requestTimeout);
-				try {
-					const response = await fetchFn(url.href, {
-						method: "GET",
-						credentials: "same-origin",
-						cache: noStore ? "no-store" : "default",
-						redirect: "error",
-						referrerPolicy: "same-origin",
-						headers: { Accept: "text/html,application/xhtml+xml" },
-						signal: controller.signal
-					});
-					if (typeof options.onResponse === "function") options.onResponse(response.status);
-					if (isCloudflareChallenge(response)) throw createHttpError("NodeSeek 的 Cloudflare 验证拦截了此分页，请完成验证后再点重试", "CLOUDFLARE_CHALLENGE", response.status);
-					if (response.status === 429 || response.status >= 500) {
-						if (attempt < 3) {
-							await wait(getRetryDelay(response, 600 * attempt), options.signal);
-							continue;
-						}
-						throw new Error(`HTTP ${response.status}`);
-					}
-					if (!response.ok) throw new Error(`HTTP ${response.status}`);
-					const responseUrl = parseSameOriginUrl(response.url);
-					const contentType = (response.headers.get("content-type") || "").toLowerCase();
-					const contentLength = Number(response.headers.get("content-length") || 0);
-					if (!responseUrl || !isAllowedPostRequest(responseUrl) || !contentType.includes("text/html")) throw new Error("响应不是同站帖子页面");
-					if (Number.isFinite(contentLength) && contentLength > maxResponseBytes) throw new Error("响应过大");
-					const html = await response.text();
-					if (!html || html.length > maxResponseBytes) throw new Error("响应过大或为空");
-					if (allowCache) writeCachedHtml(responseUrl, html);
-					return {
-						html,
-						url: responseUrl
-					};
-				} catch (error) {
-					const failure = error;
-					if (failure.code === "CLOUDFLARE_CHALLENGE") throw failure;
-					if (attempt < 3 && failure.name !== "AbortError") {
-						await new Promise((resolve) => windowObj.setTimeout(resolve, 600 * attempt));
-						continue;
-					}
-					throw failure;
-				} finally {
-					windowObj.clearTimeout(timer);
-					options.signal?.removeEventListener("abort", abortExternal);
-				}
-			}
-			throw new Error("抓取失败");
-		}
-		function parseHtml(html) {
-			const doc = new DOMParserCtor().parseFromString(html, "text/html");
-			doc.__xnsState = extractSsrState(doc);
-			return doc;
-		}
-		return Object.freeze({
-			fetchHtml,
-			parseHtml
-		});
-	}
-	var xnsHttpClient = createHttpClient({
-		windowObj: window,
-		fetchFn: window.fetch.bind(window),
-		AbortControllerCtor: window.AbortController,
-		DOMParserCtor: window.DOMParser,
-		requestTimeout: REQUEST_TIMEOUT,
-		maxResponseBytes: MAX_RESPONSE_BYTES,
-		cacheTtl: HTML_CACHE_TTL,
-		cacheMaxEntries: 16,
-		cacheMaxBytes: HTML_CACHE_MAX_BYTES,
-		cacheItemMaxBytes: HTML_CACHE_ITEM_MAX_BYTES,
-		isAllowedPostRequest,
-		parseSameOriginUrl,
-		extractSsrState
-	});
-	var fetchHtml = (url, options) => xnsHttpClient.fetchHtml(url, options);
-	var parseHtml = (html) => xnsHttpClient.parseHtml(html);
 	function createPaginationService({ windowObj, qsa, parseSameOriginUrl, getPostInfo }) {
 		function getPaginationLinks(root) {
 			const preferred = qsa(root, ".nsk-pager a[href], a.pager-pos[href]");
@@ -5474,6 +5488,7 @@
 					if (appState.mode === "thread") this.render();
 					else this.showStatus("原版评论已刷新。");
 				} catch (error) {
+					if (isAbortError(error)) return;
 					if (generation !== this.generation) return;
 					this.restoreOriginal();
 					this.showStatus(`楼中楼读取失败：${error.message || "网络错误"}，已保留原版布局。`);
@@ -6263,6 +6278,7 @@
 				});
 				return true;
 			} catch (error) {
+				if (isAbortError(error)) return false;
 				if (currentModal() === modal) showPreviewRefreshError(modal, error);
 				return false;
 			} finally {
@@ -6343,7 +6359,7 @@
 				}
 				if (preserveContent) stabilizePreviewScroll(modal, scrollSnapshot, generation);
 			} catch (error) {
-				if (currentModal() === modal && modal.loadGeneration === generation) {
+				if (!isAbortError(error) && currentModal() === modal && modal.loadGeneration === generation) {
 					if (preserveContent) showPreviewRefreshError(modal, error);
 					else showPreviewLoadError(modal, error);
 				}
