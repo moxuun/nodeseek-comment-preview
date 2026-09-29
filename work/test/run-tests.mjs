@@ -505,12 +505,15 @@ scenario('DOMPurify 清洗远端 HTML 并保留安全富内容', async (ctx) => 
     };
   });
   // Keep safe media local and deterministic; the sanitizer must preserve URLs.
+  // 204/空响应会让 media 元素把加载当成网络失败并反复重试，networkidle0 就永远不触发，
+  // 所以给一个带 content-type 的 200 空响应。
   await page.setRequestInterception(true);
   page.on('request', request => {
-    if (/\/safe-(poster\.png|video\.mp4)$/.test(request.url())) request.respond({ status: 204 });
+    if (/\/safe-video\.mp4$/.test(request.url())) request.respond({ status: 200, contentType: 'video/mp4', body: '' });
+    else if (/\/safe-poster\.png$/.test(request.url())) request.respond({ status: 200, contentType: 'image/png', body: '' });
     else request.continue();
   });
-  await page.goto(`${ctx.base}/post-123-1`, { waitUntil: 'networkidle0' });
+  await page.goto(`${ctx.base}/post-123-1`, { waitUntil: 'domcontentloaded' });
   await waitFor(page, () => !!document.querySelector('[data-xns-remote][data-xns-floor="4"] [data-case="rich"]'), 10_000, '安全富内容物化');
   const result = await page.evaluate(() => {
     const root = document.querySelector('[data-xns-remote][data-xns-floor="4"]');
@@ -927,7 +930,7 @@ scenario('预览正文长图加载后虚拟楼层坐标不偏移（0.5.23 回归
   await page.close();
 });
 
-scenario('预览楼层显示蓝色左侧标识（0.5.23 回归）', async (ctx) => {
+scenario('预览楼层显示官方主色左侧标识（0.5.23 回归）', async (ctx) => {
   const page = await openPreviewModal(ctx);
   const style = await page.evaluate(() => {
     const floor = document.querySelector('.xns-modal .xns-preview-thread > .content-item[data-xns-floor]');
@@ -938,8 +941,62 @@ scenario('预览楼层显示蓝色左侧标识（0.5.23 回归）', async (ctx) 
       color: computed.borderLeftColor,
     } : null;
   });
-  assert(style?.width >= 3 && style.style === 'solid' && /37,\s*99,\s*235/.test(style.color),
-    `预览楼层应显示蓝色左侧长条，实际 ${JSON.stringify(style)}`);
+  // #2ea44f = 官方亮暗一致的主色（--main-color），亮色模式已对齐官方。
+  assert(style?.width >= 3 && style.style === 'solid' && /46,\s*164,\s*79/.test(style.color),
+    `预览楼层应显示官方主色 #2ea44f 左侧长条，实际 ${JSON.stringify(style)}`);
+  await page.close();
+});
+
+scenario('楼中楼竖线跨条目连成一条并接到上一层（0.5.70 回归）', async (ctx) => {
+  const page = await openPreviewModal(ctx);
+  const info = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('.xns-modal .xns-preview-thread .xns-comment-child')];
+    const depthOf = (el) => Number(el.getAttribute('data-xns-depth'));
+    const readRow = (el) => {
+      if (!el) return null;
+      const computed = getComputedStyle(el);
+      const [spinePos, connectorPos] = computed.backgroundPosition.split(',').map((part) => part.trim());
+      const [spineSize, connectorSize] = computed.backgroundSize.split(',').map((part) => part.trim());
+      return {
+        depth: depthOf(el),
+        layers: (computed.backgroundImage.match(/linear-gradient/g) || []).length,
+        backgroundColor: computed.backgroundColor,
+        repeat: computed.backgroundRepeat,
+        marginTop: computed.marginTop,
+        marginLeft: computed.marginLeft,
+        paddingLeft: Number.parseFloat(computed.paddingLeft),
+        spineX: Number.parseFloat(spinePos),
+        spineY: Number.parseFloat(spinePos.split(/\s+/)[1]),
+        spineSize,
+        connectorX: Number.parseFloat(connectorPos),
+        connectorSize,
+      };
+    };
+    return {
+      count: rows.length,
+      first: readRow(rows.find((el) => depthOf(el) === 1)),
+      deep: readRow(rows.find((el) => depthOf(el) >= 2)),
+    };
+  });
+  assert(info.count > 0 && info.first && info.deep, `楼中楼应存在多层嵌套，实际 ${JSON.stringify(info)}`);
+  // 竖线用 background-image 画、底板保持透明；上下各溢出 3px + 3px 条目间隙 = 同层条目之间严丝合缝。
+  assert(info.first.layers === 2 && info.first.backgroundColor === 'rgba(0, 0, 0, 0)' && info.first.repeat === 'no-repeat, no-repeat',
+    `竖线应由两层背景图绘制且底板透明，实际 ${JSON.stringify(info.first)}`);
+  assert(info.first.marginTop === '3px' && info.first.marginLeft === '0px',
+    `缩进应完全由 padding 控制（旧实现是 margin+padding），实际 ${JSON.stringify(info.first)}`);
+  assert(info.first.spineSize === '2px calc(100% + 6px)' && info.first.spineY === -3,
+    `竖线应比条目高出 6px 以跨过 3px 间隙，实际 ${JSON.stringify(info.first)}`);
+  // 步长 18px：竖线在 18d+6，横线从上一层竖线右边缘（18(d-1)+8）起、长 18px。
+  assert(info.first.spineX === 24 && info.first.connectorSize === '0px 2px',
+    `第一层没有上一层可接，不应画横线，实际 ${JSON.stringify(info.first)}`);
+  assert(Math.abs(info.first.paddingLeft - 28) < 0.5, `第一层缩进应为 18 + 10px，实际 ${JSON.stringify(info.first)}`);
+  const step = 18;
+  assert(Math.abs(info.deep.spineX - (step * info.deep.depth + 6)) < 0.5,
+    `深层竖线应与缩进步长对齐，实际 ${JSON.stringify(info.deep)}`);
+  assert(Math.abs(info.deep.connectorX - (step * (info.deep.depth - 1) + 8)) < 0.5 && info.deep.connectorSize === '18px 2px',
+    `横线起点应正好接上一层竖线的右边缘，实际 ${JSON.stringify(info.deep)}`);
+  assert(Math.abs(info.deep.paddingLeft - (step * info.deep.depth + 10)) < 0.5,
+    `深层缩进应与步长一致，实际 ${JSON.stringify(info.deep)}`);
   await page.close();
 });
 
@@ -1575,6 +1632,9 @@ scenario('预览刷新保留滚动位置', async (ctx) => {
 
 scenario('弹窗发送回复后重排', async (ctx) => {
   const page = await openPreviewModal(ctx);
+  // 夹具 post-123 的分页器只声明 1、2 两页，回复触发的重排偶尔会顺带探测下一页（404）结束分页，
+  // 这属于分页收尾的正常噪声，登记为预期响应，避免偶发红灯。
+  dataOf(page).expectedResponses.push({ status: 404, url: '/post-123-3' });
   await page.evaluate(() => {
     document.querySelector('.xns-modal-reply').click();
     const composer = document.querySelector('.xns-preview-composer-host > .xns-preview-composer');
