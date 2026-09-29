@@ -78,8 +78,18 @@ function createHttpClient({
       removeCacheEntry(url.href);
       return;
     }
-    Array.from(htmlCache.entries()).forEach(([key, entry]) => {
-      if (entry.postId === postId) removeCacheEntry(key);
+    invalidatePostCacheForPost(postId);
+  }
+
+  /**
+   * 按帖子号丢弃短期缓存：投票、收藏、回复、编辑等会改变帖子 HTML 的操作成功后调用，
+   * 否则重新打开帖子会命中旧 HTML（计数、已操作状态都停在操作前）。
+   */
+  function invalidatePostCacheForPost(postId: string | number): void {
+    const key = String(postId ?? '');
+    if (!key) return;
+    Array.from(htmlCache.entries()).forEach(([entryKey, entry]) => {
+      if (entry.postId === key) removeCacheEntry(entryKey);
     });
   }
 
@@ -239,7 +249,7 @@ function createHttpClient({
     return doc;
   }
 
-  return Object.freeze({ fetchHtml, parseHtml });
+  return Object.freeze({ fetchHtml, invalidatePostCacheForPost, parseHtml });
 }
 
 /** 调用方主动取消（关窗、切楼层、重新加载）产生的错误：不要当失败提示给用户。 */
@@ -263,7 +273,8 @@ const xnsHttpClient = createHttpClient({
   extractSsrState,
 });
 const fetchHtml = (url: URL | null, options?: FetchHtmlOptions): Promise<{ html: string; url: URL | null }> => xnsHttpClient.fetchHtml(url, options);
+const invalidatePostCacheForPost = (postId: string | number): void => xnsHttpClient.invalidatePostCacheForPost(postId);
 const parseHtml = (html: string): Document => xnsHttpClient.parseHtml(html);
 
-export { fetchHtml, isAbortError, parseHtml };
+export { fetchHtml, invalidatePostCacheForPost, isAbortError, parseHtml };
 export type { FetchHtmlOptions, HttpError };

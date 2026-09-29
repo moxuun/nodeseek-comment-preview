@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.90
+// @version      0.5.91
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -390,8 +390,13 @@
 				removeCacheEntry(url.href);
 				return;
 			}
-			Array.from(htmlCache.entries()).forEach(([key, entry]) => {
-				if (entry.postId === postId) removeCacheEntry(key);
+			invalidatePostCacheForPost(postId);
+		}
+		function invalidatePostCacheForPost(postId) {
+			const key = String(postId ?? "");
+			if (!key) return;
+			Array.from(htmlCache.entries()).forEach(([entryKey, entry]) => {
+				if (entry.postId === key) removeCacheEntry(entryKey);
 			});
 		}
 		function readCachedHtml(url) {
@@ -549,6 +554,7 @@
 		}
 		return Object.freeze({
 			fetchHtml,
+			invalidatePostCacheForPost,
 			parseHtml
 		});
 	}
@@ -571,6 +577,7 @@
 		extractSsrState
 	});
 	var fetchHtml = (url, options) => xnsHttpClient.fetchHtml(url, options);
+	var invalidatePostCacheForPost = (postId) => xnsHttpClient.invalidatePostCacheForPost(postId);
 	var parseHtml = (html) => xnsHttpClient.parseHtml(html);
 	function isInteractionAction(action) {
 		return action === "like" || action === "chicken" || action === "dislike" || action === "favorite";
@@ -1023,6 +1030,7 @@
 					postId,
 					action: isFavoriteRemoval ? "remove" : "add"
 				}, { context: actionContext });
+				if (postId) invalidatePostCacheForPost(postId);
 				const payload = response;
 				const previousCount = stateEntry?.count ?? null;
 				const fallbackCount = Number.isFinite(previousCount) && previousCount !== null ? previousCount + (isFavoriteRemoval ? -1 : 1) : null;

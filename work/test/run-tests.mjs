@@ -1457,6 +1457,15 @@ scenario('同一页面重复打开帖子命中短期缓存，手动刷新强制�
   await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '9 条回复', 5_000, '缓存预览完成');
   const cachedReads = postReads();
   assert(cachedReads === firstReads, `第二次预览应命中缓存，不应新增请求，实际 ${firstReads} -> ${cachedReads}`);
+  // 投票会改变帖子 HTML（计数、已操作状态），操作成功后短期缓存必须失效，重新打开要重新抓。
+  await clickMenuItem(page, '.xns-preview-thread .xns-comment-root > .comment-menu > .menu-item[data-xns-action="like"]');
+  await waitPost(page, (post) => post.url.endsWith('/api/statistics/upvote'));
+  await page.locator('.xns-modal-close').click();
+  await waitFor(page, () => !document.querySelector('.xns-modal'), 5_000, '关闭点赞后的预览');
+  await link.click();
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '9 条回复', 15_000, '点赞后重新预览');
+  const afterActionReads = postReads();
+  assert(afterActionReads >= cachedReads + 2, `点赞后缓存应失效并重新读取帖子页面，实际 ${cachedReads} -> ${afterActionReads}`);
   await page.locator('.xns-refresh-post').click();
   await waitFor(page, () => !document.querySelector('.xns-refresh-post')?.hasAttribute('aria-busy'), 15_000, '手动刷新完成');
   const refreshedReads = postReads();

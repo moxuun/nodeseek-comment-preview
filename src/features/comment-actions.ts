@@ -3,7 +3,7 @@ import type { ModalHandle, PostHandle } from '../core/config.js';
 import { createElement, findCommentList, getAuthorName, getCommentId, getFloor, getPostContent, qs, qsa, safeCount, safePositiveInt } from '../core/dom.js';
 import { pageInfo } from '../core/runtime.js';
 import { postAction } from '../nodeseek/action-api.js';
-import { isAbortError } from '../nodeseek/http.js';
+import { invalidatePostCacheForPost, isAbortError } from '../nodeseek/http.js';
 import { buildPostUrl, getPostInfo, parseSameOriginUrl } from '../nodeseek/url.js';
 import type { CommentRecord, SsrCommentCounts } from '../nodeseek/content-parser.js';
 
@@ -499,6 +499,8 @@ function createCommentActions({
       else if (action === 'dislike') response = await postAction('/api/statistics/dislike', { commentId: targetId, action: 'add' }, { context: actionContext });
       // 取消收藏的官方参数是 action: 'remove'（不是 'del'）。
       else if (action === 'favorite') response = await postAction('/api/statistics/collection', { postId, action: isFavoriteRemoval ? 'remove' : 'add' }, { context: actionContext });
+      // 操作成功后帖子 HTML 里的计数与已操作状态已经过期，丢掉短期缓存，重新打开时重新抓。
+      if (postId) invalidatePostCacheForPost(postId);
       const payload = response as { postCollectionCount?: unknown; current?: unknown } | null;
       const previousCount = stateEntry?.count ?? null;
       const fallbackCount = Number.isFinite(previousCount) && previousCount !== null
