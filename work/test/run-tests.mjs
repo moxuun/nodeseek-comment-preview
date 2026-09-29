@@ -1810,11 +1810,35 @@ scenario('暗色模式跟随网站 dark-layout（0.5.12 回归）', async (ctx) 
   const lightToolbar = await postPage.evaluate(() => getComputedStyle(document.querySelector('.xns-post-toolbar')).backgroundColor);
   assert(lightToolbar.includes('248, 250, 252'), `网站亮色时工具栏应保持亮色，实际 ${lightToolbar}`);
   // 网站切到暗色（body.dark-layout）：预览组件跟随变暗。
-  const darkToolbar = await postPage.evaluate(() => {
+  const dark = await postPage.evaluate(() => {
     document.body.classList.add('dark-layout');
-    return getComputedStyle(document.querySelector('.xns-post-toolbar')).backgroundColor;
+    const cs = getComputedStyle(document.body);
+    const read = (name) => cs.getPropertyValue(name).trim();
+    return {
+      toolbar: getComputedStyle(document.querySelector('.xns-post-toolbar')).backgroundColor,
+      tokens: {
+        text: read('--xns-text'),
+        muted: read('--xns-muted'),
+        subtle: read('--xns-subtle'),
+        surface: read('--xns-surface'),
+        surfaceMuted: read('--xns-surface-muted'),
+        accent: read('--xns-accent'),
+        accentStrong: read('--xns-accent-strong'),
+        accentSoft: read('--xns-accent-soft'),
+        border: read('--xns-border'),
+        danger: read('--xns-danger'),
+        warning: read('--xns-warning'),
+      },
+    };
   });
-  assert(darkToolbar === 'rgb(30, 41, 59)', `网站暗色时工具栏应变暗，实际 ${darkToolbar}`);
+  assert(dark.toolbar === 'rgb(59, 59, 59)', `网站暗色时工具栏应用官方 --bg-sub-color，实际 ${dark.toolbar}`);
+  // 暗色取色以官方 body.dark-layout 为准：--body-text/--text-color/--disabled-text/--bg-main-color/--bg-sub-color/--sub-color/--main-color/--glass-color/--tabs-border。
+  const officialDarkTokens = {
+    text: '#f1f1f1', muted: '#aaa', subtle: '#8a8a8a', surface: '#272727', surfaceMuted: '#3b3b3b',
+    accent: '#45ca6b', accentStrong: '#2ea44f', accentSoft: 'rgba(255,255,255,.05)', border: '#2c2c2c',
+    danger: '#da3633', warning: '#9e6a03',
+  };
+  assert(JSON.stringify(dark.tokens) === JSON.stringify(officialDarkTokens), `暗色 token 应对齐官方暗色主题，实际 ${JSON.stringify(dark.tokens)}`);
   await postPage.close();
 
   const modal = await openPreviewModal(ctx);
@@ -1825,7 +1849,7 @@ scenario('暗色模式跟随网站 dark-layout（0.5.12 回归）', async (ctx) 
     document.body.classList.add('dark-layout');
     return getComputedStyle(document.querySelector('.xns-modal')).backgroundColor;
   });
-  assert(darkModal === 'rgb(24, 32, 43)', `网站暗色时弹窗应变暗，实际 ${darkModal}`);
+  assert(darkModal === 'rgb(59, 59, 59)', `网站暗色时弹窗应用官方 --bg-sub-color，实际 ${darkModal}`);
 });
 
 // ---------- 主流程 ----------
