@@ -1,4 +1,5 @@
 import { state } from '../core/config.js';
+import type { ModalHandle, PostHandle } from '../core/config.js';
 import { createElement, findCommentList, getAuthorName, getCommentId, getFloor, getPostContent, qs, qsa, safeCount, safePositiveInt } from '../core/dom.js';
 import { pageInfo } from '../core/runtime.js';
 import { postAction } from '../nodeseek/action-api.js';
@@ -21,26 +22,9 @@ interface InteractionStatePatch {
   done?: boolean;
   count?: number | null;
 }
-/** state.modal 里 comment-actions 会用到的字段；完整句柄由 preview controller 写入。 */
-interface ActionModalHandle {
-  postId?: string | number | null;
-  url?: URL | null;
-  body?: HTMLElement | null;
-  composer?: HTMLElement | null;
-  composerHost?: HTMLElement | null;
-  /** 弹窗自己提供的重渲染入口（楼层动作不再反向 import preview controller）。 */
-  refresh?: () => void;
-  /** 弹窗自己提供的回复同步入口。 */
-  syncReply?: () => Promise<boolean>;
-}
-/** state.post 里 comment-actions 会用到的字段；完整句柄由 post-page controller 写入。 */
-interface ActionPostHandle {
-  composer?: HTMLElement | null;
-  reloadPages?: (options: { refreshCurrentPage?: boolean }) => Promise<unknown>;
-}
 /** 动作上下文：弹窗内动作用弹窗身份，页面动作用页面身份。 */
 interface PreviewActionContext {
-  modal: ActionModalHandle | null;
+  modal: ModalHandle | null;
   postId?: string | number | null;
   url?: URL | null;
 }
@@ -115,7 +99,7 @@ function createCommentActions({
 
   function getInteractionKey(action: InteractionActionKey, comment?: Element | null): string | null {
     if (action === 'favorite') {
-      const modal = state.modal as ActionModalHandle | null;
+      const modal = state.modal;
       const postId = safePositiveInt(comment?.getAttribute?.('data-xns-post-id') || '')
         || safePositiveInt(modal?.postId || '')
         || safePositiveInt(pageInfo?.postId || '');
@@ -259,7 +243,7 @@ function createCommentActions({
   }
 
   function getActionTargetId(comment?: Element | null): number | null {
-    const modal = state.modal as ActionModalHandle | null;
+    const modal = state.modal;
     const commentId = getCommentId(comment);
     if (commentId !== null) return commentId;
     if (comment?.getAttribute('data-xns-target-type') === 'post') {
@@ -274,7 +258,7 @@ function createCommentActions({
   }
 
   function getActionContext(menuItem?: Element | null): PreviewActionContext {
-    const modal = (menuItem?.closest?.('.xns-overlay') ? state.modal : null) as ActionModalHandle | null;
+    const modal = menuItem?.closest?.('.xns-overlay') ? state.modal : null;
     if (modal) return { modal, postId: modal.postId, url: modal.url };
     return getPageActionContext();
   }
@@ -298,7 +282,7 @@ function createCommentActions({
   }
 
   function getPreviewSourceUrl(comment: Element | null, context: PreviewActionContext | null = null): string {
-    const modal = state.modal as ActionModalHandle | null;
+    const modal = state.modal;
     const contextUrl = context?.url?.href || modal?.url?.href || windowObj.location.href;
     if (!comment) return contextUrl;
     const contextInfo = getPostInfo(contextUrl);
@@ -322,9 +306,9 @@ function createCommentActions({
     const commentId = getCommentId(comment);
     if (commentId === null) return;
     const actionContext = context || {
-      modal: state.modal as ActionModalHandle | null,
+      modal: state.modal,
       postId: pageInfo?.postId || '',
-      url: (state.modal as ActionModalHandle | null)?.url,
+      url: state.modal?.url,
     };
     getDirectComposer(comment)?.remove();
     const composer = createElement('section', 'xns-preview-composer xns-preview-editor');
@@ -376,7 +360,7 @@ function createCommentActions({
   }
 
   function openPreviewComposer(action: string, comment: Element | null, context: PreviewActionContext | null = null): void {
-    const modal = (context?.modal || (state.modal as ActionModalHandle | null)) || null;
+    const modal = (context?.modal || state.modal) || null;
     const actionContext = context || {
       modal,
       postId: modal?.postId || pageInfo?.postId || '',
@@ -387,7 +371,7 @@ function createCommentActions({
       ? (modal?.composerHost || modal?.body || findCommentList())
       : (comment || findCommentList());
     if (!host) return;
-    const post = state.post as ActionPostHandle | null;
+    const post = state.post;
     const previousComposer = isPostReply ? (modal?.composer || post?.composer) : getDirectComposer(comment);
     previousComposer?.remove();
     const floor = isPostReply ? null : getDisplayFloor(comment);
@@ -430,7 +414,7 @@ function createCommentActions({
       const menu = qs(comment, '.xns-preview-menu');
       if (menu) menu.insertAdjacentElement('afterend', composer);
       else host.appendChild(composer);
-      const postHandle = state.post as ActionPostHandle | null;
+      const postHandle = state.post;
       if (isPostReply && postHandle) postHandle.composer = composer;
     }
     textarea.focus();
@@ -442,7 +426,7 @@ function createCommentActions({
         modal.composerHost?.classList.remove('is-open');
         if (modal.composerHost) modal.composerHost.hidden = true;
       }
-      const postHandle = state.post as ActionPostHandle | null;
+      const postHandle = state.post;
       if (!modal && postHandle?.composer === composer) postHandle.composer = null;
     });
     submit.addEventListener('click', async () => {
@@ -469,8 +453,8 @@ function createCommentActions({
           composer.remove();
           void postModal?.syncReply?.();
         } else if (state.post) {
-          const postHandle = state.post as ActionPostHandle;
-          if (postHandle.composer === composer) postHandle.composer = null;
+          const postHandle: PostHandle | null = state.post;
+          if (postHandle?.composer === composer) postHandle.composer = null;
           composer.remove();
           await postHandle.reloadPages?.({ refreshCurrentPage: true });
         }

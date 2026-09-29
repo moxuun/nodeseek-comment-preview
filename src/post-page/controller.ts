@@ -1,5 +1,6 @@
 import { flattenReplyTree, mergeCommentRecords } from '../comments/thread.js';
 import { MAX_PAGE, SELECTORS, state } from '../core/config.js';
+import type { PostMode } from '../core/config.js';
 import { createElement, findCommentList, getCommentId, getCommentItems, getFloor, qs, qsa } from '../core/dom.js';
 import { getMaxPage, updateSettings } from '../core/preferences.js';
 import { fetchPostPages } from '../data/page-loader.js';
@@ -264,7 +265,7 @@ function createPostPageController({
       const modeSwitch = createElement('span', 'xns-post-mode-switch');
       modeSwitch.setAttribute('role', 'group');
       modeSwitch.setAttribute('aria-label', '评论布局');
-      [['thread', '楼中楼', '切换到楼中楼布局'], ['original', '原版', '恢复官方评论布局']].forEach(([mode, text, title]) => {
+      ([['thread', '楼中楼', '切换到楼中楼布局'], ['original', '原版', '恢复官方评论布局']] as const).forEach(([mode, text, title]) => {
         const button = createElement('button', '', text) as HTMLButtonElement;
         button.type = 'button';
         button.dataset.mode = mode;
@@ -491,7 +492,7 @@ function createPostPageController({
         .filter((record): record is CommentRecord => Boolean(record));
     }
 
-    setMode(mode: string): void {
+    setMode(mode: PostMode): void {
       if (!['thread', 'original'].includes(mode)) return;
       appState.mode = mode;
       this.updateToolbar();
@@ -503,7 +504,7 @@ function createPostPageController({
         else this.render();
       }
       else void this.reloadPages();
-      updateSettings({ mode: mode as 'thread' | 'original' });
+      updateSettings({ mode });
     }
 
     prepareNativeEdit(comment: Element): boolean {

@@ -1,15 +1,10 @@
 import { state } from '../core/config.js';
+import type { LightboxHandle } from '../core/config.js';
 import { createElement, getSafeUrlAttribute, qsa } from '../core/dom.js';
-
-/** 灯箱实例；写入 state.lightbox，供 ESC 与全局事件关闭。 */
-interface ImageLightbox {
-  overlay?: HTMLElement | null;
-  cleanup?: () => void;
-}
 
 interface PreviewLightboxDeps {
   documentObj: Document;
-  state: { lightbox: unknown };
+  state: { lightbox: LightboxHandle | null };
   qsa: typeof qsa;
   createElement: typeof createElement;
   getSafeUrlAttribute: typeof getSafeUrlAttribute;
@@ -34,7 +29,7 @@ function createPreviewLightbox({ documentObj, state, qsa, createElement, getSafe
   }
 
   function closeImageLightbox(): void {
-    const lightbox = state.lightbox as ImageLightbox | null;
+    const lightbox = state.lightbox;
     if (!lightbox) return;
     lightbox.cleanup?.();
     lightbox.overlay?.remove();
@@ -190,4 +185,3 @@ const closeImageLightbox = (): void => xnsPreviewLightbox.closeImageLightbox();
 const installPreviewImageFallback = (root: Element | null | undefined, options?: { skipRemote?: boolean }): void => xnsPreviewLightbox.installPreviewImageFallback(root, options);
 
 export { closeImageLightbox, installPreviewImageFallback };
-export type { ImageLightbox };

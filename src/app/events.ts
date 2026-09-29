@@ -1,4 +1,5 @@
 import { state } from '../core/config.js';
+import type { LightboxHandle, ModalHandle, PostHandle, SettingsPanelHandle } from '../core/config.js';
 import { qsa } from '../core/dom.js';
 import { getActionContext, getMenuActionKey, runPreviewAction } from '../features/comment-actions.js';
 import type { PreviewActionContext, PreviewActionKey } from '../features/comment-actions.js';
@@ -8,10 +9,10 @@ import { closeModal } from '../preview/modal-ui.js';
 /** 全局事件边界依赖；写操作状态槽的具体类型由各自写入方决定。 */
 interface AppEventsDeps {
   state: {
-    post: unknown;
-    modal: unknown;
-    settingsPanel: unknown;
-    lightbox: unknown;
+    post: PostHandle | null;
+    modal: ModalHandle | null;
+    settingsPanel: SettingsPanelHandle | null;
+    lightbox: LightboxHandle | null;
   };
   qsa: typeof qsa;
   getMenuActionKey: (menuItem: Element) => PreviewActionKey | '';
@@ -36,7 +37,7 @@ function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPr
     // 官方帖子页的“编辑”由 NodeSeek/Vue 处理。虚拟列表裁掉同级楼层后，
     // Vue 的事件状态可能失效；先恢复官方列表，再重新触发一次原生入口。
     if (inPost && !action && (menuItem.textContent || '').trim() === '编辑') {
-      const post = state.post as { prepareNativeEdit?: (comment: Element) => boolean } | null;
+      const post = state.post;
       if (post?.prepareNativeEdit?.(comment)) {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -62,7 +63,7 @@ function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPr
     if (inEditor) return;
     if (state.settingsPanel) {
       event.preventDefault();
-      const panel = state.settingsPanel as { close?: () => void };
+      const panel = state.settingsPanel;
       panel.close?.();
       return;
     }

@@ -141,7 +141,7 @@ function createPreviewRenderer({
         return;
       }
       // 帖子页沿用官方编辑器：能直接定位就就地展开，否则先跳到该评论所在的页。
-      const post = state.post as { requestNativeEdit?: (target: CommentRecord) => boolean } | null | undefined;
+      const post = state.post;
       if (post?.requestNativeEdit?.(record)) return;
       const postId = record.postId || pageInfo?.postId || getPostInfo(windowObj.location.href)?.postId || '';
       const floor = record.floor;

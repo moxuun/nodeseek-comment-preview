@@ -153,7 +153,8 @@ function createPreviewController({
 }: PreviewControllerDeps) {
   /** state.modal 目前是 unknown，读取时统一在控制器里收窄。 */
   function currentModal(): PreviewModalState | null {
-    return (state.modal || null) as PreviewModalState | null;
+    // 共享槽只声明了弹窗的能力，完整状态由本控制器写入，这里统一收窄。
+    return (state.modal as PreviewModalState | null) || null;
   }
 
   async function copyPreviewLink(url: URL | null | undefined, setLabel?: ((value: string) => void) | null): Promise<void> {

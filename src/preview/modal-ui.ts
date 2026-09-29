@@ -1,17 +1,8 @@
 import { state } from '../core/config.js';
+import type { ModalHandle } from '../core/config.js';
 import { createElement } from '../core/dom.js';
 import { closeImageLightbox } from './lightbox.js';
 import { destroyVirtualLists } from './virtualizer.js';
-
-/** 弹窗句柄；由 preview controller 写入 state.modal，关闭路径与全局事件读取。 */
-interface PreviewModalHandle {
-  requestController?: { abort: () => void } | null;
-  replySyncController?: { abort: () => void } | null;
-  refreshScrollCleanup?: () => void;
-  scrollCleanup?: () => void;
-  overlay?: Element | null;
-  body?: Element | null;
-}
 
 /** 分享按钮的点击回调，回调里可以改按钮文案。 */
 type ShareClickHandler = (helpers: { setLabel: (value: string) => void }) => void;
@@ -19,7 +10,7 @@ type ShareClickHandler = (helpers: { setLabel: (value: string) => void }) => voi
 interface PreviewModalUiDeps {
   windowObj: Window & typeof globalThis;
   documentObj: Document;
-  state: { modal: unknown };
+  state: { modal: ModalHandle | null };
   createElement: typeof createElement;
   closeImageLightbox: () => void;
 }
@@ -140,7 +131,7 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
 
   function closeModal(): void {
     closeImageLightbox();
-    const modal = state.modal as PreviewModalHandle | null;
+    const modal = state.modal;
     modal?.requestController?.abort();
     modal?.replySyncController?.abort();
     modal?.refreshScrollCleanup?.();
@@ -178,4 +169,3 @@ const createShareButton = (onClick?: ShareClickHandler): HTMLButtonElement => xn
 const installPreviewScrollButtons = (dialog: Element, body: Element): (() => void) => xnsPreviewModalUi.installPreviewScrollButtons(dialog, body);
 
 export { closeModal, createCloseButton, createRefreshButton, createShareButton, installPreviewScrollButtons };
-export type { PreviewModalHandle };

@@ -1,11 +1,12 @@
 import { DEFAULT_MODE, MAX_PAGE, state } from './config.js';
+import type { PostMode } from './config.js';
 import type { Settings } from '../ui/settings-panel';
 
 /** 偏好存储依赖；测试可注入替身。 */
 interface PreferencesDeps {
   windowObj: { localStorage?: Storage | null };
   documentObj: { documentElement: HTMLElement | null };
-  state: { mode: string };
+  state: { mode: PostMode };
   storageKey: string;
   defaultMode: Settings['mode'];
   maxPage: number;

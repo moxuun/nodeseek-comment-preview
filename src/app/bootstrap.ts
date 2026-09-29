@@ -1,5 +1,6 @@
 import { handleKeydown, handlePreviewActionClick } from './events.js';
 import { state } from '../core/config.js';
+import type { PostHandle } from '../core/config.js';
 import { pageInfo } from '../core/runtime.js';
 import { handleVoteClick } from '../features/vote.js';
 import { getPostInfo, parseSameOriginUrl } from '../nodeseek/url.js';
@@ -10,8 +11,11 @@ import { handleFloorClick } from '../preview/navigation.js';
 import { registerSettingsMenu } from '../ui/settings.js';
 import { installStyle } from '../ui/style.js';
 
-/** 帖子页增强器对外使用的两个方法（实现仍在 post-page controller 里）。 */
-interface PostEnhancerLike {
+/**
+ * 帖子页增强器对外使用的方法（实现仍在 post-page controller 里）；
+ * 它同时就是写进 `state.post` 的那个句柄，因此直接扩展共享契约。
+ */
+interface PostEnhancerLike extends PostHandle {
   init: () => Promise<unknown>;
   restoreOriginal: () => void;
 }
@@ -21,7 +25,7 @@ interface AppBootstrapDeps {
   documentObj: Document;
   windowObj: Window & typeof globalThis;
   pageInfo: typeof pageInfo;
-  state: { post: unknown };
+  state: { post: PostHandle | null };
   installStyle: () => void;
   registerSettingsMenu: () => void;
   createPreviewEntryController: (options: {

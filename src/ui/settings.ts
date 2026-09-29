@@ -1,4 +1,5 @@
 import { state } from '../core/config.js';
+import type { SettingsPanelHandle } from '../core/config.js';
 import { createElement } from '../core/dom.js';
 import { getSettings, resetSettings, updateSettings } from '../core/preferences.js';
 import { mountSettingsPanel } from './settings-panel';
@@ -7,21 +8,9 @@ import type { Settings } from './settings-panel';
 // Tampermonkey 菜单 API；测试注入等非 userscript 环境下不存在。
 declare const GM_registerMenuCommand: ((name: string, handler: () => void) => void) | undefined;
 
-/** 设置面板挂载句柄；由本模块写入 state.settingsPanel。 */
-interface SettingsPanelHandle {
-  overlay: HTMLElement;
-  close: () => void;
-  unmount: () => void;
-}
-
-/** 本模块用到的帖子控制器能力。 */
-interface PostModeHandle {
-  setMode?: (mode: Settings['mode']) => void;
-}
-
 // Legacy state/GM bridge; React owns only the settings panel, never site nodes.
 function closeSettings() {
-  const panel = state.settingsPanel as SettingsPanelHandle | null;
+  const panel = state.settingsPanel;
   panel?.unmount?.();
   panel?.overlay?.remove();
   state.settingsPanel = null;
@@ -40,7 +29,7 @@ function openSettings() {
   const apply = (update: () => Settings): Settings => {
     const previousMode = state.mode;
     const next = update();
-    if (next.mode !== previousMode) (state.post as PostModeHandle | null)?.setMode?.(next.mode);
+    if (next.mode !== previousMode) state.post?.setMode?.(next.mode);
     return next;
   };
   const unmount = mountSettingsPanel(overlay, {

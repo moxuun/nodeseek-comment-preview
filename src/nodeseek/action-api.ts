@@ -1,4 +1,5 @@
 import { REQUEST_TIMEOUT, state } from '../core/config.js';
+import type { ModalHandle } from '../core/config.js';
 import { parseSameOriginUrl } from './url.js';
 
 /** 写接口请求选项；context 决定同源基准地址与 referrer。 */
@@ -11,7 +12,7 @@ interface ActionRequestOptions {
 interface ActionApiDeps {
   windowObj: Window & typeof globalThis;
   navigatorObj: { userAgent?: string };
-  state: { modal: unknown };
+  state: { modal: ModalHandle | null };
   requestTimeout: number;
   parseSameOriginUrl: (raw: string, base?: string) => URL | null;
   fetchFn: typeof fetch;
@@ -53,7 +54,7 @@ function createNodeSeekActionApi({ windowObj, navigatorObj, state, requestTimeou
 
   /** 弹窗动作的基准地址来自当前预览的帖子；没有弹窗时回落到当前页面。 */
   function modalUrl(): URL | null {
-    const modal = state.modal as { url?: URL | null } | null;
+    const modal = state.modal;
     return modal?.url ?? null;
   }
 
