@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.76
+// @version      0.5.77
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -5913,6 +5913,29 @@
 	function createPostPageController({ documentObj, windowObj, appState, selectors, maxPage, findCommentList, createElement, qs, qsa, fetchHtml, parseHtml, getFloor, getCommentItems, sanitizeImportedNode, releaseCommentNode, getSsrState, getCurrentUserUid, getCommentRecord, fetchPostPages, flattenReplyTree, createCommentVirtualizer, prepareCommentRecord, addRemoteNote, installPreviewFeatures, formatPageStatus, updateSettings, getMaxPage, buildPostUrl }) {
 		const NATIVE_EDIT_REQUEST_KEY = "xns-comment-preview-native-edit";
 		return class PostPageController {
+			info;
+			list;
+			originalChildren;
+			records;
+			loadedPages;
+			failedPages;
+			challengePages;
+			truncated;
+			totalPages;
+			toolbar;
+			statusNode;
+			loadingNode;
+			toolbarStatusText;
+			toolbarStatusTone;
+			toolbarStatusDetail;
+			loading;
+			hasRemotePages;
+			virtualizer;
+			generation;
+			progressiveTimer;
+			progressiveRendered;
+			composer;
+			requestController;
 			constructor(info) {
 				this.info = info;
 				this.list = null;
@@ -6021,6 +6044,7 @@
 			}
 			createToolbar() {
 				if (this.toolbar || !this.list) return;
+				const list = this.list;
 				const toolbar = createElement("nav", "xns-post-toolbar");
 				toolbar.setAttribute("aria-label", "评论布局");
 				const modeSwitch = createElement("span", "xns-post-mode-switch");
@@ -6058,16 +6082,17 @@
 					else this.reloadPages({ refreshCurrentPage: true });
 				});
 				toolbar.appendChild(refresh);
-				this.list.closest(selectors.commentContainer)?.insertBefore(toolbar, this.list);
+				list.closest(selectors.commentContainer)?.insertBefore(toolbar, list);
 				this.toolbar = toolbar;
 				this.updateToolbar();
 			}
 			updateToolbar() {
-				if (!this.toolbar) return;
-				qsa(this.toolbar, "[data-mode]").forEach((button) => {
+				const toolbar = this.toolbar;
+				if (!toolbar) return;
+				qsa(toolbar, "[data-mode]").forEach((button) => {
 					button.setAttribute("aria-pressed", String(button.dataset.mode === appState.mode));
 				});
-				const refresh = qs(this.toolbar, ".xns-post-refresh");
+				const refresh = qs(toolbar, ".xns-post-refresh");
 				if (refresh) {
 					refresh.disabled = this.loading;
 					refresh.setAttribute("aria-busy", String(this.loading));
@@ -6076,7 +6101,7 @@
 					refresh.title = retrying ? "重新读取分页" : "重新读取当前页和评论分页";
 					refresh.setAttribute("aria-label", retrying ? "重新读取分页" : "重新读取当前页和评论分页");
 				}
-				const status = qs(this.toolbar, ".xns-toolbar-status");
+				const status = qs(toolbar, ".xns-toolbar-status");
 				if (!status) return;
 				const text = this.toolbarStatusText || (this.records.length ? `${this.records.length} 条评论` : "读取中…");
 				status.className = `xns-toolbar-status${this.toolbarStatusTone ? ` ${this.toolbarStatusTone}` : ""}`;
@@ -6150,13 +6175,15 @@
 				this.hasRemotePages = this.totalPages > 1 || this.info.page > 1;
 			}
 			async adoptNewReplies(generation, signal) {
+				const list = this.list;
+				if (!list) return;
 				try {
 					const response = await fetchHtml(buildPostUrl(this.info.postId, this.info.page), {
 						noStore: true,
 						signal
 					});
 					if (generation !== this.generation) return;
-					const parsed = parseHtml(response.html, response.url);
+					const parsed = parseHtml(response.html);
 					const knownFloors = new Set(this.originalChildren.filter((node) => node.nodeType === Node.ELEMENT_NODE).map((node) => getFloor(node)).filter((floor) => floor !== null));
 					getCommentItems(parsed).forEach((item) => {
 						const floor = getFloor(item);
@@ -6164,7 +6191,7 @@
 						const imported = sanitizeImportedNode(item, { keepCommentMenu: true });
 						if (!imported) return;
 						knownFloors.add(floor);
-						this.list.appendChild(imported);
+						list.appendChild(imported);
 						this.originalChildren.push(imported);
 					});
 				} catch {}
@@ -6237,7 +6264,7 @@
 					keepCommentMenu: true,
 					state,
 					getCurrentUserUid
-				})).filter(Boolean);
+				})).filter((record) => Boolean(record));
 			}
 			setMode(mode) {
 				if (!["thread", "original"].includes(mode)) return;
@@ -6288,7 +6315,7 @@
 				if (!this.list || appState.mode !== "thread") return;
 				const virtualizerOptions = {
 					getViewport: () => windowObj,
-					renderItem: (entry) => prepareCommentRecord(entry.record, entry.depth),
+					renderItem: (entry) => prepareCommentRecord(entry.record, entry.depth ?? 0),
 					onMount: (node, entry) => {
 						const record = entry.record;
 						if (!record.current) {
@@ -6321,21 +6348,22 @@
 					failedPages: this.failedPages,
 					challengePages: this.challengePages,
 					truncated: this.truncated,
-					loading: loading && this.hasRemotePages,
+					loading: Boolean(loading) && this.hasRemotePages,
 					commentCount: this.records.length
 				});
 				const detail = pagination.detail || "暂无分页信息";
 				this.showStatus(`楼中楼已整理 · ${detail}`, pagination.tone, pagination.compact);
 			}
 			restoreOriginal(options = {}) {
-				if (!this.list) return;
+				const list = this.list;
+				if (!list) return;
 				this.virtualizer?.destroy();
 				this.virtualizer = null;
-				this.list.classList.remove("xns-preview-thread");
-				qsa(this.list, ".xns-reply-list, .xns-remote-note").forEach((node) => node.remove());
-				this.originalChildren.forEach(stripRenderArtifacts);
-				while (this.list.firstChild) this.list.removeChild(this.list.firstChild);
-				this.originalChildren.forEach((node) => this.list.appendChild(node));
+				list.classList.remove("xns-preview-thread");
+				qsa(list, ".xns-reply-list, .xns-remote-note").forEach((node) => node.remove());
+				this.originalChildren.forEach((node) => stripRenderArtifacts(node));
+				while (list.firstChild) list.removeChild(list.firstChild);
+				this.originalChildren.forEach((node) => list.appendChild(node));
 				if (options.releaseRemote !== false) this.records.forEach(releaseCommentNode);
 				this.statusNode?.remove();
 				this.statusNode = null;

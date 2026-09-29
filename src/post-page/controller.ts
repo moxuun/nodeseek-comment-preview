@@ -14,9 +14,73 @@ import { addRemoteNote, stripRenderArtifacts } from '../preview/render-utils.js'
 import { prepareCommentRecord } from '../preview/renderer.js';
 import { createCommentVirtualizer } from '../preview/virtualizer.js';
 import { formatPageStatus } from '../ui/status.js';
+import type { PageProgress } from '../data/page-loader.js';
+import type { CommentRecord } from '../nodeseek/content-parser.js';
+import type { PostInfo } from '../nodeseek/url.js';
+import type { CommentVirtualizer, VirtualizerSetupOptions } from '../preview/virtualizer.js';
 
 // 帖子详情页控制器。
-// 它只管理原始楼层快照、评论布局模式和分页生命周期；预览入口由 preview/entry.js 管理。
+// 它只管理原始楼层快照、评论布局模式和分页生命周期；预览入口由 preview/entry.ts 管理。
+
+/** 挂载了虚拟列表实例的宿主元素（与 renderer.ts 的 RenderHost 同构）。 */
+type VirtualizerHost = HTMLElement & { __xnsVirtualizer?: CommentVirtualizer };
+
+/** 重新读取分页的选项。 */
+interface ReloadPagesOptions {
+  onlyPages?: unknown[];
+  initialChallengePages?: unknown[];
+  refreshCurrentPage?: boolean;
+  noStore?: boolean;
+}
+
+/** 渲染选项：`progressive` 表示这是分页未读完时的阶段性渲染。 */
+interface RenderOptions {
+  progressive?: boolean;
+}
+
+/** 恢复原版布局的选项。 */
+interface RestoreOriginalOptions {
+  releaseRemote?: boolean;
+}
+
+/** sessionStorage 里跨页传递的官方编辑器请求。 */
+interface NativeEditRequest {
+  postId?: unknown;
+  floor?: unknown;
+}
+
+/** 控制器依赖：全部由入口注入，测试可替换。 */
+interface PostPageControllerDeps {
+  documentObj: Document;
+  windowObj: Window & typeof globalThis;
+  appState: typeof state;
+  selectors: typeof SELECTORS;
+  maxPage: number;
+  findCommentList: typeof findCommentList;
+  createElement: typeof createElement;
+  qs: typeof qs;
+  qsa: typeof qsa;
+  fetchHtml: typeof fetchHtml;
+  parseHtml: typeof parseHtml;
+  getFloor: typeof getFloor;
+  getCommentItems: typeof getCommentItems;
+  sanitizeImportedNode: typeof sanitizeImportedNode;
+  releaseCommentNode: typeof releaseCommentNode;
+  getSsrState: typeof getSsrState;
+  getCurrentUserUid: typeof getCurrentUserUid;
+  getCommentRecord: typeof getCommentRecord;
+  fetchPostPages: typeof fetchPostPages;
+  flattenReplyTree: typeof flattenReplyTree;
+  createCommentVirtualizer: typeof createCommentVirtualizer;
+  prepareCommentRecord: typeof prepareCommentRecord;
+  addRemoteNote: typeof addRemoteNote;
+  installPreviewFeatures: typeof installPreviewFeatures;
+  formatPageStatus: typeof formatPageStatus;
+  updateSettings: typeof updateSettings;
+  getMaxPage: typeof getMaxPage;
+  buildPostUrl: typeof buildPostUrl;
+}
+
 function createPostPageController({
   documentObj,
   windowObj,
@@ -46,11 +110,35 @@ function createPostPageController({
   updateSettings,
   getMaxPage,
   buildPostUrl,
-}) {
+}: PostPageControllerDeps) {
   const NATIVE_EDIT_REQUEST_KEY = 'xns-comment-preview-native-edit';
 
   return class PostPageController {
-    constructor(info) {
+    info: PostInfo;
+    list: Element | null;
+    originalChildren: Node[];
+    records: CommentRecord[];
+    loadedPages: number;
+    failedPages: number[];
+    challengePages: number[];
+    truncated: boolean;
+    totalPages: number | null;
+    toolbar: HTMLElement | null;
+    statusNode: Element | null;
+    loadingNode: Element | null;
+    toolbarStatusText: string;
+    toolbarStatusTone: string;
+    toolbarStatusDetail: string;
+    loading: boolean;
+    hasRemotePages: boolean;
+    virtualizer: CommentVirtualizer | null;
+    generation: number;
+    progressiveTimer: number;
+    progressiveRendered: boolean;
+    composer: HTMLElement | null;
+    requestController: AbortController | null;
+
+    constructor(info: PostInfo) {
       this.info = info;
       this.list = null;
       this.originalChildren = [];
@@ -76,11 +164,11 @@ function createPostPageController({
       this.requestController = null;
     }
 
-    consumeNativeEditRequest() {
+    consumeNativeEditRequest(): string | null {
       try {
         const raw = windowObj.sessionStorage?.getItem(NATIVE_EDIT_REQUEST_KEY);
         windowObj.sessionStorage?.removeItem(NATIVE_EDIT_REQUEST_KEY);
-        const request = raw ? JSON.parse(raw) : null;
+        const request = (raw ? JSON.parse(raw) : null) as NativeEditRequest | null;
         if (!request || String(request.postId) !== String(this.info.postId)) return null;
         if (!/^\d{1,15}$/.test(String(request.floor))) return null;
         return String(request.floor);
@@ -89,19 +177,19 @@ function createPostPageController({
       }
     }
 
-    openNativeEditAfterReload(floor) {
+    openNativeEditAfterReload(floor: string): void {
       if (this.applyNativeEdit(this.getSsrCommentIndex(null, floor))) return;
       const started = Date.now();
-      const findEdit = () => {
+      const findEdit = (): Element | undefined => {
         const comment = Array.from(this.list?.children || [])
           .find((node) => node.nodeType === 1 && String(node.id) === String(floor));
         return Array.from(comment?.querySelectorAll?.(':scope > .comment-menu > .menu-item, :scope > .comment-actions > .menu-item') || [])
           .find((item) => (item.textContent || '').trim() === '编辑');
       };
-      const check = () => {
+      const check = (): void => {
         const edit = findEdit();
         if (edit) {
-          edit.click();
+          (edit as HTMLElement).click();
           return;
         }
         if (Date.now() - started < 12_000) windowObj.setTimeout(check, 80);
@@ -109,7 +197,7 @@ function createPostPageController({
       check();
     }
 
-    rememberNativeEditRequest(floor) {
+    rememberNativeEditRequest(floor: number | string): boolean {
       try {
         windowObj.sessionStorage?.setItem(NATIVE_EDIT_REQUEST_KEY, JSON.stringify({
           postId: this.info.postId,
@@ -123,7 +211,7 @@ function createPostPageController({
 
     // 官方编辑器只接受 __config__.postData.comments 的下标，先用 commentId 定位，
     // 拿不到 commentId 时退回楼层号。
-    getSsrCommentIndex(commentId, floor) {
+    getSsrCommentIndex(commentId: number | string | null, floor: number | string | null): number {
       const comments = getSsrState(documentObj)?.postData?.comments;
       if (!Array.isArray(comments)) return -1;
       if (commentId !== null && commentId !== undefined) {
@@ -135,15 +223,15 @@ function createPostPageController({
     }
 
     // 直接调用官方编辑器入口：就地展开编辑器，不再整页刷新、不再退回原版列表。
-    applyNativeEdit(index) {
+    applyNativeEdit(index: number): boolean {
       if (!Number.isInteger(index) || index < 0) return false;
-      const editor = windowObj.editor;
+      const editor = (windowObj as unknown as { editor?: { edit?: (index: number) => void } }).editor;
       if (typeof editor?.edit !== 'function') return false;
       editor.edit(index);
       return true;
     }
 
-    async init() {
+    async init(): Promise<void> {
       this.list = await this.waitForCommentList();
       if (!this.list) return;
       this.originalChildren = Array.from(this.list.childNodes);
@@ -157,10 +245,10 @@ function createPostPageController({
       await this.reloadPages();
     }
 
-    waitForCommentList() {
+    waitForCommentList(): Promise<Element | null> {
       return new Promise((resolve) => {
         const started = Date.now();
-        const check = () => {
+        const check = (): void => {
           const list = findCommentList();
           if (list || Date.now() - started > 12_000) resolve(list);
           else windowObj.setTimeout(check, 80);
@@ -169,15 +257,16 @@ function createPostPageController({
       });
     }
 
-    createToolbar() {
+    createToolbar(): void {
       if (this.toolbar || !this.list) return;
+      const list = this.list;
       const toolbar = createElement('nav', 'xns-post-toolbar');
       toolbar.setAttribute('aria-label', '评论布局');
       const modeSwitch = createElement('span', 'xns-post-mode-switch');
       modeSwitch.setAttribute('role', 'group');
       modeSwitch.setAttribute('aria-label', '评论布局');
       [['thread', '楼中楼', '切换到楼中楼布局'], ['original', '原版', '恢复官方评论布局']].forEach(([mode, text, title]) => {
-        const button = createElement('button', '', text);
+        const button = createElement('button', '', text) as HTMLButtonElement;
         button.type = 'button';
         button.dataset.mode = mode;
         button.title = title;
@@ -187,7 +276,7 @@ function createPostPageController({
       });
       toolbar.appendChild(modeSwitch);
       toolbar.appendChild(createElement('span', 'xns-toolbar-status'));
-      const refresh = createElement('button', 'xns-post-refresh', '刷新');
+      const refresh = createElement('button', 'xns-post-refresh', '刷新') as HTMLButtonElement;
       refresh.type = 'button';
       refresh.title = '重新读取当前页和评论分页';
       refresh.setAttribute('aria-label', '重新读取当前页和评论分页');
@@ -200,18 +289,19 @@ function createPostPageController({
         else void this.reloadPages({ refreshCurrentPage: true });
       });
       toolbar.appendChild(refresh);
-      const container = this.list.closest(selectors.commentContainer);
-      container?.insertBefore(toolbar, this.list);
+      const container = list.closest(selectors.commentContainer);
+      container?.insertBefore(toolbar, list);
       this.toolbar = toolbar;
       this.updateToolbar();
     }
 
-    updateToolbar() {
-      if (!this.toolbar) return;
-      qsa(this.toolbar, '[data-mode]').forEach((button) => {
-        button.setAttribute('aria-pressed', String(button.dataset.mode === appState.mode));
+    updateToolbar(): void {
+      const toolbar = this.toolbar;
+      if (!toolbar) return;
+      qsa(toolbar, '[data-mode]').forEach((button) => {
+        button.setAttribute('aria-pressed', String((button as HTMLElement).dataset.mode === appState.mode));
       });
-      const refresh = qs(this.toolbar, '.xns-post-refresh');
+      const refresh = qs(toolbar, '.xns-post-refresh') as HTMLButtonElement | null;
       if (refresh) {
         refresh.disabled = this.loading;
         refresh.setAttribute('aria-busy', String(this.loading));
@@ -220,7 +310,7 @@ function createPostPageController({
         refresh.title = retrying ? '重新读取分页' : '重新读取当前页和评论分页';
         refresh.setAttribute('aria-label', retrying ? '重新读取分页' : '重新读取当前页和评论分页');
       }
-      const status = qs(this.toolbar, '.xns-toolbar-status');
+      const status = qs(toolbar, '.xns-toolbar-status') as HTMLElement | null;
       if (!status) return;
       const text = this.toolbarStatusText || (this.records.length ? `${this.records.length} 条评论` : '读取中…');
       status.className = `xns-toolbar-status${this.toolbarStatusTone ? ` ${this.toolbarStatusTone}` : ''}`;
@@ -231,7 +321,7 @@ function createPostPageController({
       else status.removeAttribute('title');
     }
 
-    async reloadPages(options = {}) {
+    async reloadPages(options: ReloadPagesOptions = {}): Promise<void> {
       if (!this.list) return;
       const pageLimit = Math.min(maxPage, Math.max(1, Number(getMaxPage?.()) || maxPage));
       const retryPages = Array.isArray(options.onlyPages)
@@ -260,7 +350,7 @@ function createPostPageController({
       } catch (error) {
         if (generation !== this.generation) return;
         this.restoreOriginal();
-        this.showStatus(`楼中楼读取失败：${error.message || '网络错误'}，已保留原版布局。`);
+        this.showStatus(`楼中楼读取失败：${(error as Error).message || '网络错误'}，已保留原版布局。`);
       } finally {
         if (this.requestController === requestController) this.requestController = null;
         if (generation === this.generation) {
@@ -273,12 +363,12 @@ function createPostPageController({
       }
     }
 
-    loadCurrentPage() {
+    loadCurrentPage(): void {
       const state = getSsrState(documentObj);
-      const records = [];
+      const records: CommentRecord[] = [];
       this.originalChildren.forEach((item, index) => {
         if (item.nodeType !== 1) return;
-        const record = getCommentRecord(item, this.info.postId, this.info.page, index, true, {
+        const record = getCommentRecord(item as Element, this.info.postId, this.info.page, index, true, {
           keepCommentMenu: true,
           state,
           getCurrentUserUid,
@@ -295,14 +385,16 @@ function createPostPageController({
       this.hasRemotePages = this.totalPages > 1 || this.info.page > 1;
     }
 
-    async adoptNewReplies(generation, signal) {
+    async adoptNewReplies(generation: number, signal?: AbortSignal): Promise<void> {
+      const list = this.list;
+      if (!list) return;
       try {
         const response = await fetchHtml(buildPostUrl(this.info.postId, this.info.page), { noStore: true, signal });
         if (generation !== this.generation) return;
-        const parsed = parseHtml(response.html, response.url);
+        const parsed = parseHtml(response.html);
         const knownFloors = new Set(this.originalChildren
           .filter((node) => node.nodeType === Node.ELEMENT_NODE)
-          .map((node) => getFloor(node))
+          .map((node) => getFloor(node as Element))
           .filter((floor) => floor !== null));
         getCommentItems(parsed).forEach((item) => {
           const floor = getFloor(item);
@@ -310,7 +402,7 @@ function createPostPageController({
           const imported = sanitizeImportedNode(item, { keepCommentMenu: true });
           if (!imported) return;
           knownFloors.add(floor);
-          this.list.appendChild(imported);
+          list.appendChild(imported);
           this.originalChildren.push(imported);
         });
       } catch {
@@ -318,15 +410,15 @@ function createPostPageController({
       }
     }
 
-    async loadPages(generation, options = {}, signal) {
-      const retryPages = Array.isArray(options.onlyPages) ? options.onlyPages : [];
+    async loadPages(generation: number, options: ReloadPagesOptions = {}, signal?: AbortSignal): Promise<void> {
+      const retryPages: number[] = Array.isArray(options.onlyPages) ? (options.onlyPages as number[]) : [];
       const retryOnly = retryPages.length > 0;
       this.failedPages = retryOnly ? [...retryPages] : [];
       this.challengePages = retryOnly
         ? (options.initialChallengePages || []).filter((page) => retryPages.includes(Number(page))).map(Number)
         : [];
-      const remoteRecords = [];
-      const updateProgress = (progress) => {
+      const remoteRecords: CommentRecord[] = [];
+      const updateProgress = (progress: PageProgress): void => {
         if (!progress || generation !== this.generation) return;
         this.loadedPages = progress.loadedPages;
         this.failedPages = [...progress.failedPages];
@@ -351,7 +443,7 @@ function createPostPageController({
           onlyPages: retryPages,
           initialLoadedPages,
           initialFailedPages: retryPages,
-          initialChallengePages: (options.initialChallengePages || []).filter((page) => retryPages.includes(Number(page))),
+          initialChallengePages: (options.initialChallengePages || []).filter((page) => retryPages.includes(Number(page))) as number[],
         } : {}),
         signal,
         onPageLoaded: (page, root, progress) => {
@@ -373,7 +465,7 @@ function createPostPageController({
       this.records = mergeCommentRecords(this.records, remoteRecords);
     }
 
-    scheduleProgressiveRender(generation) {
+    scheduleProgressiveRender(generation: number): void {
       if (generation !== this.generation || appState.mode !== 'thread' || this.progressiveTimer) return;
       const delay = this.progressiveRendered ? 500 : 300;
       this.progressiveTimer = windowObj.setTimeout(() => {
@@ -384,12 +476,12 @@ function createPostPageController({
       }, delay);
     }
 
-    clearProgressiveRender() {
+    clearProgressiveRender(): void {
       if (this.progressiveTimer) windowObj.clearTimeout(this.progressiveTimer);
       this.progressiveTimer = 0;
     }
 
-    collectRemoteRecords(root, page) {
+    collectRemoteRecords(root: Document, page: number): CommentRecord[] {
       const state = getSsrState(root);
       return getCommentItems(root)
         .map((item, index) => getCommentRecord(item, this.info.postId, page, index, false, {
@@ -397,10 +489,10 @@ function createPostPageController({
           state,
           getCurrentUserUid,
         }))
-        .filter(Boolean);
+        .filter((record): record is CommentRecord => Boolean(record));
     }
 
-    setMode(mode) {
+    setMode(mode: string): void {
       if (!['thread', 'original'].includes(mode)) return;
       appState.mode = mode;
       this.updateToolbar();
@@ -408,14 +500,14 @@ function createPostPageController({
       else if (this.records.length) {
         // 原版布局会同时释放远端节点和序列化快照；切回时按正常分页流程重建。
         const needsReload = this.records.some((record) => !record.current && !record.node && !record.html);
-        if (needsReload) this.reloadPages();
+        if (needsReload) void this.reloadPages();
         else this.render();
       }
-      else this.reloadPages();
-      updateSettings({ mode });
+      else void this.reloadPages();
+      updateSettings({ mode: mode as 'thread' | 'original' });
     }
 
-    prepareNativeEdit(comment) {
+    prepareNativeEdit(comment: Element): boolean {
       if (!this.virtualizer || !this.originalChildren.includes(comment)) return false;
       const floor = Number(comment.getAttribute('data-xns-floor') ?? comment.id);
       const index = this.getSsrCommentIndex(getCommentId(comment), Number.isInteger(floor) ? floor : null);
@@ -427,7 +519,7 @@ function createPostPageController({
     }
 
     // 跨页楼层：记录请求并跳到它所在的页面，重载后由 openNativeEditAfterReload 接手。
-    requestNativeEdit(record) {
+    requestNativeEdit(record: CommentRecord): boolean {
       const floor = Number(record?.floor);
       const page = Number(record?.page) || 1;
       if (!Number.isInteger(floor) || floor < 0 || !this.rememberNativeEditRequest(floor)) return false;
@@ -437,7 +529,7 @@ function createPostPageController({
       return true;
     }
 
-    showLoading(text) {
+    showLoading(text: string): void {
       this.loadingNode?.remove();
       this.loadingNode = null;
       this.toolbarStatusText = this.records.length ? `${this.records.length} 条评论` : text;
@@ -446,7 +538,7 @@ function createPostPageController({
       this.updateToolbar();
     }
 
-    showStatus(text, tone = '', visibleText = '') {
+    showStatus(text: string, tone = '', visibleText = ''): void {
       this.statusNode?.remove();
       this.statusNode = null;
       this.toolbarStatusText = visibleText || (this.records.length ? `${this.records.length} 条评论` : text);
@@ -455,13 +547,13 @@ function createPostPageController({
       this.updateToolbar();
     }
 
-    render(options = {}) {
+    render(options: RenderOptions = {}): void {
       if (!this.list || appState.mode !== 'thread') return;
-      const virtualizerOptions = {
+      const virtualizerOptions: VirtualizerSetupOptions = {
         getViewport: () => windowObj,
-        renderItem: (entry) => prepareCommentRecord(entry.record, entry.depth),
+        renderItem: (entry) => prepareCommentRecord(entry.record as unknown as CommentRecord, entry.depth ?? 0),
         onMount: (node, entry) => {
-          const record = entry.record;
+          const record = entry.record as unknown as CommentRecord;
           if (!record.current) {
             addRemoteNote(record, this.info.postId);
             node.classList.add('xns-preview-content');
@@ -469,7 +561,7 @@ function createPostPageController({
           }
         },
         onUnmount: (node, entry) => {
-          if (!entry.record.current) releaseCommentNode(entry.record);
+          if (!(entry.record as unknown as CommentRecord).current) releaseCommentNode(entry.record as unknown as CommentRecord);
         },
       };
       if (!this.virtualizer) {
@@ -483,7 +575,7 @@ function createPostPageController({
           createElement,
           estimatedHeight: 135,
           overscanScreens: 2,
-        }).mount(this.list, virtualizerOptions);
+        }).mount(this.list as VirtualizerHost, virtualizerOptions);
       }
       this.virtualizer.setEntries(flattenReplyTree(this.records), virtualizerOptions);
       const loadedPages = this.loadedPages;
@@ -494,22 +586,23 @@ function createPostPageController({
         failedPages: this.failedPages,
         challengePages: this.challengePages,
         truncated: this.truncated,
-        loading: loading && this.hasRemotePages,
+        loading: Boolean(loading) && this.hasRemotePages,
         commentCount: this.records.length,
       });
       const detail = pagination.detail || '暂无分页信息';
       this.showStatus(`楼中楼已整理 · ${detail}`, pagination.tone, pagination.compact);
     }
 
-    restoreOriginal(options = {}) {
-      if (!this.list) return;
+    restoreOriginal(options: RestoreOriginalOptions = {}): void {
+      const list = this.list;
+      if (!list) return;
       this.virtualizer?.destroy();
       this.virtualizer = null;
-      this.list.classList.remove('xns-preview-thread');
-      qsa(this.list, '.xns-reply-list, .xns-remote-note').forEach((node) => node.remove());
-      this.originalChildren.forEach(stripRenderArtifacts);
-      while (this.list.firstChild) this.list.removeChild(this.list.firstChild);
-      this.originalChildren.forEach((node) => this.list.appendChild(node));
+      list.classList.remove('xns-preview-thread');
+      qsa(list, '.xns-reply-list, .xns-remote-note').forEach((node) => node.remove());
+      this.originalChildren.forEach((node) => stripRenderArtifacts(node as Element));
+      while (list.firstChild) list.removeChild(list.firstChild);
+      this.originalChildren.forEach((node) => list.appendChild(node));
       if (options.releaseRemote !== false) this.records.forEach(releaseCommentNode);
       this.statusNode?.remove();
       this.statusNode = null;
