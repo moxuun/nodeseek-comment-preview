@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.82
+// @version      0.5.83
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -4232,7 +4232,6 @@
 			const modal = state.modal;
 			modal?.requestController?.abort();
 			modal?.replySyncController?.abort();
-			modal?.featureCleanup?.();
 			modal?.refreshScrollCleanup?.();
 			modal?.scrollCleanup?.();
 			if (modal?.body) destroyVirtualLists(modal.body);
@@ -5171,8 +5170,6 @@
 			modal.requestController?.abort();
 			modal.requestController = requestController;
 			modal.refreshScrollCleanup?.();
-			modal.featureCleanup?.();
-			modal.featureCleanup = null;
 			modal.loading = true;
 			const generation = (modal.loadGeneration || 0) + 1;
 			modal.loadGeneration = generation;
@@ -5323,7 +5320,6 @@
 				postId: getPostInfo(fetchUrl.href)?.postId || "",
 				composer: null,
 				scrollCleanup,
-				featureCleanup: null,
 				headerMeta: headerMeta.items,
 				loading: false,
 				loadGeneration: 0,

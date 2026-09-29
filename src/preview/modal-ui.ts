@@ -7,7 +7,6 @@ import { destroyVirtualLists } from './virtualizer.js';
 interface PreviewModalHandle {
   requestController?: { abort: () => void } | null;
   replySyncController?: { abort: () => void } | null;
-  featureCleanup?: () => void;
   refreshScrollCleanup?: () => void;
   scrollCleanup?: () => void;
   overlay?: Element | null;
@@ -144,7 +143,6 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     const modal = state.modal as PreviewModalHandle | null;
     modal?.requestController?.abort();
     modal?.replySyncController?.abort();
-    modal?.featureCleanup?.();
     modal?.refreshScrollCleanup?.();
     modal?.scrollCleanup?.();
     // 关闭前显式销毁还在跑的虚拟列表：它取消待执行的 rAF 并断开 ResizeObserver。

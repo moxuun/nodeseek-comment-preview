@@ -44,7 +44,6 @@ interface PreviewModalState {
   postId: string;
   composer: HTMLElement | null;
   scrollCleanup: (() => void) | null;
-  featureCleanup: (() => void) | null;
   headerMeta: Record<string, PreviewHeaderMetaItem>;
   loading: boolean;
   loadGeneration: number;
@@ -691,8 +690,6 @@ function createPreviewController({
     modal.requestController?.abort();
     modal.requestController = requestController;
     modal.refreshScrollCleanup?.();
-    modal.featureCleanup?.();
-    modal.featureCleanup = null;
     modal.loading = true;
     const generation = (modal.loadGeneration || 0) + 1;
     modal.loadGeneration = generation;
@@ -831,7 +828,7 @@ function createPreviewController({
     documentObj.documentElement.style.overflow = 'hidden';
     state.modal = {
       overlay, dialog, body, composerHost, title, url: fetchUrl, fallbackLink: fallbackLink || null,
-      postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup, featureCleanup: null,
+      postId: getPostInfo(fetchUrl.href)?.postId || '', composer: null, scrollCleanup,
       headerMeta: headerMeta.items, loading: false, loadGeneration: 0, requestController: null,
       replySyncController: null, replySyncPromise: null, replySyncing: false, pendingReplySync: false,
       toolbarStatus, previewSeed: null, previewRecords: [], loadedPages: 0, failedPages: [],
