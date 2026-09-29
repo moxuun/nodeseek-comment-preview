@@ -2,16 +2,21 @@
 // 它不读取网络，也不改变楼层关系；帖子页和预览弹窗共用同一套窗口模型。
 
 import type { ThreadLines } from '../comments/thread.js';
+import type { CommentRecord } from '../nodeseek/content-parser.js';
 
-/** 楼层记录或楼层记录中虚拟列表关心的字段。 */
+/** 虚拟列表自己要用到的记录字段：稳定 key 只看这两个。 */
 interface VirtualEntryRecord {
   postId?: string | number | null;
   floor?: number | string | null;
 }
 
-/** 虚拟列表条目：`{ record, depth }`，`index` 由 `setEntries` 写入；`thread` 是 flattenReplyTree 附带的楼层关系线几何。 */
+/**
+ * 虚拟列表条目：楼层记录 + 渲染层算好的布局信息。
+ * `index` 由 `setEntries` 写入；`depth`/`thread` 来自 flattenReplyTree，虚拟列表只原样搬运，
+ * 不认识关系线本身——布局怎么用，由渲染层在 `onUpdate` 里决定。
+ */
 interface CommentVirtualEntry extends VirtualEntryRecord {
-  record?: VirtualEntryRecord | null;
+  record?: CommentRecord | null;
   depth?: number;
   thread?: ThreadLines | null;
   index?: number;
@@ -21,6 +26,7 @@ type VirtualizerViewport = Element | Window;
 
 type RenderItem = (entry: CommentVirtualEntry, index: number) => HTMLElement | null;
 type MountHook = (node: HTMLElement, entry: CommentVirtualEntry, index: number) => void;
+type UpdateHook = (node: HTMLElement, entry: CommentVirtualEntry, index: number) => void;
 type PinnedHook = (node: HTMLElement, entry: CommentVirtualEntry, index: number) => boolean;
 type GetViewport = () => VirtualizerViewport | null;
 
@@ -46,6 +52,11 @@ interface VirtualizerSetupOptions {
   renderItem?: RenderItem;
   onMount?: MountHook;
   onUnmount?: MountHook;
+  /**
+   * `setEntries` 之后仍被复用的已挂载节点：条目的布局信息可能已经变了（例如跨页补全后
+   * 楼层关系线要改），虚拟列表不会重跑 renderItem，这里通知渲染层按新条目重写一遗布局。
+   */
+  onUpdate?: UpdateHook;
   isPinned?: PinnedHook;
   getViewport?: GetViewport;
 }
@@ -70,6 +81,7 @@ function createCommentVirtualizer({
   let renderItem: RenderItem | null = null;
   let onMount: MountHook | null = null;
   let onUnmount: MountHook | null = null;
+  let onUpdate: UpdateHook | null = null;
   let isPinned: PinnedHook | null = null;
   let getViewport: GetViewport | null = null;
   let viewport: VirtualizerViewport | null = null;
@@ -271,6 +283,7 @@ function createCommentVirtualizer({
     if (typeof options.renderItem === 'function') renderItem = options.renderItem;
     if (typeof options.onMount === 'function') onMount = options.onMount;
     if (typeof options.onUnmount === 'function') onUnmount = options.onUnmount;
+    if (typeof options.onUpdate === 'function') onUpdate = options.onUpdate;
     if (typeof options.isPinned === 'function') isPinned = options.isPinned;
     if (typeof options.getViewport === 'function') getViewport = options.getViewport;
     const normalized: CommentVirtualEntry[] = Array.isArray(nextEntries)
@@ -283,6 +296,8 @@ function createCommentVirtualizer({
       if (!nextKeys.has(oldKey) || oldKey !== nextKey) unmount(index);
     });
     entries = normalized;
+    // 复用的节点不会重跑 renderItem：先让渲染层按新条目刷新一遗布局，再排窗口。
+    mounted.forEach((node, index) => onUpdate?.(node, entries[index], index));
     host?.classList.add('xns-virtual-list');
     host?.setAttribute('data-xns-virtual-count', String(entries.length));
     renderWindow();
@@ -294,6 +309,7 @@ function createCommentVirtualizer({
     if (typeof options.renderItem === 'function') renderItem = options.renderItem;
     if (typeof options.onMount === 'function') onMount = options.onMount;
     if (typeof options.onUnmount === 'function') onUnmount = options.onUnmount;
+    if (typeof options.onUpdate === 'function') onUpdate = options.onUpdate;
     if (typeof options.isPinned === 'function') isPinned = options.isPinned;
     if (typeof options.getViewport === 'function') getViewport = options.getViewport;
     host?.classList.add('xns-virtual-list');
@@ -363,4 +379,4 @@ function destroyVirtualLists(root: ParentNode | null | undefined): void {
 }
 
 export { createCommentVirtualizer, destroyVirtualLists };
-export type { CommentVirtualEntry, CommentVirtualizer, VirtualizerSetupOptions, VirtualizerViewport };
+export type { CommentVirtualEntry, CommentVirtualizer, VirtualizerHost, VirtualizerSetupOptions, VirtualizerViewport };

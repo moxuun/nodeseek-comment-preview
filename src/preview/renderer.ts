@@ -1,5 +1,5 @@
 import { flattenReplyTree } from '../comments/thread.js';
-import type { FlatEntry, ThreadLines } from '../comments/thread.js';
+import type { ThreadLines } from '../comments/thread.js';
 import { SELECTORS, state } from '../core/config.js';
 import { clearElement, createElement, getCommentId, qs, qsa, safeCount } from '../core/dom.js';
 import { pageInfo } from '../core/runtime.js';
@@ -13,7 +13,7 @@ import { addRemoteNote, stripRenderArtifacts } from './render-utils.js';
 import { createCommentVirtualizer } from './virtualizer.js';
 import type { CommentRecord } from '../nodeseek/content-parser.js';
 import type { PageStatusOptions } from '../ui/status.js';
-import type { CommentVirtualEntry, CommentVirtualizer, VirtualizerSetupOptions } from './virtualizer.js';
+import type { CommentVirtualEntry, CommentVirtualizer, VirtualizerHost, VirtualizerSetupOptions } from './virtualizer.js';
 
 /** 帖子信息中渲染需要的字段。 */
 interface RenderPostInfo {
@@ -32,9 +32,6 @@ interface RenderRecordsOptions extends RenderStatusOptions {
   onNodeMounted?: (node: HTMLElement, record: CommentRecord) => void;
   onNodeUnmounted?: (node: HTMLElement, record: CommentRecord) => void;
 }
-
-/** 挂载了虚拟列表实例的渲染容器。 */
-type RenderHost = HTMLElement & { __xnsVirtualizer?: CommentVirtualizer };
 
 /** 关系线的缩进步长、竖线宽度与最大层级（与 ui/style.ts 里的 --xns-indent 保持一致）。 */
 const THREAD_STEP = 18;
@@ -178,17 +175,12 @@ function createPreviewRenderer({
   }
 
   /**
-   * 虚拟列表按 key 复用已挂载的节点，不会重跑 renderItem；跨页补全子楼层后，
-   * 已挂载条目的缩进和“无子楼层”标记会过期，必须按最新树同步一次。
+   * 虚拟列表复用已挂载节点时的布局刷新入口（见 virtualizer 的 onUpdate）：
+   * 条目数据变了但节点没重建，缩进、根/子/叶子标记和关系线都要按新条目重写一遗。
    */
-  function syncThreadEntries(thread: Element, entries: FlatEntry[]): void {
-    if (!entries.length) return;
-    const byFloor = new Map(entries.map((entry) => [String(entry.record.floor), entry]));
-    qsa(thread, '.content-item[data-xns-depth]').forEach((row) => {
-      const entry = byFloor.get(row.getAttribute('data-xns-floor') || '');
-      if (!entry) return;
-      applyThreadGeometry(row as HTMLElement, entry.record, entry.depth ?? 0, entry.thread);
-    });
+  function updateThreadGeometry(node: HTMLElement, entry: CommentVirtualEntry): void {
+    if (!entry.record) return;
+    applyThreadGeometry(node, entry.record, entry.depth ?? 0, entry.thread);
   }
 
   function prepareCommentRecord(record: CommentRecord, depth: number, thread?: ThreadLines | null): HTMLElement | null {
@@ -310,26 +302,31 @@ function createPreviewRenderer({
     if (!heading || !thread) return;
     // 虚拟列表实例写在它自己的挂载目标（列表容器）上，与 virtualizer 内部写的是同一处：
     // 楼层导航按 .xns-virtual-list 找实例，销毁也只需顺这个标记走，不再另存一份到 section。
-    const threadHost = thread as RenderHost;
+    const threadHost = thread as VirtualizerHost;
     heading.textContent = `${records.length} 条回复`;
     qs(section, ':scope > .xns-preview-empty')?.remove();
     if (records.length) {
       const onNodeMounted = (node: HTMLElement, entry: CommentVirtualEntry): void => {
-        const record = entry.record as unknown as CommentRecord;
+        const record = entry.record;
+        if (!record) return;
         addRemoteNote(record, info.postId, record.page !== info.page);
         options.onNodeMounted?.(node, record);
       };
       const onNodeUnmounted = (node: HTMLElement, entry: CommentVirtualEntry): void => {
-        const record = entry.record as unknown as CommentRecord;
+        const record = entry.record;
+        if (!record) return;
         if (!record.current) record.node = null;
         options.onNodeUnmounted?.(node, record);
       };
-      const renderItem = (entry: CommentVirtualEntry): HTMLElement | null => prepareCommentRecord(entry.record as unknown as CommentRecord, entry.depth ?? 0, entry.thread);
+      const renderItem = (entry: CommentVirtualEntry): HTMLElement | null => (entry.record
+        ? prepareCommentRecord(entry.record, entry.depth ?? 0, entry.thread)
+        : null);
       const virtualizerOptions: VirtualizerSetupOptions = {
         getViewport: () => thread.closest('.xns-modal-body') || windowObj,
         renderItem,
         onMount: onNodeMounted,
         onUnmount: onNodeUnmounted,
+        onUpdate: updateThreadGeometry,
       };
       const flatEntries = flattenReplyTree(records);
       const virtualizer = threadHost.__xnsVirtualizer || createCommentVirtualizer({
@@ -340,7 +337,6 @@ function createPreviewRenderer({
         overscanScreens: 2,
       }).mount(threadHost, virtualizerOptions);
       virtualizer.setEntries(flatEntries, virtualizerOptions);
-      syncThreadEntries(thread, flatEntries);
     } else {
       // 没有评论：销毁列表实例（destroy 会自己清掉挂载目标上的标记），再清空容器。
       threadHost.__xnsVirtualizer?.destroy();
@@ -353,7 +349,7 @@ function createPreviewRenderer({
   return Object.freeze({
     ensurePreviewEditOption,
     prepareCommentRecord,
-    syncThreadEntries,
+    updateThreadGeometry,
     appendNestedRecord,
     buildPreviewPostNode,
     renderPreviewStatus,
@@ -391,8 +387,8 @@ const xnsPreviewRenderer = createPreviewRenderer({
 
 const buildPreviewPostNode = (parsed: Document | Element, info: RenderPostInfo): Element | null => xnsPreviewRenderer.buildPreviewPostNode(parsed, info);
 const prepareCommentRecord = (record: CommentRecord, depth: number, thread?: ThreadLines | null): HTMLElement | null => xnsPreviewRenderer.prepareCommentRecord(record, depth, thread);
-const syncThreadEntries = (thread: Element, entries: FlatEntry[]): void => xnsPreviewRenderer.syncThreadEntries(thread, entries);
+const updateThreadGeometry = (node: HTMLElement, entry: CommentVirtualEntry): void => xnsPreviewRenderer.updateThreadGeometry(node, entry);
 const renderPreviewRecords = (section: Element, info: RenderPostInfo, records: CommentRecord[], options?: RenderRecordsOptions): void => xnsPreviewRenderer.renderPreviewRecords(section, info, records, options);
 
-export { buildPreviewPostNode, prepareCommentRecord, renderPreviewRecords, syncThreadEntries };
+export { buildPreviewPostNode, prepareCommentRecord, renderPreviewRecords, updateThreadGeometry };
 export type { RenderPostInfo, RenderRecordsOptions, RenderStatusOptions };

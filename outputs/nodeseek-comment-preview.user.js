@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.83
+// @version      0.5.84
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -3843,6 +3843,7 @@
 		let renderItem = null;
 		let onMount = null;
 		let onUnmount = null;
+		let onUpdate = null;
 		let isPinned = null;
 		let getViewport = null;
 		let viewport = null;
@@ -4026,6 +4027,7 @@
 			if (typeof options.renderItem === "function") renderItem = options.renderItem;
 			if (typeof options.onMount === "function") onMount = options.onMount;
 			if (typeof options.onUnmount === "function") onUnmount = options.onUnmount;
+			if (typeof options.onUpdate === "function") onUpdate = options.onUpdate;
 			if (typeof options.isPinned === "function") isPinned = options.isPinned;
 			if (typeof options.getViewport === "function") getViewport = options.getViewport;
 			const normalized = Array.isArray(nextEntries) ? nextEntries.map((entry, index) => ({
@@ -4039,6 +4041,7 @@
 				if (!nextKeys.has(oldKey) || oldKey !== nextKey) unmount(index);
 			});
 			entries = normalized;
+			mounted.forEach((node, index) => onUpdate?.(node, entries[index], index));
 			host?.classList.add("xns-virtual-list");
 			host?.setAttribute("data-xns-virtual-count", String(entries.length));
 			renderWindow();
@@ -4049,6 +4052,7 @@
 			if (typeof options.renderItem === "function") renderItem = options.renderItem;
 			if (typeof options.onMount === "function") onMount = options.onMount;
 			if (typeof options.onUnmount === "function") onUnmount = options.onUnmount;
+			if (typeof options.onUpdate === "function") onUpdate = options.onUpdate;
 			if (typeof options.isPinned === "function") isPinned = options.isPinned;
 			if (typeof options.getViewport === "function") getViewport = options.getViewport;
 			host?.classList.add("xns-virtual-list");
@@ -4438,14 +4442,9 @@
 			node.style.setProperty("--xns-thread-stop-x", `${(stop >= 0 ? stop : 0) * THREAD_STEP + 6}px`);
 			node.style.setProperty("--xns-thread-stop-width", stop >= 0 ? `${THREAD_LINE_WIDTH}px` : "0px");
 		}
-		function syncThreadEntries(thread, entries) {
-			if (!entries.length) return;
-			const byFloor = new Map(entries.map((entry) => [String(entry.record.floor), entry]));
-			qsa(thread, ".content-item[data-xns-depth]").forEach((row) => {
-				const entry = byFloor.get(row.getAttribute("data-xns-floor") || "");
-				if (!entry) return;
-				applyThreadGeometry(row, entry.record, entry.depth ?? 0, entry.thread);
-			});
+		function updateThreadGeometry(node, entry) {
+			if (!entry.record) return;
+			applyThreadGeometry(node, entry.record, entry.depth ?? 0, entry.thread);
 		}
 		function prepareCommentRecord(record, depth, thread) {
 			const node = materializeCommentNode(record);
@@ -4567,20 +4566,23 @@
 			if (records.length) {
 				const onNodeMounted = (node, entry) => {
 					const record = entry.record;
+					if (!record) return;
 					addRemoteNote(record, info.postId, record.page !== info.page);
 					options.onNodeMounted?.(node, record);
 				};
 				const onNodeUnmounted = (node, entry) => {
 					const record = entry.record;
+					if (!record) return;
 					if (!record.current) record.node = null;
 					options.onNodeUnmounted?.(node, record);
 				};
-				const renderItem = (entry) => prepareCommentRecord(entry.record, entry.depth ?? 0, entry.thread);
+				const renderItem = (entry) => entry.record ? prepareCommentRecord(entry.record, entry.depth ?? 0, entry.thread) : null;
 				const virtualizerOptions = {
 					getViewport: () => thread.closest(".xns-modal-body") || windowObj,
 					renderItem,
 					onMount: onNodeMounted,
-					onUnmount: onNodeUnmounted
+					onUnmount: onNodeUnmounted,
+					onUpdate: updateThreadGeometry
 				};
 				const flatEntries = flattenReplyTree(records);
 				(threadHost.__xnsVirtualizer || createCommentVirtualizer({
@@ -4590,7 +4592,6 @@
 					estimatedHeight: 135,
 					overscanScreens: 2
 				}).mount(threadHost, virtualizerOptions)).setEntries(flatEntries, virtualizerOptions);
-				syncThreadEntries(thread, flatEntries);
 			} else {
 				threadHost.__xnsVirtualizer?.destroy();
 				clearElement(thread);
@@ -4601,7 +4602,7 @@
 		return Object.freeze({
 			ensurePreviewEditOption,
 			prepareCommentRecord,
-			syncThreadEntries,
+			updateThreadGeometry,
 			appendNestedRecord,
 			buildPreviewPostNode,
 			renderPreviewStatus,
@@ -4637,7 +4638,7 @@
 	});
 	var buildPreviewPostNode = (parsed, info) => xnsPreviewRenderer.buildPreviewPostNode(parsed, info);
 	var prepareCommentRecord = (record, depth, thread) => xnsPreviewRenderer.prepareCommentRecord(record, depth, thread);
-	var syncThreadEntries = (thread, entries) => xnsPreviewRenderer.syncThreadEntries(thread, entries);
+	var updateThreadGeometry = (node, entry) => xnsPreviewRenderer.updateThreadGeometry(node, entry);
 	var renderPreviewRecords = (section, info, records, options) => xnsPreviewRenderer.renderPreviewRecords(section, info, records, options);
 	function createPreviewController({ windowObj, documentObj, state, selectors, maxPage, qs, qsa, createElement, clearElement, getPostInfo, buildPostUrl, sanitizeImportedNode, parseHtml, fetchHtml, getPageNumbers, collectPageRecords, loadPreviewRecords, buildPreviewPostNode, renderPreviewRecords, installPreviewFeatures, installPreviewScrollButtons, closeImageLightbox, closeModal, createCloseButton, createRefreshButton, createShareButton, openPreviewComposer }) {
 		function currentModal() {
@@ -5969,7 +5970,7 @@
 	});
 	var handlePreviewActionClick = (event) => xnsAppEvents.handlePreviewActionClick(event);
 	var handleKeydown = (event) => xnsAppEvents.handleKeydown(event);
-	function createPostPageController({ documentObj, windowObj, appState, selectors, maxPage, findCommentList, createElement, qs, qsa, fetchHtml, parseHtml, getFloor, getCommentItems, sanitizeImportedNode, releaseCommentNode, getSsrState, getCurrentUserUid, getCommentRecord, fetchPostPages, flattenReplyTree, createCommentVirtualizer, prepareCommentRecord, syncThreadEntries, addRemoteNote, installPreviewFeatures, formatPageStatus, updateSettings, getMaxPage, buildPostUrl }) {
+	function createPostPageController({ documentObj, windowObj, appState, selectors, maxPage, findCommentList, createElement, qs, qsa, fetchHtml, parseHtml, getFloor, getCommentItems, sanitizeImportedNode, releaseCommentNode, getSsrState, getCurrentUserUid, getCommentRecord, fetchPostPages, flattenReplyTree, createCommentVirtualizer, prepareCommentRecord, updateThreadGeometry, addRemoteNote, installPreviewFeatures, formatPageStatus, updateSettings, getMaxPage, buildPostUrl }) {
 		const NATIVE_EDIT_REQUEST_KEY = "xns-comment-preview-native-edit";
 		return class PostPageController {
 			info;
@@ -6374,18 +6375,19 @@
 				if (!this.list || appState.mode !== "thread") return;
 				const virtualizerOptions = {
 					getViewport: () => windowObj,
-					renderItem: (entry) => prepareCommentRecord(entry.record, entry.depth ?? 0, entry.thread),
+					renderItem: (entry) => entry.record ? prepareCommentRecord(entry.record, entry.depth ?? 0, entry.thread) : null,
 					onMount: (node, entry) => {
 						const record = entry.record;
-						if (!record.current) {
-							addRemoteNote(record, this.info.postId);
-							node.classList.add("xns-preview-content");
-							installPreviewFeatures(node);
-						}
+						if (!record || record.current) return;
+						addRemoteNote(record, this.info.postId);
+						node.classList.add("xns-preview-content");
+						installPreviewFeatures(node);
 					},
 					onUnmount: (node, entry) => {
-						if (!entry.record.current) releaseCommentNode(entry.record);
-					}
+						const record = entry.record;
+						if (record && !record.current) releaseCommentNode(record);
+					},
+					onUpdate: updateThreadGeometry
 				};
 				if (!this.virtualizer) {
 					this.restoreOriginal({ releaseRemote: false });
@@ -6398,9 +6400,7 @@
 						overscanScreens: 2
 					}).mount(this.list, virtualizerOptions);
 				}
-				const entries = flattenReplyTree(this.records);
-				this.virtualizer.setEntries(entries, virtualizerOptions);
-				syncThreadEntries(this.list, entries);
+				this.virtualizer.setEntries(flattenReplyTree(this.records), virtualizerOptions);
 				const loadedPages = this.loadedPages;
 				const loading = this.loading || options.progressive;
 				const pagination = formatPageStatus({
@@ -6466,7 +6466,7 @@
 		flattenReplyTree,
 		createCommentVirtualizer,
 		prepareCommentRecord,
-		syncThreadEntries,
+		updateThreadGeometry,
 		addRemoteNote,
 		installPreviewFeatures,
 		formatPageStatus,

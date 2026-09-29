@@ -2,10 +2,7 @@ import { SELECTORS } from '../core/config.js';
 import { safePositiveInt } from '../core/dom.js';
 import { pageInfo } from '../core/runtime.js';
 import { getPostInfo, parseSameOriginUrl } from '../nodeseek/url.js';
-import type { CommentVirtualizer } from './virtualizer.js';
-
-/** 虚拟列表容器上挂着分页渲染器实例。 */
-type VirtualListHost = HTMLElement & { __xnsVirtualizer?: CommentVirtualizer };
+import type { VirtualizerHost } from './virtualizer.js';
 
 /** 楼层导航依赖；测试可注入替身。 */
 interface FloorNavigationDeps {
@@ -23,7 +20,7 @@ function createFloorNavigation({ windowObj, documentObj, selectors, enabled, par
   function scrollToFloor(floor: number | string): boolean {
     let target: Element | null = documentObj.querySelector(`[data-xns-floor="${CSS.escape(String(floor))}"]`);
     if (!target) {
-      const virtualLists = Array.from(documentObj.querySelectorAll<VirtualListHost>('.xns-virtual-list'));
+      const virtualLists = Array.from(documentObj.querySelectorAll<VirtualizerHost>('.xns-virtual-list'));
       for (const list of virtualLists) {
         target = list.__xnsVirtualizer?.scrollToFloor(floor) || null;
         if (target) break;

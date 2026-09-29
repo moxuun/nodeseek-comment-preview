@@ -11,19 +11,16 @@ import { getPageNumbers } from '../nodeseek/pagination.js';
 import { getSsrState } from '../nodeseek/ssr-state.js';
 import { buildPostUrl } from '../nodeseek/url.js';
 import { addRemoteNote, stripRenderArtifacts } from '../preview/render-utils.js';
-import { prepareCommentRecord, syncThreadEntries } from '../preview/renderer.js';
+import { prepareCommentRecord, updateThreadGeometry } from '../preview/renderer.js';
 import { createCommentVirtualizer } from '../preview/virtualizer.js';
 import { formatPageStatus } from '../ui/status.js';
 import type { PageProgress } from '../data/page-loader.js';
 import type { CommentRecord } from '../nodeseek/content-parser.js';
 import type { PostInfo } from '../nodeseek/url.js';
-import type { CommentVirtualizer, VirtualizerSetupOptions } from '../preview/virtualizer.js';
+import type { CommentVirtualizer, VirtualizerHost, VirtualizerSetupOptions } from '../preview/virtualizer.js';
 
 // 帖子详情页控制器。
 // 它只管理原始楼层快照、评论布局模式和分页生命周期；预览入口由 preview/entry.ts 管理。
-
-/** 挂载了虚拟列表实例的宿主元素（与 renderer.ts 的 RenderHost 同构）。 */
-type VirtualizerHost = HTMLElement & { __xnsVirtualizer?: CommentVirtualizer };
 
 /** 重新读取分页的选项。 */
 interface ReloadPagesOptions {
@@ -73,7 +70,7 @@ interface PostPageControllerDeps {
   flattenReplyTree: typeof flattenReplyTree;
   createCommentVirtualizer: typeof createCommentVirtualizer;
   prepareCommentRecord: typeof prepareCommentRecord;
-  syncThreadEntries: typeof syncThreadEntries;
+  updateThreadGeometry: typeof updateThreadGeometry;
   addRemoteNote: typeof addRemoteNote;
   installPreviewFeatures: typeof installPreviewFeatures;
   formatPageStatus: typeof formatPageStatus;
@@ -105,7 +102,7 @@ function createPostPageController({
   flattenReplyTree,
   createCommentVirtualizer,
   prepareCommentRecord,
-  syncThreadEntries,
+  updateThreadGeometry,
   addRemoteNote,
   installPreviewFeatures,
   formatPageStatus,
@@ -553,18 +550,22 @@ function createPostPageController({
       if (!this.list || appState.mode !== 'thread') return;
       const virtualizerOptions: VirtualizerSetupOptions = {
         getViewport: () => windowObj,
-        renderItem: (entry) => prepareCommentRecord(entry.record as unknown as CommentRecord, entry.depth ?? 0, entry.thread),
+        renderItem: (entry) => (entry.record
+          ? prepareCommentRecord(entry.record, entry.depth ?? 0, entry.thread)
+          : null),
         onMount: (node, entry) => {
-          const record = entry.record as unknown as CommentRecord;
-          if (!record.current) {
-            addRemoteNote(record, this.info.postId);
-            node.classList.add('xns-preview-content');
-            installPreviewFeatures(node);
-          }
+          const record = entry.record;
+          if (!record || record.current) return;
+          addRemoteNote(record, this.info.postId);
+          node.classList.add('xns-preview-content');
+          installPreviewFeatures(node);
         },
         onUnmount: (node, entry) => {
-          if (!(entry.record as unknown as CommentRecord).current) releaseCommentNode(entry.record as unknown as CommentRecord);
+          const record = entry.record;
+          if (record && !record.current) releaseCommentNode(record);
         },
+        // 跨页补全后被复用的节点不会重跑 renderItem，布局刷新交给渲染层的入口。
+        onUpdate: updateThreadGeometry,
       };
       if (!this.virtualizer) {
         this.restoreOriginal({ releaseRemote: false });
@@ -579,10 +580,7 @@ function createPostPageController({
           overscanScreens: 2,
         }).mount(this.list as VirtualizerHost, virtualizerOptions);
       }
-      const entries = flattenReplyTree(this.records);
-      this.virtualizer.setEntries(entries, virtualizerOptions);
-      // 虚拟列表复用已挂载节点，不会重跑 renderItem：跨页补全楼层后同步缩进与关系线标记。
-      syncThreadEntries(this.list, entries);
+      this.virtualizer.setEntries(flattenReplyTree(this.records), virtualizerOptions);
       const loadedPages = this.loadedPages;
       const loading = this.loading || options.progressive;
       const pagination = formatPageStatus({
@@ -650,7 +648,7 @@ const PostEnhancer = createPostPageController({
   flattenReplyTree,
   createCommentVirtualizer,
   prepareCommentRecord,
-  syncThreadEntries,
+  updateThreadGeometry,
   addRemoteNote,
   installPreviewFeatures,
   formatPageStatus,
