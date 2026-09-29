@@ -157,6 +157,7 @@ function createPreviewRenderer({
   function applyThreadGeometry(node: HTMLElement, record: CommentRecord, depth: number, thread?: ThreadLines | null): void {
     const level = threadLevel(Math.max(0, depth));
     node.setAttribute('data-xns-depth', String(level));
+    // 写入的布局变量必须与 preview/render-utils.ts 的 THREAD_LAYOUT_PROPERTIES 保持一致（清理路径共用）。
     node.style.setProperty('--xns-indent', `${level * THREAD_STEP}px`);
     node.classList.toggle('xns-comment-root', level === 0);
     node.classList.toggle('xns-comment-child', level > 0);

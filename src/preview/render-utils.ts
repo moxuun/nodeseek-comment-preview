@@ -2,6 +2,12 @@ import { createElement, qs, qsa } from '../core/dom.js';
 import { buildPostUrl } from '../nodeseek/url.js';
 import type { CommentRecord } from '../nodeseek/content-parser.js';
 
+/**
+ * applyThreadGeometry（preview/renderer.ts）写进行内样式的楼层布局变量。
+ * 清理路径必须逐个复位：少清一个，节点被复原成官方样式后仍会留着上一条楼层的关系线。
+ */
+const THREAD_LAYOUT_PROPERTIES = ['--xns-indent', '--xns-thread-columns', '--xns-thread-stop-x', '--xns-thread-stop-width'] as const;
+
 /** 预览渲染辅助依赖；测试可注入替身。 */
 interface PreviewRenderUtilsDeps {
   qs: typeof qs;
@@ -21,7 +27,7 @@ function createPreviewRenderUtils({ qs, qsa, createElement, buildPostUrl }: Prev
     item.removeAttribute('data-xns-parent-floor');
     item.removeAttribute('data-xns-remote');
     item.removeAttribute('data-xns-source-page');
-    (item as HTMLElement).style.removeProperty('--xns-indent');
+    THREAD_LAYOUT_PROPERTIES.forEach((property) => (item as HTMLElement).style.removeProperty(property));
   }
 
   function setFloorLinkUrl(source: HTMLAnchorElement | null, record: CommentRecord, postId: string): void {
@@ -76,4 +82,4 @@ const xnsPreviewRenderUtils = createPreviewRenderUtils({ qs, qsa, createElement,
 const stripRenderArtifacts = (item: Element | null | undefined): void => xnsPreviewRenderUtils.stripRenderArtifacts(item);
 const addRemoteNote = (record: CommentRecord, postId: string, remote?: boolean): void => xnsPreviewRenderUtils.addRemoteNote(record, postId, remote);
 
-export { addRemoteNote, stripRenderArtifacts };
+export { addRemoteNote, stripRenderArtifacts, THREAD_LAYOUT_PROPERTIES };

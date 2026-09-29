@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.87
+// @version      0.5.88
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -4858,6 +4858,12 @@
 		installPreviewVotePanels
 	});
 	var installPreviewFeatures = (root, options) => xnsContentFeatures.installPreviewFeatures(root, options);
+	var THREAD_LAYOUT_PROPERTIES = [
+		"--xns-indent",
+		"--xns-thread-columns",
+		"--xns-thread-stop-x",
+		"--xns-thread-stop-width"
+	];
 	function createPreviewRenderUtils({ qs, qsa, createElement, buildPostUrl }) {
 		function stripRenderArtifacts(item) {
 			if (!item?.classList) return;
@@ -4868,7 +4874,7 @@
 			item.removeAttribute("data-xns-parent-floor");
 			item.removeAttribute("data-xns-remote");
 			item.removeAttribute("data-xns-source-page");
-			item.style.removeProperty("--xns-indent");
+			THREAD_LAYOUT_PROPERTIES.forEach((property) => item.style.removeProperty(property));
 		}
 		function setFloorLinkUrl(source, record, postId) {
 			if (!source) return;

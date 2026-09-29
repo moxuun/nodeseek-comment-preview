@@ -1270,10 +1270,17 @@ scenario('原版/楼中楼切换', async (ctx) => {
     children: document.querySelector('.comment-container > ul.comments')?.children.length,
     threaded: !!document.querySelector('.comment-container > ul.comments .xns-comment-root'),
     remote: document.querySelectorAll('.comment-container > ul.comments [data-xns-remote]').length,
+    // 楼层布局变量是行内样式写的，复原官方节点时必须同步清掉，否则会留着上一条楼层的关系线。
+    leftovers: [...document.querySelectorAll('.comment-container > ul.comments .content-item')]
+      .flatMap((node) => ['--xns-indent', '--xns-thread-columns', '--xns-thread-stop-x', '--xns-thread-stop-width']
+        .filter((property) => node.style.getPropertyValue(property)
+          ? `#${node.getAttribute('data-xns-floor') || node.getAttribute('data-post-index') || '?'}.${property}`
+          : '')),
   }));
   assert(original.children === 7, `原版应有 7 个原始评论，实际 ${original.children}`);
   assert(!original.threaded, '原版不应保留楼中楼结构');
   assert(original.remote === 0, `原版不应保留跨页评论节点，实际 ${original.remote}`);
+  assert(original.leftovers.length === 0, `原版不应保留楼层布局变量，实际 ${original.leftovers.join(', ')}`);
 
   await page.evaluate(() => {
     [...document.querySelectorAll('.xns-post-toolbar [data-mode]')].find((button) => button.dataset.mode === 'thread').click();
