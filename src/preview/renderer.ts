@@ -1,4 +1,5 @@
 import { flattenReplyTree } from '../comments/thread.js';
+import type { FlatEntry } from '../comments/thread.js';
 import { SELECTORS, state } from '../core/config.js';
 import { clearElement, createElement, getCommentId, qs, qsa, safeCount } from '../core/dom.js';
 import { pageInfo } from '../core/runtime.js';
@@ -135,6 +136,31 @@ function createPreviewRenderer({
     });
   }
 
+  /** 把层级相关的几何状态写到条目上：缩进、根/子/叶子标记（见 style.ts 的楼层关系线）。 */
+  function applyThreadGeometry(node: HTMLElement, record: CommentRecord, depth: number): void {
+    node.setAttribute('data-xns-depth', String(depth));
+    node.style.setProperty('--xns-indent', `${Math.min(8, Math.max(0, depth)) * 18}px`);
+    node.classList.toggle('xns-comment-root', depth === 0);
+    node.classList.toggle('xns-comment-child', depth > 0);
+    // 没有子楼层的嵌套条目只画“本层分支”的短横线；若也画本层竖线，相邻兄弟条目的
+    // 竖线会首尾相接，看上去像上一条目还有后代。
+    node.classList.toggle('xns-comment-leaf', depth > 0 && !record.children?.length);
+  }
+
+  /**
+   * 虚拟列表按 key 复用已挂载的节点，不会重跑 renderItem；跨页补全子楼层后，
+   * 已挂载条目的缩进和“无子楼层”标记会过期，必须按最新树同步一次。
+   */
+  function syncThreadEntries(thread: Element, entries: FlatEntry[]): void {
+    if (!entries.length) return;
+    const byFloor = new Map(entries.map((entry) => [String(entry.record.floor), entry]));
+    qsa(thread, '.content-item[data-xns-depth]').forEach((row) => {
+      const entry = byFloor.get(row.getAttribute('data-xns-floor') || '');
+      if (!entry) return;
+      applyThreadGeometry(row as HTMLElement, entry.record, entry.depth);
+    });
+  }
+
   function prepareCommentRecord(record: CommentRecord, depth: number): HTMLElement | null {
     const node = materializeCommentNode(record) as HTMLElement | null;
     if (!node) return null;
@@ -144,9 +170,7 @@ function createPreviewRenderer({
       node.setAttribute('data-xns-remote', 'true');
       node.setAttribute('data-xns-source-page', String(record.page));
     }
-    node.setAttribute('data-xns-depth', String(depth));
-    node.style.setProperty('--xns-indent', `${Math.min(8, Math.max(0, depth)) * 18}px`);
-    node.classList.add(depth === 0 ? 'xns-comment-root' : 'xns-comment-child');
+    applyThreadGeometry(node, record, depth);
     if (depth > 0 && record.parent) node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
     ensurePreviewMenu(node, { includeFavorite: false, counts: record.counts || undefined });
     ensurePreviewEditOption(node, record);
@@ -268,6 +292,7 @@ function createPreviewRenderer({
         onMount: onNodeMounted,
         onUnmount: onNodeUnmounted,
       };
+      const flatEntries = flattenReplyTree(records);
       const virtualizer = host.__xnsVirtualizer || createCommentVirtualizer({
         windowObj,
         documentObj: document,
@@ -276,7 +301,8 @@ function createPreviewRenderer({
         overscanScreens: 2,
       }).mount(thread as RenderHost, virtualizerOptions);
       host.__xnsVirtualizer = virtualizer;
-      virtualizer.setEntries(flattenReplyTree(records), virtualizerOptions);
+      virtualizer.setEntries(flatEntries, virtualizerOptions);
+      syncThreadEntries(thread, flatEntries);
     } else {
       host.__xnsVirtualizer?.destroy();
       delete host.__xnsVirtualizer;
@@ -289,6 +315,7 @@ function createPreviewRenderer({
   return Object.freeze({
     ensurePreviewEditOption,
     prepareCommentRecord,
+    syncThreadEntries,
     appendNestedRecord,
     buildPreviewPostNode,
     renderPreviewStatus,
@@ -326,7 +353,8 @@ const xnsPreviewRenderer = createPreviewRenderer({
 
 const buildPreviewPostNode = (parsed: Document | Element, info: RenderPostInfo): Element | null => xnsPreviewRenderer.buildPreviewPostNode(parsed, info);
 const prepareCommentRecord = (record: CommentRecord, depth: number): HTMLElement | null => xnsPreviewRenderer.prepareCommentRecord(record, depth);
+const syncThreadEntries = (thread: Element, entries: FlatEntry[]): void => xnsPreviewRenderer.syncThreadEntries(thread, entries);
 const renderPreviewRecords = (section: Element, info: RenderPostInfo, records: CommentRecord[], options?: RenderRecordsOptions): void => xnsPreviewRenderer.renderPreviewRecords(section, info, records, options);
 
-export { buildPreviewPostNode, prepareCommentRecord, renderPreviewRecords };
+export { buildPreviewPostNode, prepareCommentRecord, renderPreviewRecords, syncThreadEntries };
 export type { RenderPostInfo, RenderRecordsOptions, RenderStatusOptions };

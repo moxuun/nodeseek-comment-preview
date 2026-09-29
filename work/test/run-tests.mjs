@@ -947,7 +947,7 @@ scenario('预览楼层显示官方主色左侧标识（0.5.23 回归）', async 
   await page.close();
 });
 
-scenario('楼中楼竖线跨条目连成一条并接到上一层（0.5.70 回归）', async (ctx) => {
+scenario('楼中楼竖线按 linux tree 画：父层竖线贯穿整棵子树并接到上一层（0.5.79 回归）', async (ctx) => {
   const page = await openPreviewModal(ctx);
   const info = await page.evaluate(() => {
     const rows = [...document.querySelectorAll('.xns-modal .xns-preview-thread .xns-comment-child')];
@@ -955,19 +955,21 @@ scenario('楼中楼竖线跨条目连成一条并接到上一层（0.5.70 回归
     const readRow = (el) => {
       if (!el) return null;
       const computed = getComputedStyle(el);
-      const [spinePos, connectorPos] = computed.backgroundPosition.split(',').map((part) => part.trim());
-      const [spineSize, connectorSize] = computed.backgroundSize.split(',').map((part) => part.trim());
+      const [columnsPos, connectorPos] = computed.backgroundPosition.split(',').map((part) => part.trim());
+      const [columnsSize, connectorSize] = computed.backgroundSize.split(',').map((part) => part.trim());
       return {
         depth: depthOf(el),
+        leaf: el.classList.contains('xns-comment-leaf'),
         layers: (computed.backgroundImage.match(/linear-gradient/g) || []).length,
+        columnsImage: computed.backgroundImage.startsWith('repeating-linear-gradient'),
         backgroundColor: computed.backgroundColor,
         repeat: computed.backgroundRepeat,
         marginTop: computed.marginTop,
         marginLeft: computed.marginLeft,
         paddingLeft: Number.parseFloat(computed.paddingLeft),
-        spineX: Number.parseFloat(spinePos),
-        spineY: Number.parseFloat(spinePos.split(/\s+/)[1]),
-        spineSize,
+        columnsX: Number.parseFloat(columnsPos),
+        columnsY: Number.parseFloat(columnsPos.split(/\s+/)[1]),
+        columnsSize,
         connectorX: Number.parseFloat(connectorPos),
         connectorSize,
       };
@@ -975,26 +977,36 @@ scenario('楼中楼竖线跨条目连成一条并接到上一层（0.5.70 回归
     return {
       count: rows.length,
       first: readRow(rows.find((el) => depthOf(el) === 1)),
-      deep: readRow(rows.find((el) => depthOf(el) >= 2)),
+      // 有子条目的最深一层（叶子条目不画自己的竖线，不能拿来验证“父层竖线贯穿子树”的宽度公式）。
+      deep: readRow(rows.filter((el) => !el.classList.contains('xns-comment-leaf')).sort((a, b) => depthOf(b) - depthOf(a))[0]),
+      leaf: readRow(rows.find((el) => el.classList.contains('xns-comment-leaf'))),
+      // leaf 标记必须精确：标记为 leaf 的条目后面不能再出现更深的条目，否则它的竖线会提前断掉。
+      leafViolations: rows.filter((el, index) => el.classList.contains('xns-comment-leaf')
+        && rows.slice(index + 1).some((next) => depthOf(next) > depthOf(el))).length,
     };
   });
-  assert(info.count > 0 && info.first && info.deep, `楼中楼应存在多层嵌套，实际 ${JSON.stringify(info)}`);
-  // 竖线用 background-image 画、底板保持透明；上下各溢出 3px + 3px 条目间隙 = 同层条目之间严丝合缝。
-  assert(info.first.layers === 2 && info.first.backgroundColor === 'rgba(0, 0, 0, 0)' && info.first.repeat === 'no-repeat, no-repeat',
-    `竖线应由两层背景图绘制且底板透明，实际 ${JSON.stringify(info.first)}`);
+  assert(info.count > 0 && info.first && info.deep && info.leaf, `楼中楼应存在多层嵌套与叶子条目，实际 ${JSON.stringify(info)}`);
+  // 竖线用背景图画、底板保持透明；上下各溢出 3px + 3px 条目间隙 = 同层条目之间严丝合缝。
+  assert(info.first.layers === 2 && info.first.columnsImage && info.first.backgroundColor === 'rgba(0, 0, 0, 0)' && info.first.repeat === 'no-repeat, no-repeat',
+    `竖线应由两层背景图绘制（第一层 repeating-linear-gradient 画各层竖线）且底板透明，实际 ${JSON.stringify(info.first)}`);
   assert(info.first.marginTop === '3px' && info.first.marginLeft === '0px',
     `缩进应完全由 padding 控制（旧实现是 margin+padding），实际 ${JSON.stringify(info.first)}`);
-  assert(info.first.spineSize === '2px calc(100% + 6px)' && info.first.spineY === -3,
-    `竖线应比条目高出 6px 以跨过 3px 间隙，实际 ${JSON.stringify(info.first)}`);
-  // 步长 18px：竖线在 18d+6，横线从上一层竖线右边缘（18(d-1)+8）起、长 18px。
-  assert(info.first.spineX === 24 && info.first.connectorSize === '0px 2px',
-    `第一层没有上一层可接，不应画横线，实际 ${JSON.stringify(info.first)}`);
+  assert(info.first.columnsX === 0 && info.first.columnsY === -3 && info.first.columnsSize === '27px calc(100% + 6px)',
+    `竖线画在 padding 区、比条目高出 6px 以跨过 3px 间隙，且宽度覆盖第 0/1 层（18 + 9 = 27px），实际 ${JSON.stringify(info.first)}`);
+  // 缩进步长 18px：竖线在 18k + 6（第 k 层，宽 3px），横线从上一层竖线右边缘（18(d-1) + 9）起、长 18px。
+  // 第一层竖线宽度 18d + 9 = 27px，刚好覆盖第 0 层（x 6..9）与第 1 层（x 24..27）两条竖线，
+  // 这是“父层竖线贯穿整棵子树”的关键：层数越深，本行画出的竖线越多。
+  assert(info.first.columnsSize === '27px calc(100% + 6px)' && info.first.connectorX === 9 && info.first.connectorSize === '18px 3px',
+    `第一层应画出第 0/1 层竖线并接到第 0 层（x=9），实际 ${JSON.stringify(info.first)}`);
   assert(Math.abs(info.first.paddingLeft - 28) < 0.5, `第一层缩进应为 18 + 10px，实际 ${JSON.stringify(info.first)}`);
   const step = 18;
-  assert(Math.abs(info.deep.spineX - (step * info.deep.depth + 6)) < 0.5,
-    `深层竖线应与缩进步长对齐，实际 ${JSON.stringify(info.deep)}`);
-  assert(Math.abs(info.deep.connectorX - (step * (info.deep.depth - 1) + 8)) < 0.5 && info.deep.connectorSize === '18px 2px',
+  assert(info.deep.columnsSize === `${step * info.deep.depth + 9}px calc(100% + 6px)`,
+    `第 ${info.deep.depth} 层应画到第 ${info.deep.depth} 层竖线（宽 18d + 9），实际 ${JSON.stringify(info.deep)}`);
+  assert(Math.abs(info.deep.connectorX - (step * (info.deep.depth - 1) + 9)) < 0.5 && info.deep.connectorSize === '18px 3px',
     `横线起点应正好接上一层竖线的右边缘，实际 ${JSON.stringify(info.deep)}`);
+  // 叶子条目：不再向下画自己的竖线（否则会垂到空处），但仍要画接进上一层的横线。
+  assert(info.leaf.columnsSize === `${step * (info.leaf.depth - 1) + 9}px calc(100% + 6px)` && info.leaf.connectorSize === '18px 3px' && info.leafViolations === 0,
+    `叶子条目只画父层竖线（宽 18(d-1) + 9）且 leaf 标记必须精确，实际 ${JSON.stringify({ leaf: info.leaf, leafViolations: info.leafViolations })}`);
   assert(Math.abs(info.deep.paddingLeft - (step * info.deep.depth + 10)) < 0.5,
     `深层缩进应与步长一致，实际 ${JSON.stringify(info.deep)}`);
   await page.close();

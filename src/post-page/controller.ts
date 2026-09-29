@@ -11,7 +11,7 @@ import { getPageNumbers } from '../nodeseek/pagination.js';
 import { getSsrState } from '../nodeseek/ssr-state.js';
 import { buildPostUrl } from '../nodeseek/url.js';
 import { addRemoteNote, stripRenderArtifacts } from '../preview/render-utils.js';
-import { prepareCommentRecord } from '../preview/renderer.js';
+import { prepareCommentRecord, syncThreadEntries } from '../preview/renderer.js';
 import { createCommentVirtualizer } from '../preview/virtualizer.js';
 import { formatPageStatus } from '../ui/status.js';
 import type { PageProgress } from '../data/page-loader.js';
@@ -73,6 +73,7 @@ interface PostPageControllerDeps {
   flattenReplyTree: typeof flattenReplyTree;
   createCommentVirtualizer: typeof createCommentVirtualizer;
   prepareCommentRecord: typeof prepareCommentRecord;
+  syncThreadEntries: typeof syncThreadEntries;
   addRemoteNote: typeof addRemoteNote;
   installPreviewFeatures: typeof installPreviewFeatures;
   formatPageStatus: typeof formatPageStatus;
@@ -104,6 +105,7 @@ function createPostPageController({
   flattenReplyTree,
   createCommentVirtualizer,
   prepareCommentRecord,
+  syncThreadEntries,
   addRemoteNote,
   installPreviewFeatures,
   formatPageStatus,
@@ -577,7 +579,10 @@ function createPostPageController({
           overscanScreens: 2,
         }).mount(this.list as VirtualizerHost, virtualizerOptions);
       }
-      this.virtualizer.setEntries(flattenReplyTree(this.records), virtualizerOptions);
+      const entries = flattenReplyTree(this.records);
+      this.virtualizer.setEntries(entries, virtualizerOptions);
+      // 虚拟列表复用已挂载节点，不会重跑 renderItem：跨页补全楼层后同步缩进与关系线标记。
+      syncThreadEntries(this.list, entries);
       const loadedPages = this.loadedPages;
       const loading = this.loading || options.progressive;
       const pagination = formatPageStatus({
@@ -645,6 +650,7 @@ const PostEnhancer = createPostPageController({
   flattenReplyTree,
   createCommentVirtualizer,
   prepareCommentRecord,
+  syncThreadEntries,
   addRemoteNote,
   installPreviewFeatures,
   formatPageStatus,

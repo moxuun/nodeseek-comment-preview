@@ -15,7 +15,7 @@ function createPreviewRenderUtils({ qs, qsa, createElement, buildPostUrl }: Prev
   function stripRenderArtifacts(item: Element | null | undefined): void {
     if (!item?.classList) return;
     qsa(item, '.xns-reply-list, .xns-remote-floor-link').forEach((node) => node.remove());
-    item.classList.remove('xns-comment-root', 'xns-comment-child', 'xns-floor-highlight');
+    item.classList.remove('xns-comment-root', 'xns-comment-child', 'xns-comment-leaf', 'xns-floor-highlight');
     item.removeAttribute('data-xns-floor');
     item.removeAttribute('data-xns-depth');
     item.removeAttribute('data-xns-parent-floor');

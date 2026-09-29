@@ -16,7 +16,8 @@ const XNS_STYLE_TOKENS = `
         --xns-danger: #cf222e;
         --xns-warning: #9a6700;
         --xns-success: #1a7f37;
-        --xns-thread-line: rgba(0,0,0,.1);
+        /* 官方亮色 blockquote 竖线是 rgba(0,0,0,.1)，太淡；关系线需要能看清层级，明确略微加深。 */
+        --xns-thread-line: rgba(0,0,0,.2);
         --xns-code-bg: rgba(255,255,153,.33);
         --xns-code-border: #eee;
         --xns-code-text: #444;
@@ -39,7 +40,8 @@ const XNS_STYLE_TOKENS = `
         --xns-danger: #da3633;
         --xns-warning: #9e6a03;
         --xns-success: #238636;
-        --xns-thread-line: rgba(255,255,255,.1);
+        /* 同亮色：官方暗色 blockquote 竖线 rgba(255,255,255,.1) 偏淡，关系线略微加深。 */
+        --xns-thread-line: rgba(255,255,255,.22);
         --xns-code-bg: #2e2e04;
         --xns-code-border: #56560b;
         --xns-code-text: #aaa;
