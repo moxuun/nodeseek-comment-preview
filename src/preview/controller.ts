@@ -11,6 +11,7 @@ import { buildPostUrl, getPostInfo } from '../nodeseek/url.js';
 import { closeImageLightbox } from './lightbox.js';
 import { closeModal, createCloseButton, createRefreshButton, createShareButton, installPreviewScrollButtons } from './modal-ui.js';
 import { buildPreviewPostNode, renderPreviewRecords } from './renderer.js';
+import { destroyVirtualLists } from './virtualizer.js';
 import type { LoadPreviewResult, PageProgress } from '../data/page-loader.js';
 import type { CommentRecord } from '../nodeseek/content-parser.js';
 import type { RenderRecordsOptions } from './renderer.js';
@@ -708,6 +709,7 @@ function createPreviewController({
     closeImageLightbox();
     if (!preserveContent) {
       modal.body.scrollTop = 0;
+      destroyVirtualLists(modal.body);
       clearElement(modal.body);
       modal.body.appendChild(createElement('p', 'xns-loading', loadingText));
     }
@@ -731,6 +733,8 @@ function createPreviewController({
       const scrollSnapshot = preserveContent ? capturePreviewScroll(modal.body) : null;
       modal.title.textContent = preview.title || 'NodeSeek 帖子预览';
       updatePreviewHeaderMeta(modal, preview.headerMeta);
+      // 正文整体换新：先销毁旧列表的虚拟化实例，否则它的监听与 observer 会留在 modal.body 上累积。
+      destroyVirtualLists(modal.body);
       clearElement(modal.body);
       modal.body.appendChild(preview.content);
       if (modal.composer && !modal.composer.isConnected) modal.body.appendChild(modal.composer);

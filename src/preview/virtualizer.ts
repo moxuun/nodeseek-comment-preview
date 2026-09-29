@@ -349,5 +349,18 @@ function createCommentVirtualizer({
   return api;
 }
 
-export { createCommentVirtualizer };
+/**
+ * 销毁 root 里仍在运行的虚拟列表。
+ * 虚拟列表把实例写在自己的挂载目标上（目标带 .xns-virtual-list 类），正文整体换新或弹窗关闭时
+ * 必须调用一次：它的 scroll/load/error 监听挂在长期存在的视口容器上，ResizeObserver 也还盯着旧节点，
+ * 不销毁就会随每次刷新累积，之后每次滚动都白白重排一份已经脱离文档的列表。
+ */
+function destroyVirtualLists(root: ParentNode | null | undefined): void {
+  if (!root) return;
+  root.querySelectorAll<VirtualizerHost>('.xns-virtual-list').forEach((host) => {
+    host.__xnsVirtualizer?.destroy();
+  });
+}
+
+export { createCommentVirtualizer, destroyVirtualLists };
 export type { CommentVirtualEntry, CommentVirtualizer, VirtualizerSetupOptions, VirtualizerViewport };

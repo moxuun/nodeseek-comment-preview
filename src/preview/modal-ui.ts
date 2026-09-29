@@ -1,6 +1,7 @@
 import { state } from '../core/config.js';
 import { createElement } from '../core/dom.js';
 import { closeImageLightbox } from './lightbox.js';
+import { destroyVirtualLists } from './virtualizer.js';
 
 /** 弹窗句柄；由 preview controller 写入 state.modal，关闭路径与全局事件读取。 */
 interface PreviewModalHandle {
@@ -10,6 +11,7 @@ interface PreviewModalHandle {
   refreshScrollCleanup?: () => void;
   scrollCleanup?: () => void;
   overlay?: Element | null;
+  body?: Element | null;
 }
 
 /** 分享按钮的点击回调，回调里可以改按钮文案。 */
@@ -145,6 +147,8 @@ function createPreviewModalUi({ windowObj, documentObj, state, createElement, cl
     modal?.featureCleanup?.();
     modal?.refreshScrollCleanup?.();
     modal?.scrollCleanup?.();
+    // 关闭前显式销毁还在跑的虚拟列表：它取消待执行的 rAF 并断开 ResizeObserver。
+    if (modal?.body) destroyVirtualLists(modal.body);
     modal?.overlay?.remove();
     state.modal = null;
     removeBodyLock();

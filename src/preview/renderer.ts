@@ -308,7 +308,9 @@ function createPreviewRenderer({
     const heading = qs(section, ':scope > h3');
     const thread = qs(section, ':scope > .xns-preview-thread');
     if (!heading || !thread) return;
-    const host = section as RenderHost;
+    // 虚拟列表实例写在它自己的挂载目标（列表容器）上，与 virtualizer 内部写的是同一处：
+    // 楼层导航按 .xns-virtual-list 找实例，销毁也只需顺这个标记走，不再另存一份到 section。
+    const threadHost = thread as RenderHost;
     heading.textContent = `${records.length} 条回复`;
     qs(section, ':scope > .xns-preview-empty')?.remove();
     if (records.length) {
@@ -330,19 +332,18 @@ function createPreviewRenderer({
         onUnmount: onNodeUnmounted,
       };
       const flatEntries = flattenReplyTree(records);
-      const virtualizer = host.__xnsVirtualizer || createCommentVirtualizer({
+      const virtualizer = threadHost.__xnsVirtualizer || createCommentVirtualizer({
         windowObj,
         documentObj: document,
         createElement,
         estimatedHeight: 135,
         overscanScreens: 2,
-      }).mount(thread as RenderHost, virtualizerOptions);
-      host.__xnsVirtualizer = virtualizer;
+      }).mount(threadHost, virtualizerOptions);
       virtualizer.setEntries(flatEntries, virtualizerOptions);
       syncThreadEntries(thread, flatEntries);
     } else {
-      host.__xnsVirtualizer?.destroy();
-      delete host.__xnsVirtualizer;
+      // 没有评论：销毁列表实例（destroy 会自己清掉挂载目标上的标记），再清空容器。
+      threadHost.__xnsVirtualizer?.destroy();
       clearElement(thread);
       section.appendChild(createElement('p', 'xns-status xns-preview-empty', '没有读取到评论。'));
     }

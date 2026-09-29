@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.81
+// @version      0.5.82
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -3837,270 +3837,6 @@
 		installPreviewVotePanels
 	});
 	var installPreviewFeatures = (root, options) => xnsContentFeatures.installPreviewFeatures(root, options);
-	function createPreviewModalUi({ windowObj, documentObj, state, createElement, closeImageLightbox }) {
-		function removeBodyLock() {
-			if (!state.modal) documentObj.documentElement.style.removeProperty("overflow");
-		}
-		function createScrollArrow(points) {
-			const svg = documentObj.createElementNS("http://www.w3.org/2000/svg", "svg");
-			svg.setAttribute("viewBox", "0 0 24 24");
-			svg.setAttribute("aria-hidden", "true");
-			const polyline = documentObj.createElementNS("http://www.w3.org/2000/svg", "polyline");
-			polyline.setAttribute("points", points);
-			svg.appendChild(polyline);
-			return svg;
-		}
-		function createRefreshArrow() {
-			const svg = documentObj.createElementNS("http://www.w3.org/2000/svg", "svg");
-			svg.setAttribute("viewBox", "0 0 24 24");
-			svg.setAttribute("aria-hidden", "true");
-			const path = documentObj.createElementNS("http://www.w3.org/2000/svg", "path");
-			path.setAttribute("d", "M20 11a8 8 0 1 1-2.34-5.66");
-			const polyline = documentObj.createElementNS("http://www.w3.org/2000/svg", "polyline");
-			polyline.setAttribute("points", "20 4 20 11 13 11");
-			svg.append(path, polyline);
-			return svg;
-		}
-		function createRefreshButton(onClick) {
-			const button = createElement("button", "xns-modal-tool xns-refresh-post");
-			button.type = "button";
-			button.title = "刷新帖子";
-			button.setAttribute("aria-label", "刷新帖子");
-			button.append(createRefreshArrow(), createElement("span", "xns-modal-tool-label", "刷新"));
-			button.addEventListener("click", onClick);
-			return button;
-		}
-		function createShareButton(onClick) {
-			const button = createElement("button", "xns-modal-tool xns-modal-share");
-			button.type = "button";
-			button.title = "复制帖子链接";
-			button.setAttribute("aria-label", "复制帖子链接");
-			const label = createElement("span", "xns-modal-tool-label", "分享");
-			button.append(createCopyIcon(), label);
-			button.addEventListener("click", () => {
-				onClick?.({ setLabel: (value) => {
-					label.textContent = value;
-				} });
-			});
-			return button;
-		}
-		function createCopyIcon() {
-			const svg = documentObj.createElementNS("http://www.w3.org/2000/svg", "svg");
-			svg.setAttribute("viewBox", "0 0 24 24");
-			svg.setAttribute("aria-hidden", "true");
-			const back = documentObj.createElementNS("http://www.w3.org/2000/svg", "rect");
-			back.setAttribute("x", "5");
-			back.setAttribute("y", "5");
-			back.setAttribute("width", "11");
-			back.setAttribute("height", "13");
-			back.setAttribute("rx", "2");
-			const front = documentObj.createElementNS("http://www.w3.org/2000/svg", "path");
-			front.setAttribute("d", "M9 5V4a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2");
-			svg.append(back, front);
-			return svg;
-		}
-		function installPreviewScrollButtons(dialog, body) {
-			const group = createElement("div", "xns-preview-scroll-btns");
-			group.setAttribute("role", "toolbar");
-			group.setAttribute("aria-label", "阅读导航");
-			const top = createElement("button", "xns-scroll-btn xns-to-top");
-			top.type = "button";
-			top.title = "回到顶部";
-			top.setAttribute("aria-label", "回到顶部");
-			top.setAttribute("data-xns-tip", "回到顶部");
-			top.appendChild(createScrollArrow("18 15 12 9 6 15"));
-			const bottom = createElement("button", "xns-scroll-btn xns-to-bottom");
-			bottom.type = "button";
-			bottom.title = "回到底部";
-			bottom.setAttribute("aria-label", "回到底部");
-			bottom.setAttribute("data-xns-tip", "回到底部");
-			bottom.appendChild(createScrollArrow("6 9 12 15 18 9"));
-			const scrollTo = (edge) => {
-				const topPosition = edge === "bottom" ? Math.max(0, body.scrollHeight - body.clientHeight) : 0;
-				body.scrollTo({
-					top: topPosition,
-					behavior: "smooth"
-				});
-			};
-			top.addEventListener("click", () => scrollTo("top"));
-			bottom.addEventListener("click", () => scrollTo("bottom"));
-			group.append(top, bottom);
-			dialog.appendChild(group);
-			const update = () => {
-				const distanceFromBottom = body.scrollHeight - (body.scrollTop + body.clientHeight);
-				top.classList.toggle("hidden", body.scrollTop <= 300);
-				bottom.classList.toggle("hidden", distanceFromBottom <= 300);
-			};
-			const cleanup = () => {
-				body.removeEventListener("scroll", update);
-				windowObj.removeEventListener("resize", update);
-				mutationObserver?.disconnect();
-				resizeObserver?.disconnect();
-				group.remove();
-			};
-			const mutationObserver = windowObj.MutationObserver ? new windowObj.MutationObserver(update) : null;
-			const resizeObserver = windowObj.ResizeObserver ? new windowObj.ResizeObserver(update) : null;
-			body.addEventListener("scroll", update, { passive: true });
-			windowObj.addEventListener("resize", update, { passive: true });
-			mutationObserver?.observe(body, {
-				childList: true,
-				subtree: true
-			});
-			resizeObserver?.observe(body);
-			windowObj.setTimeout(update, 0);
-			update();
-			return cleanup;
-		}
-		function closeModal() {
-			closeImageLightbox();
-			const modal = state.modal;
-			modal?.requestController?.abort();
-			modal?.replySyncController?.abort();
-			modal?.featureCleanup?.();
-			modal?.refreshScrollCleanup?.();
-			modal?.scrollCleanup?.();
-			modal?.overlay?.remove();
-			state.modal = null;
-			removeBodyLock();
-		}
-		function createCloseButton(onClick) {
-			const button = createElement("button", "xns-modal-close", "×");
-			button.type = "button";
-			button.setAttribute("aria-label", "关闭");
-			button.title = "关闭预览（Esc）";
-			button.addEventListener("click", onClick);
-			return button;
-		}
-		return Object.freeze({
-			removeBodyLock,
-			installPreviewScrollButtons,
-			closeModal,
-			createCloseButton,
-			createRefreshButton,
-			createShareButton
-		});
-	}
-	var xnsPreviewModalUi = createPreviewModalUi({
-		windowObj: window,
-		documentObj: document,
-		state,
-		createElement,
-		closeImageLightbox
-	});
-	var closeModal = () => xnsPreviewModalUi.closeModal();
-	var createCloseButton = (onClick) => xnsPreviewModalUi.createCloseButton(onClick);
-	var createRefreshButton = (onClick) => xnsPreviewModalUi.createRefreshButton(onClick);
-	var createShareButton = (onClick) => xnsPreviewModalUi.createShareButton(onClick);
-	var installPreviewScrollButtons = (dialog, body) => xnsPreviewModalUi.installPreviewScrollButtons(dialog, body);
-	function createPageStatusFormatter({ maxPage, getMaxPage }) {
-		function format(options = {}) {
-			const configuredLimit = Number(options.pageLimit) || Number(getMaxPage?.()) || maxPage;
-			const pageLimit = Math.min(maxPage, Math.max(1, configuredLimit));
-			const totalPages = Number(options.totalPages) || 0;
-			const loadedPages = Math.max(0, Number(options.loadedPages) || 0);
-			const failedCount = Array.isArray(options.failedPages) ? options.failedPages.length : 0;
-			const targetPages = Math.min(pageLimit, totalPages || loadedPages);
-			const pageProgress = targetPages ? `已读取 ${loadedPages}/${targetPages} 页` : "";
-			const stage = options.loading ? pageProgress ? `正在读取其他分页 · ${pageProgress}` : "正在读取其他分页…" : pageProgress;
-			const failed = failedCount ? `${failedCount} 页读取失败` : "";
-			const challengeCount = Array.isArray(options.challengePages) ? options.challengePages.length : 0;
-			const challenge = challengeCount ? `${challengeCount} 页被 Cloudflare 验证拦截，请完成验证后重试` : "";
-			const truncated = options.truncated ? `帖子共 ${totalPages || pageLimit} 页，仅读取前 ${pageLimit} 页，后面的内容没有显示` : "";
-			const detail = [
-				stage,
-				failed,
-				challenge,
-				truncated
-			].filter(Boolean).join(" · ");
-			return {
-				targetPages,
-				loadedPages,
-				failedCount,
-				stage,
-				failed,
-				challenge,
-				challengeCount,
-				truncated,
-				detail,
-				compact: [
-					Number.isFinite(options.commentCount) ? `${options.commentCount} 条回复` : "",
-					failedCount ? `${failedCount} 页失败` : "",
-					challengeCount ? `${challengeCount} 页需验证` : ""
-				].filter(Boolean).join(" · ") || detail,
-				tone: failedCount ? "is-failed" : ""
-			};
-		}
-		return Object.freeze({ format });
-	}
-	var formatPageStatus = createPageStatusFormatter({
-		maxPage: 50,
-		getMaxPage
-	}).format;
-	function createPreviewRenderUtils({ qs, qsa, createElement, buildPostUrl }) {
-		function stripRenderArtifacts(item) {
-			if (!item?.classList) return;
-			qsa(item, ".xns-reply-list, .xns-remote-floor-link").forEach((node) => node.remove());
-			item.classList.remove("xns-comment-root", "xns-comment-child", "xns-comment-leaf", "xns-floor-highlight");
-			item.removeAttribute("data-xns-floor");
-			item.removeAttribute("data-xns-depth");
-			item.removeAttribute("data-xns-parent-floor");
-			item.removeAttribute("data-xns-remote");
-			item.removeAttribute("data-xns-source-page");
-			item.style.removeProperty("--xns-indent");
-		}
-		function setFloorLinkUrl(source, record, postId) {
-			if (!source) return;
-			const url = buildPostUrl(postId, record.page, record.floor);
-			if (!url) return;
-			source.href = url.href;
-			source.target = "_blank";
-			source.rel = "noopener noreferrer";
-			source.title = `打开原楼层 #${record.floor}`;
-			source.setAttribute("aria-label", `打开原楼层 #${record.floor}`);
-		}
-		function addRemoteNote(record, postId, remote = record.node?.hasAttribute("data-xns-remote") === true) {
-			const node = record.node;
-			if (!node) return;
-			const floorLinks = qsa(node, ".floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link");
-			const existing = floorLinks.find((link) => link.closest(".floor-link-wrapper")) || floorLinks[0] || null;
-			if (!remote) {
-				floorLinks.forEach((link) => setFloorLinkUrl(link, record, postId));
-				return;
-			}
-			const meta = qs(node, ":scope > .nsk-content-meta-info");
-			let source = existing;
-			let wrapper = source?.closest(".floor-link-wrapper") ?? null;
-			if (!source) {
-				wrapper = createElement("div", "floor-link-wrapper");
-				source = createElement("a", "floor-link", `#${record.floor}`);
-				wrapper.appendChild(source);
-				(meta || node).appendChild(wrapper);
-			} else {
-				source.textContent = `#${record.floor}`;
-				wrapper = wrapper || (() => {
-					const created = createElement("div", "floor-link-wrapper");
-					source?.replaceWith(created);
-					created.appendChild(source);
-					return created;
-				})();
-			}
-			setFloorLinkUrl(source, record, postId);
-			qsa(node, ".floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link").forEach((link) => setFloorLinkUrl(link, record, postId));
-			wrapper?.classList.add("xns-remote-floor-link");
-		}
-		return Object.freeze({
-			stripRenderArtifacts,
-			addRemoteNote
-		});
-	}
-	var xnsPreviewRenderUtils = createPreviewRenderUtils({
-		qs,
-		qsa,
-		createElement,
-		buildPostUrl
-	});
-	var stripRenderArtifacts = (item) => xnsPreviewRenderUtils.stripRenderArtifacts(item);
-	var addRemoteNote = (record, postId, remote) => xnsPreviewRenderUtils.addRemoteNote(record, postId, remote);
 	function createCommentVirtualizer({ windowObj, documentObj, createElement, estimatedHeight = 150, overscanScreens = 2 }) {
 		let host = null;
 		let entries = [];
@@ -4371,6 +4107,277 @@
 		});
 		return api;
 	}
+	function destroyVirtualLists(root) {
+		if (!root) return;
+		root.querySelectorAll(".xns-virtual-list").forEach((host) => {
+			host.__xnsVirtualizer?.destroy();
+		});
+	}
+	function createPreviewModalUi({ windowObj, documentObj, state, createElement, closeImageLightbox }) {
+		function removeBodyLock() {
+			if (!state.modal) documentObj.documentElement.style.removeProperty("overflow");
+		}
+		function createScrollArrow(points) {
+			const svg = documentObj.createElementNS("http://www.w3.org/2000/svg", "svg");
+			svg.setAttribute("viewBox", "0 0 24 24");
+			svg.setAttribute("aria-hidden", "true");
+			const polyline = documentObj.createElementNS("http://www.w3.org/2000/svg", "polyline");
+			polyline.setAttribute("points", points);
+			svg.appendChild(polyline);
+			return svg;
+		}
+		function createRefreshArrow() {
+			const svg = documentObj.createElementNS("http://www.w3.org/2000/svg", "svg");
+			svg.setAttribute("viewBox", "0 0 24 24");
+			svg.setAttribute("aria-hidden", "true");
+			const path = documentObj.createElementNS("http://www.w3.org/2000/svg", "path");
+			path.setAttribute("d", "M20 11a8 8 0 1 1-2.34-5.66");
+			const polyline = documentObj.createElementNS("http://www.w3.org/2000/svg", "polyline");
+			polyline.setAttribute("points", "20 4 20 11 13 11");
+			svg.append(path, polyline);
+			return svg;
+		}
+		function createRefreshButton(onClick) {
+			const button = createElement("button", "xns-modal-tool xns-refresh-post");
+			button.type = "button";
+			button.title = "刷新帖子";
+			button.setAttribute("aria-label", "刷新帖子");
+			button.append(createRefreshArrow(), createElement("span", "xns-modal-tool-label", "刷新"));
+			button.addEventListener("click", onClick);
+			return button;
+		}
+		function createShareButton(onClick) {
+			const button = createElement("button", "xns-modal-tool xns-modal-share");
+			button.type = "button";
+			button.title = "复制帖子链接";
+			button.setAttribute("aria-label", "复制帖子链接");
+			const label = createElement("span", "xns-modal-tool-label", "分享");
+			button.append(createCopyIcon(), label);
+			button.addEventListener("click", () => {
+				onClick?.({ setLabel: (value) => {
+					label.textContent = value;
+				} });
+			});
+			return button;
+		}
+		function createCopyIcon() {
+			const svg = documentObj.createElementNS("http://www.w3.org/2000/svg", "svg");
+			svg.setAttribute("viewBox", "0 0 24 24");
+			svg.setAttribute("aria-hidden", "true");
+			const back = documentObj.createElementNS("http://www.w3.org/2000/svg", "rect");
+			back.setAttribute("x", "5");
+			back.setAttribute("y", "5");
+			back.setAttribute("width", "11");
+			back.setAttribute("height", "13");
+			back.setAttribute("rx", "2");
+			const front = documentObj.createElementNS("http://www.w3.org/2000/svg", "path");
+			front.setAttribute("d", "M9 5V4a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2");
+			svg.append(back, front);
+			return svg;
+		}
+		function installPreviewScrollButtons(dialog, body) {
+			const group = createElement("div", "xns-preview-scroll-btns");
+			group.setAttribute("role", "toolbar");
+			group.setAttribute("aria-label", "阅读导航");
+			const top = createElement("button", "xns-scroll-btn xns-to-top");
+			top.type = "button";
+			top.title = "回到顶部";
+			top.setAttribute("aria-label", "回到顶部");
+			top.setAttribute("data-xns-tip", "回到顶部");
+			top.appendChild(createScrollArrow("18 15 12 9 6 15"));
+			const bottom = createElement("button", "xns-scroll-btn xns-to-bottom");
+			bottom.type = "button";
+			bottom.title = "回到底部";
+			bottom.setAttribute("aria-label", "回到底部");
+			bottom.setAttribute("data-xns-tip", "回到底部");
+			bottom.appendChild(createScrollArrow("6 9 12 15 18 9"));
+			const scrollTo = (edge) => {
+				const topPosition = edge === "bottom" ? Math.max(0, body.scrollHeight - body.clientHeight) : 0;
+				body.scrollTo({
+					top: topPosition,
+					behavior: "smooth"
+				});
+			};
+			top.addEventListener("click", () => scrollTo("top"));
+			bottom.addEventListener("click", () => scrollTo("bottom"));
+			group.append(top, bottom);
+			dialog.appendChild(group);
+			const update = () => {
+				const distanceFromBottom = body.scrollHeight - (body.scrollTop + body.clientHeight);
+				top.classList.toggle("hidden", body.scrollTop <= 300);
+				bottom.classList.toggle("hidden", distanceFromBottom <= 300);
+			};
+			const cleanup = () => {
+				body.removeEventListener("scroll", update);
+				windowObj.removeEventListener("resize", update);
+				mutationObserver?.disconnect();
+				resizeObserver?.disconnect();
+				group.remove();
+			};
+			const mutationObserver = windowObj.MutationObserver ? new windowObj.MutationObserver(update) : null;
+			const resizeObserver = windowObj.ResizeObserver ? new windowObj.ResizeObserver(update) : null;
+			body.addEventListener("scroll", update, { passive: true });
+			windowObj.addEventListener("resize", update, { passive: true });
+			mutationObserver?.observe(body, {
+				childList: true,
+				subtree: true
+			});
+			resizeObserver?.observe(body);
+			windowObj.setTimeout(update, 0);
+			update();
+			return cleanup;
+		}
+		function closeModal() {
+			closeImageLightbox();
+			const modal = state.modal;
+			modal?.requestController?.abort();
+			modal?.replySyncController?.abort();
+			modal?.featureCleanup?.();
+			modal?.refreshScrollCleanup?.();
+			modal?.scrollCleanup?.();
+			if (modal?.body) destroyVirtualLists(modal.body);
+			modal?.overlay?.remove();
+			state.modal = null;
+			removeBodyLock();
+		}
+		function createCloseButton(onClick) {
+			const button = createElement("button", "xns-modal-close", "×");
+			button.type = "button";
+			button.setAttribute("aria-label", "关闭");
+			button.title = "关闭预览（Esc）";
+			button.addEventListener("click", onClick);
+			return button;
+		}
+		return Object.freeze({
+			removeBodyLock,
+			installPreviewScrollButtons,
+			closeModal,
+			createCloseButton,
+			createRefreshButton,
+			createShareButton
+		});
+	}
+	var xnsPreviewModalUi = createPreviewModalUi({
+		windowObj: window,
+		documentObj: document,
+		state,
+		createElement,
+		closeImageLightbox
+	});
+	var closeModal = () => xnsPreviewModalUi.closeModal();
+	var createCloseButton = (onClick) => xnsPreviewModalUi.createCloseButton(onClick);
+	var createRefreshButton = (onClick) => xnsPreviewModalUi.createRefreshButton(onClick);
+	var createShareButton = (onClick) => xnsPreviewModalUi.createShareButton(onClick);
+	var installPreviewScrollButtons = (dialog, body) => xnsPreviewModalUi.installPreviewScrollButtons(dialog, body);
+	function createPageStatusFormatter({ maxPage, getMaxPage }) {
+		function format(options = {}) {
+			const configuredLimit = Number(options.pageLimit) || Number(getMaxPage?.()) || maxPage;
+			const pageLimit = Math.min(maxPage, Math.max(1, configuredLimit));
+			const totalPages = Number(options.totalPages) || 0;
+			const loadedPages = Math.max(0, Number(options.loadedPages) || 0);
+			const failedCount = Array.isArray(options.failedPages) ? options.failedPages.length : 0;
+			const targetPages = Math.min(pageLimit, totalPages || loadedPages);
+			const pageProgress = targetPages ? `已读取 ${loadedPages}/${targetPages} 页` : "";
+			const stage = options.loading ? pageProgress ? `正在读取其他分页 · ${pageProgress}` : "正在读取其他分页…" : pageProgress;
+			const failed = failedCount ? `${failedCount} 页读取失败` : "";
+			const challengeCount = Array.isArray(options.challengePages) ? options.challengePages.length : 0;
+			const challenge = challengeCount ? `${challengeCount} 页被 Cloudflare 验证拦截，请完成验证后重试` : "";
+			const truncated = options.truncated ? `帖子共 ${totalPages || pageLimit} 页，仅读取前 ${pageLimit} 页，后面的内容没有显示` : "";
+			const detail = [
+				stage,
+				failed,
+				challenge,
+				truncated
+			].filter(Boolean).join(" · ");
+			return {
+				targetPages,
+				loadedPages,
+				failedCount,
+				stage,
+				failed,
+				challenge,
+				challengeCount,
+				truncated,
+				detail,
+				compact: [
+					Number.isFinite(options.commentCount) ? `${options.commentCount} 条回复` : "",
+					failedCount ? `${failedCount} 页失败` : "",
+					challengeCount ? `${challengeCount} 页需验证` : ""
+				].filter(Boolean).join(" · ") || detail,
+				tone: failedCount ? "is-failed" : ""
+			};
+		}
+		return Object.freeze({ format });
+	}
+	var formatPageStatus = createPageStatusFormatter({
+		maxPage: 50,
+		getMaxPage
+	}).format;
+	function createPreviewRenderUtils({ qs, qsa, createElement, buildPostUrl }) {
+		function stripRenderArtifacts(item) {
+			if (!item?.classList) return;
+			qsa(item, ".xns-reply-list, .xns-remote-floor-link").forEach((node) => node.remove());
+			item.classList.remove("xns-comment-root", "xns-comment-child", "xns-comment-leaf", "xns-floor-highlight");
+			item.removeAttribute("data-xns-floor");
+			item.removeAttribute("data-xns-depth");
+			item.removeAttribute("data-xns-parent-floor");
+			item.removeAttribute("data-xns-remote");
+			item.removeAttribute("data-xns-source-page");
+			item.style.removeProperty("--xns-indent");
+		}
+		function setFloorLinkUrl(source, record, postId) {
+			if (!source) return;
+			const url = buildPostUrl(postId, record.page, record.floor);
+			if (!url) return;
+			source.href = url.href;
+			source.target = "_blank";
+			source.rel = "noopener noreferrer";
+			source.title = `打开原楼层 #${record.floor}`;
+			source.setAttribute("aria-label", `打开原楼层 #${record.floor}`);
+		}
+		function addRemoteNote(record, postId, remote = record.node?.hasAttribute("data-xns-remote") === true) {
+			const node = record.node;
+			if (!node) return;
+			const floorLinks = qsa(node, ".floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link");
+			const existing = floorLinks.find((link) => link.closest(".floor-link-wrapper")) || floorLinks[0] || null;
+			if (!remote) {
+				floorLinks.forEach((link) => setFloorLinkUrl(link, record, postId));
+				return;
+			}
+			const meta = qs(node, ":scope > .nsk-content-meta-info");
+			let source = existing;
+			let wrapper = source?.closest(".floor-link-wrapper") ?? null;
+			if (!source) {
+				wrapper = createElement("div", "floor-link-wrapper");
+				source = createElement("a", "floor-link", `#${record.floor}`);
+				wrapper.appendChild(source);
+				(meta || node).appendChild(wrapper);
+			} else {
+				source.textContent = `#${record.floor}`;
+				wrapper = wrapper || (() => {
+					const created = createElement("div", "floor-link-wrapper");
+					source?.replaceWith(created);
+					created.appendChild(source);
+					return created;
+				})();
+			}
+			setFloorLinkUrl(source, record, postId);
+			qsa(node, ".floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link").forEach((link) => setFloorLinkUrl(link, record, postId));
+			wrapper?.classList.add("xns-remote-floor-link");
+		}
+		return Object.freeze({
+			stripRenderArtifacts,
+			addRemoteNote
+		});
+	}
+	var xnsPreviewRenderUtils = createPreviewRenderUtils({
+		qs,
+		qsa,
+		createElement,
+		buildPostUrl
+	});
+	var stripRenderArtifacts = (item) => xnsPreviewRenderUtils.stripRenderArtifacts(item);
+	var addRemoteNote = (record, postId, remote) => xnsPreviewRenderUtils.addRemoteNote(record, postId, remote);
 	var THREAD_STEP = 18;
 	var THREAD_LINE_WIDTH = 3;
 	var THREAD_LEVEL_LIMIT = 8;
@@ -4555,7 +4562,7 @@
 			const heading = qs(section, ":scope > h3");
 			const thread = qs(section, ":scope > .xns-preview-thread");
 			if (!heading || !thread) return;
-			const host = section;
+			const threadHost = thread;
 			heading.textContent = `${records.length} 条回复`;
 			qs(section, ":scope > .xns-preview-empty")?.remove();
 			if (records.length) {
@@ -4577,19 +4584,16 @@
 					onUnmount: onNodeUnmounted
 				};
 				const flatEntries = flattenReplyTree(records);
-				const virtualizer = host.__xnsVirtualizer || createCommentVirtualizer({
+				(threadHost.__xnsVirtualizer || createCommentVirtualizer({
 					windowObj,
 					documentObj: document,
 					createElement,
 					estimatedHeight: 135,
 					overscanScreens: 2
-				}).mount(thread, virtualizerOptions);
-				host.__xnsVirtualizer = virtualizer;
-				virtualizer.setEntries(flatEntries, virtualizerOptions);
+				}).mount(threadHost, virtualizerOptions)).setEntries(flatEntries, virtualizerOptions);
 				syncThreadEntries(thread, flatEntries);
 			} else {
-				host.__xnsVirtualizer?.destroy();
-				delete host.__xnsVirtualizer;
+				threadHost.__xnsVirtualizer?.destroy();
 				clearElement(thread);
 				section.appendChild(createElement("p", "xns-status xns-preview-empty", "没有读取到评论。"));
 			}
@@ -5185,6 +5189,7 @@
 			closeImageLightbox();
 			if (!preserveContent) {
 				modal.body.scrollTop = 0;
+				destroyVirtualLists(modal.body);
 				clearElement(modal.body);
 				modal.body.appendChild(createElement("p", "xns-loading", loadingText));
 			}
@@ -5211,6 +5216,7 @@
 				const scrollSnapshot = preserveContent ? capturePreviewScroll(modal.body) : null;
 				modal.title.textContent = preview.title || "NodeSeek 帖子预览";
 				updatePreviewHeaderMeta(modal, preview.headerMeta);
+				destroyVirtualLists(modal.body);
 				clearElement(modal.body);
 				modal.body.appendChild(preview.content);
 				if (modal.composer && !modal.composer.isConnected) modal.body.appendChild(modal.composer);
