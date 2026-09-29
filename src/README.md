@@ -4,7 +4,8 @@
 `src/main.ts` 是唯一脚本入口，`vite.config.ts` 管理 userscript 元数据，版本读取根目录 `package.json`。
 设置面板由 `src/ui/settings-panel.tsx` 使用 React + TypeScript 渲染，关闭时卸载 React root。
 `src/ui/settings.js` 仅桥接现有状态、偏好保存和油猴菜单；React 不接管 NodeSeek 原生评论节点。
-其余业务模块仍为 JS，虚拟列表库与 DOMPurify 将分别迁移。
+`src/nodeseek/sanitize.ts` 使用 DOMPurify 清洗远端节点，再应用楼层 ID、评论菜单、链接和延迟图片规则；不清洗或替换当前页原生评论节点。
+其余业务模块仍为 JS，虚拟列表库将单独迁移。
 
 | 目录职责 | 说明 |
 | --- | --- |

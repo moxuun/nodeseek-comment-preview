@@ -1,5 +1,6 @@
-import { getAuthorName, getCommentId, getFloor, getPostContent, getSafeUrlAttribute, qs, qsa, safeCount, safePositiveInt } from '../core/dom.js';
+import { getAuthorName, getCommentId, getFloor, getPostContent, qs, qsa, safeCount, safePositiveInt } from '../core/dom.js';
 import { getCurrentUserUid } from './identity.js';
+import { sanitizeImportedNode } from './sanitize';
 import { getPostInfo, parseSameOriginUrl } from './url.js';
 
 // NodeSeek 页面内容解析与安全克隆；输出供预览和帖子页共用的评论记录。
@@ -7,7 +8,6 @@ function createContentParser({
   documentObj,
   qs,
   qsa,
-  getSafeUrlAttribute,
   parseSameOriginUrl,
   getPostInfo,
   safePositiveInt,
@@ -17,56 +17,7 @@ function createContentParser({
   getPostContent,
   getCurrentUserUid,
 }) {
-const DANGEROUS_IMPORTED_SELECTOR = 'script,style,link,meta,base,iframe,object,embed,form,input,textarea,select,option,button';
-const COMMENT_MENU_SELECTOR = '.comment-menu, .comment-actions';
 const ssrCommentIndexes = new WeakMap();
-
-function sanitizeImportedNode(sourceNode, options = {}) {
-  if (!sourceNode) return null;
-  const imported = documentObj.importNode(sourceNode, true);
-  if (imported.matches?.(DANGEROUS_IMPORTED_SELECTOR)) return null;
-  const all = [imported, ...qsa(imported, '*')].filter((node) => node.nodeType === 1);
-  all.forEach((node) => {
-    if (node !== imported && node.matches?.(DANGEROUS_IMPORTED_SELECTOR)) {
-      node.remove();
-      return;
-    }
-    if (node !== imported && !options.keepCommentMenu && node.matches?.(COMMENT_MENU_SELECTOR)) {
-      node.remove();
-      return;
-    }
-    // 保留克隆根节点的楼层 id；旧实现的 [id] 查询只覆盖后代节点，
-    // 预览和帖子页回复流程依赖根 id 继续识别楼层。
-    if (node !== imported && node.hasAttribute('id')) node.removeAttribute('id');
-    Array.from(node.attributes).forEach((attribute) => {
-      const name = attribute.name.toLowerCase();
-      if (name.startsWith('on') || ['style', 'srcdoc', 'srcset', 'formaction', 'contenteditable', 'ping'].includes(name)) {
-        node.removeAttribute(attribute.name);
-        return;
-      }
-      if (['href', 'src', 'poster', 'xlink:href'].includes(name)) {
-        const safeFragment = name === 'xlink:href' && attribute.value.trim().startsWith('#');
-        const urlName = name === 'poster' ? 'src' : name === 'xlink:href' ? 'href' : name;
-        const safeValue = safeFragment ? attribute.value : getSafeUrlAttribute(urlName, attribute.value);
-        if (!safeValue) node.removeAttribute(attribute.name);
-        else if (options.deferImages && node.localName === 'img' && name === 'src') {
-          node.setAttribute('data-xns-deferred-src', safeValue);
-          node.removeAttribute(attribute.name);
-        } else node.setAttribute(attribute.name, safeValue);
-      }
-    });
-    if (node.localName === 'a' && (node.hasAttribute('href') || node.hasAttribute('xlink:href'))) {
-      node.setAttribute('target', '_blank');
-      node.setAttribute('rel', 'noopener noreferrer');
-    }
-    if (node.localName === 'img') {
-      node.setAttribute('loading', 'lazy');
-      node.setAttribute('decoding', 'async');
-      node.setAttribute('referrerpolicy', 'origin');
-    }
-  });
-  return imported;
-}
 
 function extractReplyMetadata(item, postId) {
   const content = getPostContent(item);
@@ -204,7 +155,6 @@ const xnsContentParser = createContentParser({
   documentObj: document,
   qs,
   qsa,
-  getSafeUrlAttribute,
   parseSameOriginUrl,
   getPostInfo,
   safePositiveInt,
@@ -214,7 +164,6 @@ const xnsContentParser = createContentParser({
   getPostContent,
   getCurrentUserUid,
 });
-function sanitizeImportedNode(...args) { return xnsContentParser.sanitizeImportedNode(...args); }
 function extractReplyMetadata(...args) { return xnsContentParser.extractReplyMetadata(...args); }
 function isPinnedComment(...args) { return xnsContentParser.isPinnedComment(...args); }
 function hasOwnEditOption(...args) { return xnsContentParser.hasOwnEditOption(...args); }

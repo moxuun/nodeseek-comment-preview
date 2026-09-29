@@ -1,6 +1,6 @@
 {
   "name": "nodeseek-comment-preview",
-  "version": "0.5.62",
+  "version": "0.5.63",
   "private": true,
   "type": "module",
   "scripts": {
@@ -21,6 +21,7 @@
     "node": "^22.12.0 || >=24.0.0"
   },
   "dependencies": {
+    "dompurify": "^3.4.16",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   }

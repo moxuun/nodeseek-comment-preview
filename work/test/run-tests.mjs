@@ -305,8 +305,10 @@ async function installParserCounter(page) {
     const stats = { count: 0 };
     const original = DOMParser.prototype.parseFromString;
     DOMParser.prototype.parseFromString = function patchedParseFromString(...args) {
-      stats.count += 1;
-      return original.apply(this, args);
+      const parsed = original.apply(this, args);
+      // Count fetched post documents, not DOMPurify's empty scratch document.
+      if (parsed.querySelector('.comment-container')) stats.count += 1;
+      return parsed;
     };
     window.__xnsParserStats = stats;
   });
@@ -467,6 +469,79 @@ scenario('远端评论安全克隆规则保持', async (ctx) => {
   assert(state.dangerousNodes === 0, `危险节点应被清理，实际 ${state.dangerousNodes}`);
   assert(state.unsafeAttributes === 0, `危险属性应被清理，实际 ${state.unsafeAttributes}`);
   assert(state.unsafeLinks === 0, `javascript 链接应被清理，实际 ${state.unsafeLinks}`);
+  await page.close();
+});
+
+scenario('DOMPurify 清洗远端 HTML 并保留安全富内容', async (ctx) => {
+  const page = await ctx.newPage();
+  await page.evaluateOnNewDocument(() => {
+    const fetchOriginal = window.fetch.bind(window);
+    window.__xnsPayloadRan = false;
+    window.fetch = async (...args) => {
+      const response = await fetchOriginal(...args);
+      if (response.url.endsWith('/post-123-2')) {
+        const read = response.text.bind(response);
+        response.text = async () => (await read()).replace('跨页回复</p>', `跨页回复</p>
+          <div data-case="rich" id="duplicate-id" onclick="window.__xnsPayloadRan=true" style="color:red">
+            <a data-case="safe-link" href="/space/9" target="_self" rel="opener">安全链接</a>
+            <a data-case="bad-link" href="java&#x0a;script:window.__xnsPayloadRan=true">危险链接</a>
+            <a data-case="data-link" href="data:text/html,unsafe">数据链接</a>
+            <img data-case="forged-deferred" data-xns-deferred-src="javascript:window.__xnsPayloadRan=true">
+            <img data-case="safe-image" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" onerror="window.__xnsPayloadRan=true" srcset="javascript:bad 2x">
+            <svg viewBox="0 0 10 10" onload="window.__xnsPayloadRan=true">
+              <use data-case="local-icon" href="#edit"></use>
+              <use data-case="external-icon" href="https://example.invalid/icons.svg#edit"></use>
+              <use data-case="bad-icon" href="javascript:window.__xnsPayloadRan=true"></use>
+              <circle cx="5" cy="5" r="2"></circle>
+              <foreignObject><div>不应保留</div></foreignObject>
+            </svg>
+            <math><mi>x</mi><mo>+</mo><mn>1</mn></math>
+            <video controls poster="/safe-poster.png"><source src="/safe-video.mp4" type="video/mp4"></video>
+            <form><span data-case="form-child">不应保留表单子树</span><input name="attributes"></form>
+            <template><img src="x" onerror="window.__xnsPayloadRan=true"></template>
+          </div>`);
+      }
+      return response;
+    };
+  });
+  // Keep safe media local and deterministic; the sanitizer must preserve URLs.
+  await page.setRequestInterception(true);
+  page.on('request', request => {
+    if (/\/safe-(poster\.png|video\.mp4)$/.test(request.url())) request.respond({ status: 204 });
+    else request.continue();
+  });
+  await page.goto(`${ctx.base}/post-123-1`, { waitUntil: 'networkidle0' });
+  await waitFor(page, () => !!document.querySelector('[data-xns-remote][data-xns-floor="4"] [data-case="rich"]'), 10_000, '安全富内容物化');
+  const result = await page.evaluate(() => {
+    const root = document.querySelector('[data-xns-remote][data-xns-floor="4"]');
+    const rich = root.querySelector('[data-case="rich"]');
+    const link = rich.querySelector('[data-case="safe-link"]');
+    const image = rich.querySelector('[data-case="safe-image"]');
+    return {
+      floor: root.id,
+      handlers: [rich, ...rich.querySelectorAll('*')].flatMap(node => [...node.attributes]).filter(attr => /^on/i.test(attr.name)).length,
+      styles: rich.hasAttribute('style') || !!rich.querySelector('[style],[srcset]'),
+      ids: rich.id || rich.querySelector('[id]')?.id || '',
+      link: [link.getAttribute('href'), link.target, link.rel],
+      badHref: rich.querySelector('[data-case="bad-link"]').hasAttribute('href') || rich.querySelector('[data-case="data-link"]').hasAttribute('href'),
+      forged: rich.querySelector('[data-case="forged-deferred"]').outerHTML,
+      image: [image.getAttribute('src'), image.loading, image.decoding],
+      localIcon: rich.querySelector('[data-case="local-icon"]')?.getAttribute('href'),
+      externalIcon: rich.querySelector('[data-case="external-icon"]')?.hasAttribute('href'),
+      badIcon: rich.querySelector('[data-case="bad-icon"]')?.hasAttribute('href'),
+      media: !!rich.querySelector('video[controls] source[type="video/mp4"]'),
+      math: rich.querySelector('math')?.textContent,
+      forbidden: !!rich.querySelector('form,input,foreignObject,[data-case="form-child"]'),
+      ran: window.__xnsPayloadRan,
+    };
+  });
+  assert(result.floor === '4' && result.ids === '', '只应保留根楼层 ID');
+  assert(result.handlers === 0 && !result.styles && !result.badHref && !result.forbidden && !result.ran, `危险内容未完全移除：${JSON.stringify(result)}`);
+  assert(JSON.stringify(result.link) === JSON.stringify([`${ctx.base}/space/9`, '_blank', 'noopener noreferrer']), '安全链接应保留、绝对化并隔离 opener');
+  assert(!/\ssrc=|data-xns-deferred-src/.test(result.forged), '伪造延迟图片地址不能恢复为 src');
+  assert(result.image[0]?.startsWith('data:image/gif;') && result.image[1] === 'lazy' && result.image[2] === 'async', '合法图片应物化并保留懒加载');
+  assert(result.localIcon === '#edit' && !result.externalIcon && !result.badIcon, 'SVG 图标只保留本地符号引用');
+  assert(result.media && result.math === 'x+1', '安全视频和数学公式应保留');
   await page.close();
 });
 
