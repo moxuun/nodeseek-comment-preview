@@ -4,6 +4,7 @@ import { clearElement, createElement, getCommentId, qs, qsa, safeCount } from '.
 import { pageInfo } from '../core/runtime.js';
 import { ensurePreviewMenu, getDirectCommentMenu, openPreviewEditor } from '../features/comment-actions.js';
 import { getSsrCommentCounts, materializeCommentNode, sanitizeImportedNode } from '../nodeseek/content-parser.js';
+import type { SsrCommentCounts } from '../nodeseek/content-parser.js';
 import { getDocState } from '../nodeseek/ssr-state.js';
 import { buildPostUrl, getPostInfo } from '../nodeseek/url.js';
 import { formatPageStatus } from '../ui/status.js';
@@ -54,7 +55,7 @@ interface PreviewRendererDeps {
   sanitizeImportedNode: typeof sanitizeImportedNode;
   materializeCommentNode: typeof materializeCommentNode;
   getDirectCommentMenu: (node: Element) => Element | null;
-  ensurePreviewMenu: (node: Element, options: { includeFavorite: boolean; counts?: unknown }) => void;
+  ensurePreviewMenu: (node: Element, options: { includeFavorite: boolean; counts?: SsrCommentCounts | null }) => void;
   stripRenderArtifacts: typeof stripRenderArtifacts;
   flattenReplyTree: typeof flattenReplyTree;
   createCommentVirtualizer: typeof createCommentVirtualizer;

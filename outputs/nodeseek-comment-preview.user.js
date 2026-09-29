@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.75
+// @version      0.5.76
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -5328,6 +5328,9 @@
 	function openPreviewModal(...args) {
 		return xnsPreviewController.openPreviewModal(...args);
 	}
+	function isInteractionAction(action) {
+		return action === "like" || action === "chicken" || action === "dislike" || action === "favorite";
+	}
 	function createCommentActions({ windowObj, documentObj, state, pageInfo, qs, qsa, createElement, getPostInfo, buildPostUrl, parseSameOriginUrl, safeCount, safePositiveInt, getFloor, getCommentId, getAuthorName, getPostContent, findCommentList, postAction, syncPreviewReply, refreshPreviewModal }) {
 		const PREVIEW_ACTIONS = [
 			[
@@ -5383,7 +5386,8 @@
 		const interactionStates = new Map();
 		function getInteractionKey(action, comment) {
 			if (action === "favorite") {
-				const postId = safePositiveInt(comment?.getAttribute?.("data-xns-post-id") || "") || safePositiveInt(state.modal?.postId || "") || safePositiveInt(pageInfo?.postId || "");
+				const modal = state.modal;
+				const postId = safePositiveInt(comment?.getAttribute?.("data-xns-post-id") || "") || safePositiveInt(modal?.postId || "") || safePositiveInt(pageInfo?.postId || "");
 				return postId === null ? null : `post:${postId}`;
 			}
 			const commentId = comment ? getCommentId(comment) : null;
@@ -5413,15 +5417,17 @@
 		function applyInteractionState(menuItem, entry) {
 			menuItem.classList.toggle("xns-action-done", Boolean(entry?.done));
 			const countNode = qs(menuItem, ":scope > .xns-action-count") || getMenuCountElement(menuItem);
-			if (countNode && Number.isFinite(entry?.count) && entry.count >= 0) countNode.textContent = String(entry.count);
+			const count = entry && typeof entry.count === "number" && Number.isFinite(entry.count) && entry.count >= 0 ? entry.count : null;
+			if (countNode && count !== null) countNode.textContent = String(count);
 		}
 		function getDirectCommentMenu(comment) {
 			return Array.from(comment?.children || []).find((child) => child.matches?.(".comment-menu, .comment-actions")) || null;
 		}
 		function getMenuActionKey(menuItem) {
+			const node = menuItem;
 			const values = [
-				menuItem?.dataset?.action,
-				menuItem?.dataset?.type,
+				node?.dataset?.action,
+				node?.dataset?.type,
 				menuItem?.getAttribute?.("title"),
 				menuItem?.getAttribute?.("aria-label"),
 				menuItem?.textContent
@@ -5491,7 +5497,7 @@
 			const counts = options.counts || null;
 			menuItems.forEach((item) => {
 				const action = getMenuActionKey(item);
-				if (!action || !ACTION_FLAGS[action]) return;
+				if (!action || !isInteractionAction(action)) return;
 				applyInteractionState(item, getInteractionState(action, comment, counts));
 			});
 			return menu;
@@ -5501,9 +5507,10 @@
 			return getFloor(comment);
 		}
 		function getActionTargetId(comment) {
+			const modal = state.modal;
 			const commentId = getCommentId(comment);
 			if (commentId !== null) return commentId;
-			if (comment?.getAttribute("data-xns-target-type") === "post") return safePositiveInt(comment.getAttribute("data-xns-post-id") || "") || safePositiveInt(state.modal?.postId || "");
+			if (comment?.getAttribute("data-xns-target-type") === "post") return safePositiveInt(comment.getAttribute("data-xns-post-id") || "") || safePositiveInt(modal?.postId || "");
 			return null;
 		}
 		function getPageActionContext() {
@@ -5539,14 +5546,15 @@
 			return (copy.innerText || copy.textContent || "").trim().slice(0, 12e3);
 		}
 		function getPreviewSourceUrl(comment, context = null) {
-			const contextUrl = context?.url?.href || state.modal?.url?.href || windowObj.location.href;
+			const modal = state.modal;
+			const contextUrl = context?.url?.href || modal?.url?.href || windowObj.location.href;
 			if (!comment) return contextUrl;
 			const contextInfo = getPostInfo(contextUrl);
 			const modalInfo = context?.postId ? {
 				postId: String(context.postId),
 				page: contextInfo?.page || 1
-			} : contextInfo || (state.modal?.postId ? {
-				postId: state.modal.postId,
+			} : contextInfo || (modal?.postId ? {
+				postId: modal.postId,
 				page: 1
 			} : null);
 			if (!modalInfo) return contextUrl;
@@ -5563,7 +5571,7 @@
 			if (commentId === null) return;
 			const actionContext = context || {
 				modal: state.modal,
-				postId: state.modal?.postId || pageInfo?.postId || "",
+				postId: pageInfo?.postId || "",
 				url: state.modal?.url
 			};
 			getDirectComposer(comment)?.remove();
@@ -5621,7 +5629,7 @@
 			});
 		}
 		function openPreviewComposer(action, comment, context = null) {
-			const modal = context?.modal || state.modal;
+			const modal = context?.modal || state.modal || null;
 			const actionContext = context || {
 				modal,
 				postId: modal?.postId || pageInfo?.postId || "",
@@ -5630,7 +5638,8 @@
 			const isPostReply = !comment || action === "post-reply";
 			const host = isPostReply ? modal?.composerHost || modal?.body || findCommentList() : comment || findCommentList();
 			if (!host) return;
-			(isPostReply ? modal?.composer || state.post?.composer : getDirectComposer(comment))?.remove();
+			const post = state.post;
+			(isPostReply ? modal?.composer || post?.composer : getDirectComposer(comment))?.remove();
 			const floor = isPostReply ? null : getDisplayFloor(comment);
 			const author = isPostReply ? "" : getAuthorName(comment);
 			const isReply = action === "reply" && !isPostReply;
@@ -5671,7 +5680,8 @@
 				const menu = qs(comment, ".xns-preview-menu");
 				if (menu) menu.insertAdjacentElement("afterend", composer);
 				else host.appendChild(composer);
-				if (isPostReply && state.post) state.post.composer = composer;
+				const postHandle = state.post;
+				if (isPostReply && postHandle) postHandle.composer = composer;
 			}
 			textarea.focus();
 			if (!isPostReply || !modal?.composerHost) composer.scrollIntoView({
@@ -5685,7 +5695,8 @@
 					modal.composerHost?.classList.remove("is-open");
 					if (modal.composerHost) modal.composerHost.hidden = true;
 				}
-				if (!modal && state.post?.composer === composer) state.post.composer = null;
+				const postHandle = state.post;
+				if (!modal && postHandle?.composer === composer) postHandle.composer = null;
 			});
 			submit.addEventListener("click", async () => {
 				const content = textarea.value.trim();
@@ -5715,10 +5726,10 @@
 						composer.remove();
 						syncPreviewReply?.(postModal);
 					} else if (state.post) {
-						const post = state.post;
-						if (post.composer === composer) post.composer = null;
+						const postHandle = state.post;
+						if (postHandle.composer === composer) postHandle.composer = null;
 						composer.remove();
-						await post.reloadPages({ refreshCurrentPage: true });
+						await postHandle.reloadPages?.({ refreshCurrentPage: true });
 					}
 				} catch (error) {
 					status.textContent = `发送失败：${error.message || "网络错误"}`;
@@ -5768,8 +5779,10 @@
 					postId,
 					action: isFavoriteRemoval ? "remove" : "add"
 				}, { context: actionContext });
-				const fallbackCount = Number.isFinite(stateEntry?.count) ? stateEntry.count + (isFavoriteRemoval ? -1 : 1) : null;
-				const responseCount = safeCount(action === "favorite" ? response?.postCollectionCount : response?.current);
+				const payload = response;
+				const previousCount = stateEntry?.count ?? null;
+				const fallbackCount = Number.isFinite(previousCount) && previousCount !== null ? previousCount + (isFavoriteRemoval ? -1 : 1) : null;
+				const responseCount = safeCount(action === "favorite" ? payload?.postCollectionCount : payload?.current);
 				updateInteractionState(action, comment, {
 					done: !isFavoriteRemoval,
 					count: responseCount === null ? fallbackCount : responseCount
@@ -5817,26 +5830,26 @@
 		syncPreviewReply: (...args) => syncPreviewReply(...args),
 		refreshPreviewModal: (...args) => refreshPreviewModal(...args)
 	});
-	function getDirectCommentMenu(...args) {
-		return xnsCommentActions.getDirectCommentMenu(...args);
+	function getDirectCommentMenu(comment) {
+		return xnsCommentActions.getDirectCommentMenu(comment);
 	}
-	function getMenuActionKey(...args) {
-		return xnsCommentActions.getMenuActionKey(...args);
+	function getMenuActionKey(menuItem) {
+		return xnsCommentActions.getMenuActionKey(menuItem);
 	}
-	function ensurePreviewMenu(...args) {
-		return xnsCommentActions.ensurePreviewMenu(...args);
+	function ensurePreviewMenu(comment, options = {}) {
+		return xnsCommentActions.ensurePreviewMenu(comment, options);
 	}
-	function getActionContext(...args) {
-		return xnsCommentActions.getActionContext(...args);
+	function getActionContext(menuItem) {
+		return xnsCommentActions.getActionContext(menuItem);
 	}
-	function openPreviewComposer(...args) {
-		return xnsCommentActions.openPreviewComposer(...args);
+	function openPreviewComposer(action, comment, context) {
+		return xnsCommentActions.openPreviewComposer(action, comment, context);
 	}
-	function openPreviewEditor(...args) {
-		return xnsCommentActions.openPreviewEditor(...args);
+	function openPreviewEditor(comment, record, context) {
+		return xnsCommentActions.openPreviewEditor(comment, record, context);
 	}
-	function runPreviewAction(...args) {
-		return xnsCommentActions.runPreviewAction(...args);
+	function runPreviewAction(action, menuItem, comment, context) {
+		return xnsCommentActions.runPreviewAction(action, menuItem, comment, context);
 	}
 	function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPreviewAction, closeImageLightbox, closeModal }) {
 		function handlePreviewActionClick(event) {
@@ -6389,8 +6402,9 @@
 		function handle(event) {
 			if (event.defaultPrevented || event.button !== 0) return;
 			if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-			if (getPostInfo(location.href) || event.target.closest?.(".xns-overlay")) return;
-			const link = event.target.closest?.("a[href]");
+			const target = event.target;
+			if (getPostInfo(location.href) || target?.closest?.(".xns-overlay")) return;
+			const link = target?.closest?.("a[href]") || null;
 			if (!link || !isListTitle(link)) return;
 			const url = parseSameOriginUrl(link.getAttribute("href") || "");
 			if (!url || !getPostInfo(url.href)) return;

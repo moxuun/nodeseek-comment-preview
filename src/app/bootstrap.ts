@@ -29,15 +29,15 @@ interface AppBootstrapDeps {
     location: Location;
     parseSameOriginUrl: typeof parseSameOriginUrl;
     getPostInfo: typeof getPostInfo;
-    openPreviewModal: unknown;
-  }) => { handle: (event: Event) => void };
+    openPreviewModal: (url: URL, link: Element) => void;
+  }) => { handle: (event: MouseEvent) => void };
   createFloorNavigationController: (options: {
     enabled: boolean;
     handleFloorClick: (event: Event) => void;
   }) => { handle: (event: Event) => void };
   parseSameOriginUrl: typeof parseSameOriginUrl;
   getPostInfo: typeof getPostInfo;
-  openPreviewModal: unknown;
+  openPreviewModal: (url: URL, link: Element) => void;
   handleFloorClick: (event: Event) => void;
   handlePreviewActionClick: (event: Event) => void;
   handleVoteClick: (event: Event) => void;

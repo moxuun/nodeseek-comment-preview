@@ -1,6 +1,7 @@
 import { state } from '../core/config.js';
 import { qsa } from '../core/dom.js';
 import { getActionContext, getMenuActionKey, runPreviewAction } from '../features/comment-actions.js';
+import type { PreviewActionContext, PreviewActionKey } from '../features/comment-actions.js';
 import { closeImageLightbox } from '../preview/lightbox.js';
 import { closeModal } from '../preview/modal-ui.js';
 
@@ -13,9 +14,9 @@ interface AppEventsDeps {
     lightbox: unknown;
   };
   qsa: typeof qsa;
-  getMenuActionKey: (menuItem: Element) => unknown;
-  getActionContext: (menuItem: Element | null) => unknown;
-  runPreviewAction: (action: string, menuItem: Element, comment: Element, context: unknown) => unknown;
+  getMenuActionKey: (menuItem: Element) => PreviewActionKey | '';
+  getActionContext: (menuItem: Element | null) => PreviewActionContext;
+  runPreviewAction: (action: PreviewActionKey, menuItem: Element, comment: Element | null, context: PreviewActionContext | null) => unknown;
   closeImageLightbox: () => void;
   closeModal: () => void;
 }
@@ -30,7 +31,7 @@ function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPr
     const inPost = Boolean(menuItem.closest('.comment-container'));
     if (!inPreview && !inPost) return;
     const comment = menuItem.closest('.content-item');
-    const action = menuItem.dataset.xnsAction || (getMenuActionKey(menuItem) as string | undefined);
+    const action = (menuItem.dataset.xnsAction || getMenuActionKey(menuItem)) as PreviewActionKey | '';
     if (!comment) return;
     // 官方帖子页的“编辑”由 NodeSeek/Vue 处理。虚拟列表裁掉同级楼层后，
     // Vue 的事件状态可能失效；先恢复官方列表，再重新触发一次原生入口。

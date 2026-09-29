@@ -236,4 +236,4 @@ const xnsContentParser = createContentParser({
 const { getCommentRecord, getSsrCommentCounts, materializeCommentNode, releaseCommentNode } = xnsContentParser;
 
 export { getCommentRecord, getSsrCommentCounts, materializeCommentNode, releaseCommentNode, sanitizeImportedNode };
-export type { SsrCommentEntry, SsrState };
+export type { SsrCommentCounts, SsrCommentEntry, SsrState };
