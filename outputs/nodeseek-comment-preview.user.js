@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.77
+// @version      0.5.78
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -4582,6 +4582,9 @@
 	var prepareCommentRecord = (record, depth) => xnsPreviewRenderer.prepareCommentRecord(record, depth);
 	var renderPreviewRecords = (section, info, records, options) => xnsPreviewRenderer.renderPreviewRecords(section, info, records, options);
 	function createPreviewController({ windowObj, documentObj, state, selectors, maxPage, qs, qsa, createElement, clearElement, getPostInfo, buildPostUrl, sanitizeImportedNode, parseHtml, fetchHtml, getPageNumbers, collectPageRecords, loadPreviewRecords, buildPreviewPostNode, renderPreviewRecords, installPreviewFeatures, installPreviewScrollButtons, closeImageLightbox, closeModal, createCloseButton, createRefreshButton, createShareButton, openPreviewComposer }) {
+		function currentModal() {
+			return state.modal || null;
+		}
 		async function copyPreviewLink(url, setLabel) {
 			const text = url?.href || "";
 			if (!text) throw new Error("原帖链接不可用");
@@ -4622,7 +4625,7 @@
 				node: meta?.node || "",
 				author: meta?.author || "",
 				time: meta?.time || "",
-				replies: Number.isFinite(meta?.replyCount) ? `${meta.replyCount} 条回复` : ""
+				replies: Number.isFinite(meta?.replyCount) ? `${meta?.replyCount} 条回复` : ""
 			};
 			Object.entries(values).forEach(([key, value]) => {
 				const item = modal.headerMeta[key];
@@ -4633,7 +4636,7 @@
 		}
 		function renderPreviewSection(section, info, records, options = {}) {
 			const onNodeMounted = options.onNodeMounted;
-			return renderPreviewRecords(section, info, records, {
+			renderPreviewRecords(section, info, records, {
 				...options,
 				onNodeMounted: (node, record) => {
 					installPreviewFeatures(node);
@@ -4776,7 +4779,7 @@
 			while (current && current !== owner) {
 				const parent = current.parentElement;
 				if (!parent) return [];
-				const index = Array.prototype.indexOf.call(parent.children, current);
+				const index = Array.from(parent.children).indexOf(current);
 				if (index < 0) return [];
 				path.unshift(index);
 				current = parent;
@@ -4845,10 +4848,11 @@
 				body.scrollTop = maxScrollTop;
 				return;
 			}
-			const anchor = snapshot.anchor ? resolvePreviewScrollAnchor(body, snapshot.anchor) : null;
-			if (anchor) {
+			const anchorInfo = snapshot.anchor;
+			const anchor = anchorInfo ? resolvePreviewScrollAnchor(body, anchorInfo) : null;
+			if (anchor && anchorInfo) {
 				const currentOffset = anchor.getBoundingClientRect().top - body.getBoundingClientRect().top;
-				const targetScrollTop = body.scrollTop + currentOffset - snapshot.anchor.offset;
+				const targetScrollTop = body.scrollTop + currentOffset - anchorInfo.offset;
 				body.scrollTop = Math.max(0, Math.min(targetScrollTop, maxScrollTop));
 				return;
 			}
@@ -4864,7 +4868,7 @@
 			const imageHandlers = [];
 			const apply = () => {
 				frame = 0;
-				if (!active || state.modal !== modal || modal.loadGeneration !== generation) return;
+				if (!active || currentModal() !== modal || modal.loadGeneration !== generation) return;
 				restorePreviewScroll(body, snapshot);
 			};
 			const schedule = () => {
@@ -4952,7 +4956,7 @@
 			}
 		}
 		async function syncPreviewReply(modal) {
-			if (!modal || state.modal !== modal) return false;
+			if (!modal || currentModal() !== modal) return false;
 			if (modal.loading) {
 				modal.pendingReplySync = true;
 				return false;
@@ -4972,19 +4976,18 @@
 				const additions = [];
 				let successfulReads = 0;
 				for (const page of pages) {
-					if (state.modal !== modal) return false;
+					if (currentModal() !== modal) return false;
 					try {
-						const response = await fetchHtml(buildPostUrl(info.postId, page), {
+						const parsed = parseHtml((await fetchHtml(buildPostUrl(info.postId, page), {
 							noStore: true,
 							allowCache: false,
 							signal: controller?.signal
-						});
-						const parsed = parseHtml(response.html, response.url);
+						})).html);
 						additions.push(...collectPageRecords(info, parsed, page));
 						successfulReads += 1;
 					} catch {}
 				}
-				if (state.modal !== modal) return false;
+				if (currentModal() !== modal) return false;
 				if (successfulReads === 0) return false;
 				modal.previewRecords = mergeCommentRecords(modal.previewRecords, additions);
 				const section = qs(modal.body, ".xns-preview-comments");
@@ -4998,7 +5001,7 @@
 					statusNode: modal.toolbarStatus,
 					loading: false,
 					onRetry: () => {
-						if (state.modal === modal && !modal.loading) retryPreviewPages(modal);
+						if (currentModal() === modal && !modal.loading) retryPreviewPages(modal);
 					}
 				});
 				updatePreviewHeaderMeta(modal, {
@@ -5046,10 +5049,10 @@
 			const targetPages = Math.min(pageLimit, totalPages);
 			const loadedPages = Array.from({ length: targetPages }, (_, index) => index + 1).filter((page) => !retryPages.includes(page));
 			const retryAgain = () => {
-				if (state.modal === modal && !modal.loading) retryPreviewPages(modal);
+				if (currentModal() === modal && !modal.loading) retryPreviewPages(modal);
 			};
 			const renderProgress = (progress, loading) => {
-				if (state.modal !== modal || !progress) return;
+				if (currentModal() !== modal || !progress) return;
 				modal.failedPages = [...progress.failedPages || []];
 				modal.totalPages = progress.totalPages || modal.totalPages;
 				modal.pageLimit = progress.pageLimit || modal.pageLimit;
@@ -5078,7 +5081,7 @@
 					signal: requestController?.signal,
 					onRecordsLoaded: (progress) => renderProgress(progress, true)
 				});
-				if (state.modal !== modal) return false;
+				if (currentModal() !== modal) return false;
 				applyPreviewResult(modal, preview);
 				renderProgress({
 					...preview,
@@ -5092,7 +5095,7 @@
 				});
 				return true;
 			} catch (error) {
-				if (state.modal === modal) showPreviewRefreshError(modal, error);
+				if (currentModal() === modal) showPreviewRefreshError(modal, error);
 				return false;
 			} finally {
 				if (modal.requestController === requestController) modal.requestController = null;
@@ -5131,12 +5134,11 @@
 				modal.body.appendChild(createElement("p", "xns-loading", loadingText));
 			}
 			try {
-				const response = await fetchHtml(modal.url, {
+				const parsed = parseHtml((await fetchHtml(modal.url, {
 					noStore: fresh,
 					allowCache: !fresh,
 					signal: requestController?.signal
-				});
-				const parsed = parseHtml(response.html, response.url);
+				})).html);
 				modal.previewSeed = parsed;
 				const preview = buildPreviewContent(modal.url, parsed, {
 					noStore: fresh,
@@ -5145,12 +5147,12 @@
 					signal: requestController?.signal,
 					statusNode: toolbarStatus,
 					onRetry: () => {
-						if (state.modal === modal && !modal.loading) retryPreviewPages(modal);
+						if (currentModal() === modal && !modal.loading) retryPreviewPages(modal);
 					}
 				});
 				let hydratedPreview = null;
 				if (preserveContent && preview.hydrate) hydratedPreview = await preview.hydrate;
-				if (state.modal !== modal || modal.loadGeneration !== generation) return false;
+				if (currentModal() !== modal || modal.loadGeneration !== generation) return false;
 				const scrollSnapshot = preserveContent ? capturePreviewScroll(modal.body) : null;
 				modal.title.textContent = preview.title || "NodeSeek 帖子预览";
 				updatePreviewHeaderMeta(modal, preview.headerMeta);
@@ -5161,7 +5163,7 @@
 				if (previewPost) installPreviewFeatures(previewPost);
 				if (!preserveContent && preview.hydrate) {
 					hydratedPreview = await preview.hydrate;
-					if (state.modal !== modal || modal.loadGeneration !== generation) return false;
+					if (currentModal() !== modal || modal.loadGeneration !== generation) return false;
 				}
 				updatePreviewHeaderMeta(modal, {
 					...preview.headerMeta,
@@ -5173,7 +5175,7 @@
 				}
 				if (preserveContent) stabilizePreviewScroll(modal, scrollSnapshot, generation);
 			} catch (error) {
-				if (state.modal === modal && modal.loadGeneration === generation) {
+				if (currentModal() === modal && modal.loadGeneration === generation) {
 					if (preserveContent) showPreviewRefreshError(modal, error);
 					else showPreviewLoadError(modal, error);
 				}
@@ -5182,7 +5184,7 @@
 				modal.loading = false;
 				refresh?.classList.remove("xns-action-pending");
 				refresh?.removeAttribute("aria-busy");
-				if (modal.pendingReplySync && state.modal === modal) {
+				if (modal.pendingReplySync && currentModal() === modal) {
 					modal.pendingReplySync = false;
 					windowObj.setTimeout(() => {
 						syncPreviewReply(modal);
@@ -5192,7 +5194,7 @@
 			return true;
 		}
 		function refreshPreviewModal() {
-			const modal = state.modal;
+			const modal = currentModal();
 			if (!modal || modal.loading || modal.replySyncing) return;
 			loadPreviewModal(modal, "正在刷新帖子…", { preserveContent: true });
 		}
@@ -5256,7 +5258,7 @@
 				composerHost,
 				title,
 				url: fetchUrl,
-				fallbackLink,
+				fallbackLink: fallbackLink || null,
 				postId: getPostInfo(fetchUrl.href)?.postId || "",
 				composer: null,
 				scrollCleanup,
@@ -5280,7 +5282,7 @@
 				pageLimit: maxPage
 			};
 			overlay.focus();
-			loadPreviewModal(state.modal, "正在读取帖子内容…");
+			loadPreviewModal(currentModal(), "正在读取帖子内容…");
 		}
 		return Object.freeze({
 			buildPreviewContent,
@@ -5317,10 +5319,10 @@
 		createCloseButton,
 		createRefreshButton,
 		createShareButton,
-		openPreviewComposer: (...args) => openPreviewComposer(...args)
+		openPreviewComposer
 	});
-	function syncPreviewReply(...args) {
-		return xnsPreviewController.syncPreviewReply(...args);
+	function syncPreviewReply(modal) {
+		return xnsPreviewController.syncPreviewReply(modal);
 	}
 	function refreshPreviewModal(...args) {
 		return xnsPreviewController.refreshPreviewModal(...args);
