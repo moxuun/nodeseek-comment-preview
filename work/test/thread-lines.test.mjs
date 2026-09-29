@@ -5,7 +5,7 @@
 // （后面还有兄弟）；是最后一条时父层只在本行横线处收口（stop），不能垂空线。
 // 浏览器场景（run-tests.mjs 的 0.5.81 回归）只负责确认这些几何正确映射到 CSS，不再用渲染结果反推树规则。
 
-import { flattenReplyTree } from '../../src/comments/thread.ts';
+import { flattenReplyTree, threadLevel } from '../../src/comments/thread.ts';
 
 let failures = 0;
 
@@ -54,5 +54,30 @@ check('关系线：只有一页时第 2 楼收口', lines([record(1), record(2, 
   ['1:0 full=[] stop=-1', '2:1 full=[] stop=0']);
 check('关系线：跨页追加兄弟后第 2 楼改为贯穿', lines([record(1), record(2, 1), record(3, 1)]),
   ['1:0 full=[] stop=-1', '2:1 full=[0] stop=-1', '3:1 full=[] stop=0']);
+
+// 深度上限：超过 8 层的楼层被压平到第 8 层；竖线最多画到第 7 层，否则最深的竖线会落进自己的卡片里。
+const deepChain = Array.from({ length: 12 }, (_, index) => (index === 0 ? record(1) : record(index + 1, index)));
+check('关系线：超过缩进上限的深链逐层收口、收口层级封顶在第 7 层', lines(deepChain),
+  ['1:0 full=[] stop=-1', '2:1 full=[] stop=0', '3:2 full=[] stop=1', '4:3 full=[] stop=2', '5:4 full=[] stop=3',
+    '6:5 full=[] stop=4', '7:6 full=[] stop=5', '8:7 full=[] stop=6', '9:8 full=[] stop=7', '10:9 full=[] stop=7',
+    '11:10 full=[] stop=7', '12:11 full=[] stop=7']);
+
+// 上限之下再分叉：第 10 楼（深度 9，已压平）有两个子楼层，先出现的那条继承第 7 层竖线，末条收口在第 7 层。
+const deepBranch = deepChain.slice(0, 10).concat([record(11, 10), record(12, 10)]);
+check('关系线：压平层的兄弟仍按贯穿/收口区分', lines(deepBranch).slice(-2),
+  ['11:10 full=[7] stop=-1', '12:10 full=[] stop=7']);
+
+// 通用不变量：任何一行的贯穿层级与收口层级都必须小于本行的缩进层级，否则线会画到卡片里面。
+function checkColumnsLeftOfCard(name, records) {
+  const bad = flattenReplyTree(records)
+    .filter((entry) => [...entry.thread.full, entry.thread.stop]
+      .some((level) => level >= 0 && level >= threadLevel(entry.depth)))
+    .map((entry) => `${entry.record.floor}@${entry.depth}`);
+  check(`关系线：${name} 的竖线都在卡片左侧`, bad, []);
+}
+
+checkColumnsLeftOfCard('深链', deepChain);
+checkColumnsLeftOfCard('上限处分叉', deepBranch);
+checkColumnsLeftOfCard('多兄弟与末子节点带后代', [record(1), record(2, 1), record(4, 2), record(5, 2), record(3, 1), record(6, 5)]);
 
 export { failures };

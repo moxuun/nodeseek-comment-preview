@@ -1,5 +1,6 @@
 import { flattenReplyTree } from '../comments/thread.js';
 import type { ThreadLines } from '../comments/thread.js';
+import { THREAD_COLUMN_LIMIT, threadLevel } from '../comments/thread.js';
 import { SELECTORS, state } from '../core/config.js';
 import { clearElement, createElement, getCommentId, qs, qsa, safeCount } from '../core/dom.js';
 import { pageInfo } from '../core/runtime.js';
@@ -33,14 +34,13 @@ interface RenderRecordsOptions extends RenderStatusOptions {
   onNodeUnmounted?: (node: HTMLElement, record: CommentRecord) => void;
 }
 
-/** 关系线的缩进步长、竖线宽度与最大层级（与 ui/style.ts 里的 --xns-indent 保持一致）。 */
+/** 竖线的缩进步长与宽度（与 ui/style.ts 的 --xns-indent 保持一致）；层级上限统一由 comments/thread.ts 映射。 */
 const THREAD_STEP = 18;
 const THREAD_LINE_WIDTH = 3;
-const THREAD_LEVEL_LIMIT = 8;
 
 /** 生成各层竖线的背景图：只画指定层级（x = 18k + 6，宽 3px），其余保持透明。 */
 function threadColumnImage(levels: number[]): string {
-  const unique = Array.from(new Set(levels.filter((level) => level >= 0 && level <= THREAD_LEVEL_LIMIT))).sort((a, b) => a - b);
+  const unique = Array.from(new Set(levels.filter((level) => level >= 0 && level <= THREAD_COLUMN_LIMIT))).sort((a, b) => a - b);
   if (!unique.length) return 'none';
   const stops: string[] = [];
   unique.forEach((level) => {
@@ -155,7 +155,7 @@ function createPreviewRenderer({
    * `thread` 来自 flattenReplyTree；缺少时（非虚拟列表路径）退回“所有祖先层都贯穿”，随后同步纠正。
    */
   function applyThreadGeometry(node: HTMLElement, record: CommentRecord, depth: number, thread?: ThreadLines | null): void {
-    const level = Math.min(THREAD_LEVEL_LIMIT, Math.max(0, depth));
+    const level = threadLevel(Math.max(0, depth));
     node.setAttribute('data-xns-depth', String(level));
     node.style.setProperty('--xns-indent', `${level * THREAD_STEP}px`);
     node.classList.toggle('xns-comment-root', level === 0);

@@ -33,6 +33,21 @@ interface ThreadLines {
   stop: number;
 }
 
+/** 楼层缩进的最大层级：更深的楼层压平到这一层，卡片缩进与竖线坐标共用这套映射。 */
+const THREAD_LEVEL_LIMIT = 8;
+/** 竖线最多画到哪一层；必须比缩进上限小 1，否则最深层的竖线会落到自己的卡片里。 */
+const THREAD_COLUMN_LIMIT = THREAD_LEVEL_LIMIT - 1;
+
+/** 真实深度 → 卡片缩进层级。 */
+function threadLevel(depth: number): number {
+  return Math.min(depth, THREAD_LEVEL_LIMIT);
+}
+
+/** 真实深度 → 竖线层级（“该深度的祖先的子女流”所在的列）。 */
+function threadColumn(depth: number): number {
+  return Math.min(depth, THREAD_COLUMN_LIMIT);
+}
+
 /** 展平后的楼层条目，供虚拟列表逐层渲染。 */
 interface FlatEntry {
   record: CommentRecord;
@@ -47,6 +62,8 @@ function flattenReplyTree(records: CommentRecord[]): FlatEntry[] {
   // 深度优先展平，同时按树结构算出每行的关系线几何：
   // 子楼层不是父层最后一条时，父层竖线要贯穿子楼层整行（后面还有兄弟）；
   // 是最后一条时父层竖线只在子楼层横线处收口，否则没有后续兄弟也会垂出一条长线。
+  // 层级统一经过 threadLevel/threadColumn 映射：超过缩进上限的深楼层被压平，
+  // 卡片缩进与竖线坐标用的是同一套层级，不会出现线跑到卡片外面的情况。
   const stack: FlatEntry[] = roots.slice().reverse().map((record) => ({ record, depth: 0, thread: { full: [], stop: -1 } }));
   while (stack.length) {
     const entry = stack.pop();
@@ -60,8 +77,8 @@ function flattenReplyTree(records: CommentRecord[]): FlatEntry[] {
         record: child,
         depth: entry.depth + 1,
         thread: {
-          full: isLastChild ? entry.thread.full : entry.thread.full.concat(entry.depth),
-          stop: isLastChild ? entry.depth : -1,
+          full: isLastChild ? entry.thread.full : entry.thread.full.concat(threadColumn(entry.depth)),
+          stop: isLastChild ? threadColumn(entry.depth) : -1,
         },
       });
     });
@@ -85,5 +102,5 @@ function mergeCommentRecords<T extends { floor: number; current?: boolean }>(
   return Array.from(merged.values());
 }
 
-export { buildReplyTree, flattenReplyTree, mergeCommentRecords };
+export { buildReplyTree, flattenReplyTree, mergeCommentRecords, THREAD_COLUMN_LIMIT, THREAD_LEVEL_LIMIT, threadColumn, threadLevel };
 export type { FlatEntry, ThreadLines };

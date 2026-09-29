@@ -14,7 +14,9 @@ npm test
 
 ### 楼层关系线纯逻辑测试
 
-`thread-lines.test.mjs` 在浏览器场景之前先跑，直接 `import` `src/comments/thread.ts`（Node ≥ 23 原生剥离类型，该模块只有 `import type`，运行时零依赖），用小型树对拍 `flattenReplyTree` 输出的 `full/stop`：单链、多兄弟、末子节点带后代、非末子节点带后代、跨页追加兄弟后几何反转。
+`thread-lines.test.mjs` 在浏览器场景之前先跑，直接 `import` `src/comments/thread.ts`（Node ≥ 23 原生剥离类型，该模块只有 `import type`，运行时零依赖），用小型树对拍 `flattenReplyTree` 输出的 `full/stop`：单链、多兄弟、末子节点带后代、非末子节点带后代、跨页追加兄弟后几何反转、超过缩进上限的深链与上限处分叉。
+
+深度映射只此一处：`threadLevel()` 决定卡片缩进层级（上限 8，更深的楼层压平），`threadColumn()` 决定竖线层级（上限 7）。两者必须保持“竖线层级 < 本行缩进层级”，否则最深的竖线会画进自己的卡片里；测试用通用不变量逐行校验这一点。
 
 树规则只在纯逻辑测试里核对；浏览器场景只断言这些几何正确映射到 CSS（卡片缩进、覆盖层位置、贯穿/收口），不再用渲染结果反推树结构。
 

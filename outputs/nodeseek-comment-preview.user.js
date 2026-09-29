@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.86
+// @version      0.5.87
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -1730,6 +1730,12 @@
 			return order(a) - order(b);
 		});
 	}
+	function threadLevel(depth) {
+		return Math.min(depth, 8);
+	}
+	function threadColumn(depth) {
+		return Math.min(depth, 7);
+	}
 	function flattenReplyTree(records) {
 		const flat = [];
 		const stack = buildReplyTree(records).slice().reverse().map((record) => ({
@@ -1750,8 +1756,8 @@
 					record: child,
 					depth: entry.depth + 1,
 					thread: {
-						full: isLastChild ? entry.thread.full : entry.thread.full.concat(entry.depth),
-						stop: isLastChild ? entry.depth : -1
+						full: isLastChild ? entry.thread.full : entry.thread.full.concat(threadColumn(entry.depth)),
+						stop: isLastChild ? threadColumn(entry.depth) : -1
 					}
 				});
 			});
@@ -4963,9 +4969,8 @@
 	}).format;
 	var THREAD_STEP = 18;
 	var THREAD_LINE_WIDTH = 3;
-	var THREAD_LEVEL_LIMIT = 8;
 	function threadColumnImage(levels) {
-		const unique = Array.from(new Set(levels.filter((level) => level >= 0 && level <= THREAD_LEVEL_LIMIT))).sort((a, b) => a - b);
+		const unique = Array.from(new Set(levels.filter((level) => level >= 0 && level <= 7))).sort((a, b) => a - b);
 		if (!unique.length) return "none";
 		const stops = [];
 		unique.forEach((level) => {
@@ -5010,7 +5015,7 @@
 			});
 		}
 		function applyThreadGeometry(node, record, depth, thread) {
-			const level = Math.min(THREAD_LEVEL_LIMIT, Math.max(0, depth));
+			const level = threadLevel(Math.max(0, depth));
 			node.setAttribute("data-xns-depth", String(level));
 			node.style.setProperty("--xns-indent", `${level * THREAD_STEP}px`);
 			node.classList.toggle("xns-comment-root", level === 0);
