@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.79
+// @version      0.5.80
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -342,16 +342,27 @@
 		const flat = [];
 		const stack = buildReplyTree(records).slice().reverse().map((record) => ({
 			record,
-			depth: 0
+			depth: 0,
+			thread: {
+				full: [],
+				stop: -1
+			}
 		}));
 		while (stack.length) {
 			const entry = stack.pop();
 			if (!entry) continue;
 			flat.push(entry);
-			entry.record.children.slice().reverse().forEach((child) => stack.push({
-				record: child,
-				depth: entry.depth + 1
-			}));
+			entry.record.children.slice().reverse().forEach((child, index) => {
+				const isLastChild = index === 0;
+				stack.push({
+					record: child,
+					depth: entry.depth + 1,
+					thread: {
+						full: isLastChild ? entry.thread.full : entry.thread.full.concat(entry.depth),
+						stop: isLastChild ? entry.depth : -1
+					}
+				});
+			});
 		}
 		return flat;
 	}
@@ -4360,6 +4371,19 @@
 		});
 		return api;
 	}
+	var THREAD_STEP = 18;
+	var THREAD_LINE_WIDTH = 3;
+	var THREAD_LEVEL_LIMIT = 8;
+	function threadColumnImage(levels) {
+		const unique = Array.from(new Set(levels.filter((level) => level >= 0 && level <= THREAD_LEVEL_LIMIT))).sort((a, b) => a - b);
+		if (!unique.length) return "none";
+		const stops = [];
+		unique.forEach((level) => {
+			const x = level * THREAD_STEP + 6;
+			stops.push(`transparent ${x}px`, `var(--xns-thread-line) ${x}px`, `var(--xns-thread-line) ${x + THREAD_LINE_WIDTH}px`, `transparent ${x + THREAD_LINE_WIDTH}px`);
+		});
+		return `linear-gradient(to right, ${stops.join(", ")})`;
+	}
 	function createPreviewRenderer({ document, windowObj, state, pageInfo, selectors, qs, qsa, createElement, clearElement, getPostInfo, buildPostUrl, getDocState, getCommentId, getSsrCommentCounts, safeCount, sanitizeImportedNode, materializeCommentNode, getDirectCommentMenu, ensurePreviewMenu, stripRenderArtifacts, flattenReplyTree, createCommentVirtualizer, addRemoteNote, formatPageStatus, openPreviewEditor }) {
 		function ensurePreviewEditOption(node, record) {
 			if (!node || !record?.isMine) return;
@@ -4395,12 +4419,18 @@
 				if (url) windowObj.open(url.href, "_blank", "noopener");
 			});
 		}
-		function applyThreadGeometry(node, record, depth) {
-			node.setAttribute("data-xns-depth", String(depth));
-			node.style.setProperty("--xns-indent", `${Math.min(8, Math.max(0, depth)) * 18}px`);
-			node.classList.toggle("xns-comment-root", depth === 0);
-			node.classList.toggle("xns-comment-child", depth > 0);
-			node.classList.toggle("xns-comment-leaf", depth > 0 && !record.children?.length);
+		function applyThreadGeometry(node, record, depth, thread) {
+			const level = Math.min(THREAD_LEVEL_LIMIT, Math.max(0, depth));
+			node.setAttribute("data-xns-depth", String(level));
+			node.style.setProperty("--xns-indent", `${level * THREAD_STEP}px`);
+			node.classList.toggle("xns-comment-root", level === 0);
+			node.classList.toggle("xns-comment-child", level > 0);
+			node.classList.toggle("xns-comment-leaf", level > 0 && !record.children?.length);
+			const full = thread ? thread.full : Array.from({ length: level }, (_, index) => index);
+			node.style.setProperty("--xns-thread-columns", threadColumnImage(record.children?.length ? full.concat(level) : full));
+			const stop = thread ? thread.stop : -1;
+			node.style.setProperty("--xns-thread-stop-x", `${(stop >= 0 ? stop : 0) * THREAD_STEP + 6}px`);
+			node.style.setProperty("--xns-thread-stop-width", stop >= 0 ? `${THREAD_LINE_WIDTH}px` : "0px");
 		}
 		function syncThreadEntries(thread, entries) {
 			if (!entries.length) return;
@@ -4408,10 +4438,10 @@
 			qsa(thread, ".content-item[data-xns-depth]").forEach((row) => {
 				const entry = byFloor.get(row.getAttribute("data-xns-floor") || "");
 				if (!entry) return;
-				applyThreadGeometry(row, entry.record, entry.depth);
+				applyThreadGeometry(row, entry.record, entry.depth ?? 0, entry.thread);
 			});
 		}
-		function prepareCommentRecord(record, depth) {
+		function prepareCommentRecord(record, depth, thread) {
 			const node = materializeCommentNode(record);
 			if (!node) return null;
 			stripRenderArtifacts(record.node);
@@ -4420,7 +4450,7 @@
 				node.setAttribute("data-xns-remote", "true");
 				node.setAttribute("data-xns-source-page", String(record.page));
 			}
-			applyThreadGeometry(node, record, depth);
+			applyThreadGeometry(node, record, depth, thread);
 			if (depth > 0 && record.parent) node.setAttribute("data-xns-parent-floor", String(record.parent.floor));
 			ensurePreviewMenu(node, {
 				includeFavorite: false,
@@ -4429,13 +4459,20 @@
 			ensurePreviewEditOption(node, record);
 			return node;
 		}
-		function appendNestedRecord(record, container, depth) {
-			const node = prepareCommentRecord(record, depth);
+		function appendNestedRecord(record, container, depth, thread) {
+			const node = prepareCommentRecord(record, depth, thread);
 			if (!node) return;
 			container.appendChild(node);
 			if (!record.children.length) return;
 			const replyList = createElement("ul", "xns-reply-list");
-			record.children.forEach((child) => appendNestedRecord(child, replyList, depth + 1));
+			const full = thread ? thread.full : Array.from({ length: depth }, (_, index) => index);
+			record.children.forEach((child, index) => {
+				const isLastChild = index === record.children.length - 1;
+				appendNestedRecord(child, replyList, depth + 1, {
+					full: isLastChild ? full : full.concat(depth),
+					stop: isLastChild ? depth : -1
+				});
+			});
 			node.appendChild(replyList);
 		}
 		function buildPreviewPostNode(parsed, info) {
@@ -4532,7 +4569,7 @@
 					if (!record.current) record.node = null;
 					options.onNodeUnmounted?.(node, record);
 				};
-				const renderItem = (entry) => prepareCommentRecord(entry.record, entry.depth ?? 0);
+				const renderItem = (entry) => prepareCommentRecord(entry.record, entry.depth ?? 0, entry.thread);
 				const virtualizerOptions = {
 					getViewport: () => thread.closest(".xns-modal-body") || windowObj,
 					renderItem,
@@ -4596,7 +4633,7 @@
 		openPreviewEditor
 	});
 	var buildPreviewPostNode = (parsed, info) => xnsPreviewRenderer.buildPreviewPostNode(parsed, info);
-	var prepareCommentRecord = (record, depth) => xnsPreviewRenderer.prepareCommentRecord(record, depth);
+	var prepareCommentRecord = (record, depth, thread) => xnsPreviewRenderer.prepareCommentRecord(record, depth, thread);
 	var syncThreadEntries = (thread, entries) => xnsPreviewRenderer.syncThreadEntries(thread, entries);
 	var renderPreviewRecords = (section, info, records, options) => xnsPreviewRenderer.renderPreviewRecords(section, info, records, options);
 	function createPreviewController({ windowObj, documentObj, state, selectors, maxPage, qs, qsa, createElement, clearElement, getPostInfo, buildPostUrl, sanitizeImportedNode, parseHtml, fetchHtml, getPageNumbers, collectPageRecords, loadPreviewRecords, buildPreviewPostNode, renderPreviewRecords, installPreviewFeatures, installPreviewScrollButtons, closeImageLightbox, closeModal, createCloseButton, createRefreshButton, createShareButton, openPreviewComposer }) {
@@ -6335,7 +6372,7 @@
 				if (!this.list || appState.mode !== "thread") return;
 				const virtualizerOptions = {
 					getViewport: () => windowObj,
-					renderItem: (entry) => prepareCommentRecord(entry.record, entry.depth ?? 0),
+					renderItem: (entry) => prepareCommentRecord(entry.record, entry.depth ?? 0, entry.thread),
 					onMount: (node, entry) => {
 						const record = entry.record;
 						if (!record.current) {
@@ -18252,17 +18289,14 @@
            裁剪宽度 = 18d + 8，leaf 条目为 18(d-1) + 8（额外扣除本层 18px）；
          - 缩进步长 18px = renderer 的 --xns-indent 步长；缩进统一用 padding-left 表达，节点盒仍占满整行，
            竖线才能画在父层位置。 */
-      /* 楼层关系线（linux tree 风格）：每层一条 3px 竖线（同官方 blockquote 竖线宽度）+ 本层 18px 短横线接进上一层竖线。
-         - 竖线用 repeating-linear-gradient 每 18px 画一条（x = 18k + 6，宽 3px），再用 background-size 宽度裁到本层
-           （18d + 9px），于是 0..d 层的竖线都画在本行上：父层竖线贯穿整棵子树，不会只画一小段；
-         - 竖线上下各延伸 3px 跨过 3px 条目间隙，同层竖线在相邻条目间严丝合缝；
-         - 横线从上一层竖线右边缘（18(d-1) + 9）起、长 18px，接到本层竖线右边缘，高度对准第一行（作者/时间）的垂直中心；
-         - 本层竖线只在有条目子楼层时画（否则相邻兄弟条目的竖线会首尾相接，看上去像上一条目还有后代）：
-           裁剪宽度 = 18d + 9，leaf 条目为 18(d-1) + 9（额外扣除本层 18px）；
-         - 缩进步长 18px = renderer 的 --xns-indent 步长；缩进统一用 padding-left 表达，节点盒仍占满整行，
-           竖线才能画在父层位置。 */
-      .xns-comment-child { --xns-thread-branch: 9px; --xns-thread-elbow: 15px; margin:3px 0 0 !important; padding:7px 8px 6px calc(var(--xns-indent,0px) + 10px) !important; border:0 !important; border-radius:0 !important; background-color:transparent !important; background-image:repeating-linear-gradient(to right, transparent 0 6px, var(--xns-thread-line) 6px 9px, transparent 9px 18px), linear-gradient(var(--xns-thread-line), var(--xns-thread-line)) !important; background-repeat:no-repeat !important; background-size:calc(var(--xns-indent,0px) + var(--xns-thread-branch)) calc(100% + 6px), 18px 3px !important; background-position:0 -3px, calc(var(--xns-indent,0px) - 9px) var(--xns-thread-elbow) !important; }
-      .xns-comment-leaf { --xns-thread-branch: -9px; }
+      /* 楼层关系线（linux tree 风格）：逐层一条 3px 竖线（x = 18k + 6，同官方 blockquote 竖线宽度）+ 本层 18px 短横线接进父层竖线。
+         - 竖线由 JS（renderer.ts 的 applyThreadGeometry）按树结构生成背景图 --xns-thread-columns：
+           祖先里还有后续兄弟的层贯穿整行；本层有子楼层时本层竖线也贯穿整行；
+         - 竖线上下各溢出 3px 跨过 3px 条目间隙，同层竖线在相邻条目之间严丝合缝；
+         - 横线从父层竖线右边缘（18(d-1) + 9）起、长 18px，接到本层竖线右边缘，高度对准第一行（作者/时间）的垂直中心；
+         - 本条是父层最后一条子楼层时，父层竖线不贯穿本行，只用 --xns-thread-stop-* 画到横线处（否则没有后续兄弟还垂出一条长线）；
+         - 缩进步长 18px = renderer 的 THREAD_STEP；缩进统一用 padding-left 表达，节点盒仍占满整行，竖线才能画在父层位置。 */
+      .xns-comment-child { --xns-thread-elbow: 15px; margin:3px 0 0 !important; padding:7px 8px 6px calc(var(--xns-indent,0px) + 10px) !important; border:0 !important; border-radius:0 !important; background-color:transparent !important; background-image:var(--xns-thread-columns, none), linear-gradient(var(--xns-thread-line), var(--xns-thread-line)), linear-gradient(var(--xns-thread-line), var(--xns-thread-line)) !important; background-repeat:no-repeat !important; background-size:100% calc(100% + 6px), 18px 3px, var(--xns-thread-stop-width, 0px) 21px !important; background-position:0 -3px, calc(var(--xns-indent,0px) - 9px) var(--xns-thread-elbow), var(--xns-thread-stop-x, 0px) -3px !important; }
       .xns-reply-list { margin:6px 0 0 !important; padding:0 !important; list-style:none !important; }
       .xns-floor-highlight { animation:xns-floor-highlight 1.8s ease both; }
       @keyframes xns-floor-highlight { 0%,100%{box-shadow:none} 20%{box-shadow:0 0 0 4px rgba(46,163,79,.3)} }

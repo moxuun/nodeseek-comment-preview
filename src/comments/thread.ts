@@ -22,21 +22,49 @@ function buildReplyTree(records: CommentRecord[]): CommentRecord[] {
   });
 }
 
+/**
+ * 楼层关系线几何：供 preview/renderer.ts 的 applyThreadGeometry 与 ui/style.ts 画线用。
+ * 竖线层级 k 代表“深度 k 的祖先的子女流”（x = 18k + 6，宽 3px）。
+ */
+interface ThreadLines {
+  /** 需要贯穿整行（含上下各 3px 桥接）的竖线层级。 */
+  full: number[];
+  /** 父层竖线需要在本条目横线处收口的层级（-1 表示不收口）；本条是父层最后一条子楼层时用它。 */
+  stop: number;
+}
+
 /** 展平后的楼层条目，供虚拟列表逐层渲染。 */
 interface FlatEntry {
   record: CommentRecord;
   depth: number;
+  /** 关系线几何，见 ThreadLines。 */
+  thread: ThreadLines;
 }
 
 function flattenReplyTree(records: CommentRecord[]): FlatEntry[] {
   const flat: FlatEntry[] = [];
   const roots = buildReplyTree(records);
-  const stack: FlatEntry[] = roots.slice().reverse().map((record) => ({ record, depth: 0 }));
+  // 深度优先展平，同时按树结构算出每行的关系线几何：
+  // 子楼层不是父层最后一条时，父层竖线要贯穿子楼层整行（后面还有兄弟）；
+  // 是最后一条时父层竖线只在子楼层横线处收口，否则没有后续兄弟也会垂出一条长线。
+  const stack: FlatEntry[] = roots.slice().reverse().map((record) => ({ record, depth: 0, thread: { full: [], stop: -1 } }));
   while (stack.length) {
     const entry = stack.pop();
     if (!entry) continue;
     flat.push(entry);
-    entry.record.children.slice().reverse().forEach((child) => stack.push({ record: child, depth: entry.depth + 1 }));
+    const children = entry.record.children;
+    children.slice().reverse().forEach((child, index) => {
+      // 反向遍历：第一个处理的是最后一条子楼层。
+      const isLastChild = index === 0;
+      stack.push({
+        record: child,
+        depth: entry.depth + 1,
+        thread: {
+          full: isLastChild ? entry.thread.full : entry.thread.full.concat(entry.depth),
+          stop: isLastChild ? entry.depth : -1,
+        },
+      });
+    });
   }
   return flat;
 }
@@ -58,4 +86,4 @@ function mergeCommentRecords<T extends { floor: number; current?: boolean }>(
 }
 
 export { buildReplyTree, flattenReplyTree, mergeCommentRecords };
-export type { FlatEntry };
+export type { FlatEntry, ThreadLines };

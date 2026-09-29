@@ -553,7 +553,7 @@ function createPostPageController({
       if (!this.list || appState.mode !== 'thread') return;
       const virtualizerOptions: VirtualizerSetupOptions = {
         getViewport: () => windowObj,
-        renderItem: (entry) => prepareCommentRecord(entry.record as unknown as CommentRecord, entry.depth ?? 0),
+        renderItem: (entry) => prepareCommentRecord(entry.record as unknown as CommentRecord, entry.depth ?? 0, entry.thread),
         onMount: (node, entry) => {
           const record = entry.record as unknown as CommentRecord;
           if (!record.current) {

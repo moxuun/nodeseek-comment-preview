@@ -1,16 +1,19 @@
 // 评论虚拟列表：保留完整评论记录，只把视口附近的楼层物化成 DOM。
 // 它不读取网络，也不改变楼层关系；帖子页和预览弹窗共用同一套窗口模型。
 
+import type { ThreadLines } from '../comments/thread.js';
+
 /** 楼层记录或楼层记录中虚拟列表关心的字段。 */
 interface VirtualEntryRecord {
   postId?: string | number | null;
   floor?: number | string | null;
 }
 
-/** 虚拟列表条目：`{ record, depth }`，`index` 由 `setEntries` 写入。 */
+/** 虚拟列表条目：`{ record, depth }`，`index` 由 `setEntries` 写入；`thread` 是 flattenReplyTree 附带的楼层关系线几何。 */
 interface CommentVirtualEntry extends VirtualEntryRecord {
   record?: VirtualEntryRecord | null;
   depth?: number;
+  thread?: ThreadLines | null;
   index?: number;
 }
 

@@ -1,5 +1,5 @@
 import { flattenReplyTree } from '../comments/thread.js';
-import type { FlatEntry } from '../comments/thread.js';
+import type { FlatEntry, ThreadLines } from '../comments/thread.js';
 import { SELECTORS, state } from '../core/config.js';
 import { clearElement, createElement, getCommentId, qs, qsa, safeCount } from '../core/dom.js';
 import { pageInfo } from '../core/runtime.js';
@@ -35,6 +35,23 @@ interface RenderRecordsOptions extends RenderStatusOptions {
 
 /** 挂载了虚拟列表实例的渲染容器。 */
 type RenderHost = HTMLElement & { __xnsVirtualizer?: CommentVirtualizer };
+
+/** 关系线的缩进步长、竖线宽度与最大层级（与 ui/style.ts 里的 --xns-indent 保持一致）。 */
+const THREAD_STEP = 18;
+const THREAD_LINE_WIDTH = 3;
+const THREAD_LEVEL_LIMIT = 8;
+
+/** 生成各层竖线的背景图：只画指定层级（x = 18k + 6，宽 3px），其余保持透明。 */
+function threadColumnImage(levels: number[]): string {
+  const unique = Array.from(new Set(levels.filter((level) => level >= 0 && level <= THREAD_LEVEL_LIMIT))).sort((a, b) => a - b);
+  if (!unique.length) return 'none';
+  const stops: string[] = [];
+  unique.forEach((level) => {
+    const x = level * THREAD_STEP + 6;
+    stops.push(`transparent ${x}px`, `var(--xns-thread-line) ${x}px`, `var(--xns-thread-line) ${x + THREAD_LINE_WIDTH}px`, `transparent ${x + THREAD_LINE_WIDTH}px`);
+  });
+  return `linear-gradient(to right, ${stops.join(', ')})`;
+}
 
 /** 渲染器依赖；测试可注入替身。 */
 interface PreviewRendererDeps {
@@ -136,15 +153,26 @@ function createPreviewRenderer({
     });
   }
 
-  /** 把层级相关的几何状态写到条目上：缩进、根/子/叶子标记（见 style.ts 的楼层关系线）。 */
-  function applyThreadGeometry(node: HTMLElement, record: CommentRecord, depth: number): void {
-    node.setAttribute('data-xns-depth', String(depth));
-    node.style.setProperty('--xns-indent', `${Math.min(8, Math.max(0, depth)) * 18}px`);
-    node.classList.toggle('xns-comment-root', depth === 0);
-    node.classList.toggle('xns-comment-child', depth > 0);
+  /**
+   * 把层级相关的几何状态写到条目上：缩进、根/子/叶子标记和关系线的竖线层（见 style.ts 的楼层关系线）。
+   * `thread` 来自 flattenReplyTree；缺少时（非虚拟列表路径）退回“所有祖先层都贯穿”，随后同步纠正。
+   */
+  function applyThreadGeometry(node: HTMLElement, record: CommentRecord, depth: number, thread?: ThreadLines | null): void {
+    const level = Math.min(THREAD_LEVEL_LIMIT, Math.max(0, depth));
+    node.setAttribute('data-xns-depth', String(level));
+    node.style.setProperty('--xns-indent', `${level * THREAD_STEP}px`);
+    node.classList.toggle('xns-comment-root', level === 0);
+    node.classList.toggle('xns-comment-child', level > 0);
     // 没有子楼层的嵌套条目只画“本层分支”的短横线；若也画本层竖线，相邻兄弟条目的
     // 竖线会首尾相接，看上去像上一条目还有后代。
-    node.classList.toggle('xns-comment-leaf', depth > 0 && !record.children?.length);
+    node.classList.toggle('xns-comment-leaf', level > 0 && !record.children?.length);
+    // 竖线分层：祖先里还有后续兄弟的层级贯穿整行，本层有子楼层时本层竖线也贯穿整行。
+    const full = thread ? thread.full : Array.from({ length: level }, (_, index) => index);
+    node.style.setProperty('--xns-thread-columns', threadColumnImage(record.children?.length ? full.concat(level) : full));
+    // 本条是父层最后一条子楼层：父层竖线不贯穿本行，只在横线处收口，否则没有后续兄弟也会垂出一条长线。
+    const stop = thread ? thread.stop : -1;
+    node.style.setProperty('--xns-thread-stop-x', `${(stop >= 0 ? stop : 0) * THREAD_STEP + 6}px`);
+    node.style.setProperty('--xns-thread-stop-width', stop >= 0 ? `${THREAD_LINE_WIDTH}px` : '0px');
   }
 
   /**
@@ -157,11 +185,11 @@ function createPreviewRenderer({
     qsa(thread, '.content-item[data-xns-depth]').forEach((row) => {
       const entry = byFloor.get(row.getAttribute('data-xns-floor') || '');
       if (!entry) return;
-      applyThreadGeometry(row as HTMLElement, entry.record, entry.depth);
+      applyThreadGeometry(row as HTMLElement, entry.record, entry.depth ?? 0, entry.thread);
     });
   }
 
-  function prepareCommentRecord(record: CommentRecord, depth: number): HTMLElement | null {
+  function prepareCommentRecord(record: CommentRecord, depth: number, thread?: ThreadLines | null): HTMLElement | null {
     const node = materializeCommentNode(record) as HTMLElement | null;
     if (!node) return null;
     stripRenderArtifacts(record.node);
@@ -170,20 +198,27 @@ function createPreviewRenderer({
       node.setAttribute('data-xns-remote', 'true');
       node.setAttribute('data-xns-source-page', String(record.page));
     }
-    applyThreadGeometry(node, record, depth);
+    applyThreadGeometry(node, record, depth, thread);
     if (depth > 0 && record.parent) node.setAttribute('data-xns-parent-floor', String(record.parent.floor));
     ensurePreviewMenu(node, { includeFavorite: false, counts: record.counts || undefined });
     ensurePreviewEditOption(node, record);
     return node;
   }
 
-  function appendNestedRecord(record: CommentRecord, container: Element, depth: number): void {
-    const node = prepareCommentRecord(record, depth);
+  function appendNestedRecord(record: CommentRecord, container: Element, depth: number, thread?: ThreadLines | null): void {
+    const node = prepareCommentRecord(record, depth, thread);
     if (!node) return;
     container.appendChild(node);
     if (!record.children.length) return;
     const replyList = createElement('ul', 'xns-reply-list');
-    record.children.forEach((child) => appendNestedRecord(child, replyList, depth + 1));
+    const full = thread ? thread.full : Array.from({ length: depth }, (_, index) => index);
+    record.children.forEach((child, index) => {
+      const isLastChild = index === record.children.length - 1;
+      appendNestedRecord(child, replyList, depth + 1, {
+        full: isLastChild ? full : full.concat(depth),
+        stop: isLastChild ? depth : -1,
+      });
+    });
     node.appendChild(replyList);
   }
 
@@ -285,7 +320,7 @@ function createPreviewRenderer({
         if (!record.current) record.node = null;
         options.onNodeUnmounted?.(node, record);
       };
-      const renderItem = (entry: CommentVirtualEntry): HTMLElement | null => prepareCommentRecord(entry.record as unknown as CommentRecord, entry.depth ?? 0);
+      const renderItem = (entry: CommentVirtualEntry): HTMLElement | null => prepareCommentRecord(entry.record as unknown as CommentRecord, entry.depth ?? 0, entry.thread);
       const virtualizerOptions: VirtualizerSetupOptions = {
         getViewport: () => thread.closest('.xns-modal-body') || windowObj,
         renderItem,
@@ -352,7 +387,7 @@ const xnsPreviewRenderer = createPreviewRenderer({
 });
 
 const buildPreviewPostNode = (parsed: Document | Element, info: RenderPostInfo): Element | null => xnsPreviewRenderer.buildPreviewPostNode(parsed, info);
-const prepareCommentRecord = (record: CommentRecord, depth: number): HTMLElement | null => xnsPreviewRenderer.prepareCommentRecord(record, depth);
+const prepareCommentRecord = (record: CommentRecord, depth: number, thread?: ThreadLines | null): HTMLElement | null => xnsPreviewRenderer.prepareCommentRecord(record, depth, thread);
 const syncThreadEntries = (thread: Element, entries: FlatEntry[]): void => xnsPreviewRenderer.syncThreadEntries(thread, entries);
 const renderPreviewRecords = (section: Element, info: RenderPostInfo, records: CommentRecord[], options?: RenderRecordsOptions): void => xnsPreviewRenderer.renderPreviewRecords(section, info, records, options);
 

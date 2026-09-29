@@ -55,17 +55,14 @@ function installStyle(): void {
            裁剪宽度 = 18d + 8，leaf 条目为 18(d-1) + 8（额外扣除本层 18px）；
          - 缩进步长 18px = renderer 的 --xns-indent 步长；缩进统一用 padding-left 表达，节点盒仍占满整行，
            竖线才能画在父层位置。 */
-      /* 楼层关系线（linux tree 风格）：每层一条 3px 竖线（同官方 blockquote 竖线宽度）+ 本层 18px 短横线接进上一层竖线。
-         - 竖线用 repeating-linear-gradient 每 18px 画一条（x = 18k + 6，宽 3px），再用 background-size 宽度裁到本层
-           （18d + 9px），于是 0..d 层的竖线都画在本行上：父层竖线贯穿整棵子树，不会只画一小段；
-         - 竖线上下各延伸 3px 跨过 3px 条目间隙，同层竖线在相邻条目间严丝合缝；
-         - 横线从上一层竖线右边缘（18(d-1) + 9）起、长 18px，接到本层竖线右边缘，高度对准第一行（作者/时间）的垂直中心；
-         - 本层竖线只在有条目子楼层时画（否则相邻兄弟条目的竖线会首尾相接，看上去像上一条目还有后代）：
-           裁剪宽度 = 18d + 9，leaf 条目为 18(d-1) + 9（额外扣除本层 18px）；
-         - 缩进步长 18px = renderer 的 --xns-indent 步长；缩进统一用 padding-left 表达，节点盒仍占满整行，
-           竖线才能画在父层位置。 */
-      .xns-comment-child { --xns-thread-branch: 9px; --xns-thread-elbow: 15px; margin:3px 0 0 !important; padding:7px 8px 6px calc(var(--xns-indent,0px) + 10px) !important; border:0 !important; border-radius:0 !important; background-color:transparent !important; background-image:repeating-linear-gradient(to right, transparent 0 6px, var(--xns-thread-line) 6px 9px, transparent 9px 18px), linear-gradient(var(--xns-thread-line), var(--xns-thread-line)) !important; background-repeat:no-repeat !important; background-size:calc(var(--xns-indent,0px) + var(--xns-thread-branch)) calc(100% + 6px), 18px 3px !important; background-position:0 -3px, calc(var(--xns-indent,0px) - 9px) var(--xns-thread-elbow) !important; }
-      .xns-comment-leaf { --xns-thread-branch: -9px; }
+      /* 楼层关系线（linux tree 风格）：逐层一条 3px 竖线（x = 18k + 6，同官方 blockquote 竖线宽度）+ 本层 18px 短横线接进父层竖线。
+         - 竖线由 JS（renderer.ts 的 applyThreadGeometry）按树结构生成背景图 --xns-thread-columns：
+           祖先里还有后续兄弟的层贯穿整行；本层有子楼层时本层竖线也贯穿整行；
+         - 竖线上下各溢出 3px 跨过 3px 条目间隙，同层竖线在相邻条目之间严丝合缝；
+         - 横线从父层竖线右边缘（18(d-1) + 9）起、长 18px，接到本层竖线右边缘，高度对准第一行（作者/时间）的垂直中心；
+         - 本条是父层最后一条子楼层时，父层竖线不贯穿本行，只用 --xns-thread-stop-* 画到横线处（否则没有后续兄弟还垂出一条长线）；
+         - 缩进步长 18px = renderer 的 THREAD_STEP；缩进统一用 padding-left 表达，节点盒仍占满整行，竖线才能画在父层位置。 */
+      .xns-comment-child { --xns-thread-elbow: 15px; margin:3px 0 0 !important; padding:7px 8px 6px calc(var(--xns-indent,0px) + 10px) !important; border:0 !important; border-radius:0 !important; background-color:transparent !important; background-image:var(--xns-thread-columns, none), linear-gradient(var(--xns-thread-line), var(--xns-thread-line)), linear-gradient(var(--xns-thread-line), var(--xns-thread-line)) !important; background-repeat:no-repeat !important; background-size:100% calc(100% + 6px), 18px 3px, var(--xns-thread-stop-width, 0px) 21px !important; background-position:0 -3px, calc(var(--xns-indent,0px) - 9px) var(--xns-thread-elbow), var(--xns-thread-stop-x, 0px) -3px !important; }
       .xns-reply-list { margin:6px 0 0 !important; padding:0 !important; list-style:none !important; }
       .xns-floor-highlight { animation:xns-floor-highlight 1.8s ease both; }
       @keyframes xns-floor-highlight { 0%,100%{box-shadow:none} 20%{box-shadow:0 0 0 4px rgba(46,163,79,.3)} }
