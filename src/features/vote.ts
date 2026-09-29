@@ -3,6 +3,46 @@ import { getActionContext } from './comment-actions.js';
 import { dynamicSign, postAction } from '../nodeseek/action-api.js';
 import { parseSameOriginUrl } from '../nodeseek/url.js';
 
+/** 投票选项；`count` 只在已结束/已公开的投票里出现。 */
+interface VoteItem {
+  count?: number;
+  voted?: boolean;
+  text?: string;
+  vote_item_id?: number | string;
+}
+
+/** 投票主体。 */
+interface VoteInfo {
+  id: number | string;
+  title?: string;
+  multiple?: boolean;
+  locked?: boolean;
+  isPublic?: boolean;
+  items?: VoteItem[];
+}
+
+/** `/api/vote/info/:id` 的响应。 */
+interface VoteInfoResponse {
+  success?: boolean;
+  message?: string;
+  vote?: VoteInfo;
+}
+
+/** 投票模块依赖；测试可注入替身。 */
+interface VoteFeatureDeps {
+  windowObj: Window & typeof globalThis;
+  documentObj: Document;
+  qs: typeof qs;
+  qsa: typeof qsa;
+  createElement: typeof createElement;
+  parseSameOriginUrl: typeof parseSameOriginUrl;
+  safePositiveInt: typeof safePositiveInt;
+  dynamicSign: typeof dynamicSign;
+  postAction: typeof postAction;
+  getActionContext: typeof getActionContext;
+  fetchFn: typeof fetch;
+}
+
 // 投票功能模块。
 // 投票的读取、选择态、结果态和提交由这里管理；普通评论 reaction 不与它共享 UI 状态。
 function createVoteFeature({
@@ -17,17 +57,17 @@ function createVoteFeature({
   postAction,
   getActionContext,
   fetchFn,
-}) {
-  function getVoteIdFromLink(link) {
+}: VoteFeatureDeps) {
+  function getVoteIdFromLink(link: Element): number | null {
     const href = link.getAttribute('data-href') || link.getAttribute('href') || '';
     const match = /nsapp:\/\/vote\?id=(\d+)/.exec(href);
     return match ? safePositiveInt(match[1]) : null;
   }
 
-  async function fetchVoteInfo(voteId) {
+  async function fetchVoteInfo(voteId: number): Promise<VoteInfoResponse> {
     const endpoint = parseSameOriginUrl(`/api/vote/info/${voteId}`);
     if (!endpoint) throw new Error('投票地址非法');
-    const headers = { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' };
+    const headers: Record<string, string> = { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' };
     if (windowObj.crypto?.subtle) headers['x-dynamic-sign'] = await dynamicSign('GET', endpoint.href, '');
     const response = await fetchFn(endpoint.href, {
       method: 'GET',
@@ -38,17 +78,17 @@ function createVoteFeature({
       headers,
     });
     const text = await response.text();
-    let data = null;
+    let data: VoteInfoResponse | null = null;
     try { data = text ? JSON.parse(text) : null; } catch { /* 非 JSON 响应 */ }
     if (!response.ok || !data || data.success === false) throw new Error(data?.message || `HTTP ${response.status}`);
     return data;
   }
 
-  function hasVoteResults(vote) {
+  function hasVoteResults(vote: VoteInfo): boolean {
     return (vote.items || []).some((item) => typeof item.count === 'number');
   }
 
-  function buildVoteResults(vote) {
+  function buildVoteResults(vote: VoteInfo): HTMLElement {
     const items = vote.items || [];
     const total = items.reduce((sum, item) => sum + (typeof item.count === 'number' ? item.count : 0), 0);
     const box = createElement('div', 'xns-vote-results');
@@ -58,7 +98,7 @@ function createVoteFeature({
       const row = createElement('div', `xns-vote-result${item.voted ? ' xns-vote-mine' : ''}`);
       row.appendChild(createElement('div', 'vote-item-text', item.text || ''));
       const barWrap = createElement('div', 'xns-vote-bar-wrap');
-      const bar = createElement('div', 'xns-vote-bar');
+      const bar = createElement('div', 'xns-vote-bar') as HTMLElement;
       bar.style.width = `${percent}%`;
       bar.appendChild(documentObj.createTextNode(`${percent}%`));
       barWrap.appendChild(bar);
@@ -70,10 +110,10 @@ function createVoteFeature({
     return box;
   }
 
-  function buildVotePanel(vote) {
-    const panel = createElement('div', 'vote-panel xns-vote-panel');
+  function buildVotePanel(vote: VoteInfo): HTMLElement {
+    const panel = createElement('div', 'vote-panel xns-vote-panel') as HTMLElement;
     panel.dataset.xnsVoteId = String(vote.id);
-    const title = createElement('h2', 'xns-vote-title', vote.title || '投票');
+    const title = createElement('h2', 'xns-vote-title', vote.title || '投票') as HTMLElement;
     title.style.textAlign = 'center';
     title.style.fontSize = '1.2rem';
     panel.appendChild(title);
@@ -99,7 +139,7 @@ function createVoteFeature({
     });
     panel.appendChild(wrapper);
     const buttons = createElement('fieldset', 'op-buttons');
-    const submit = createElement('button', 'pure-button pure-button-primary add-margin', vote.locked ? '已结束' : '投票');
+    const submit = createElement('button', 'pure-button pure-button-primary add-margin', vote.locked ? '已结束' : '投票') as HTMLButtonElement;
     submit.type = 'button';
     if (vote.locked) submit.setAttribute('disabled', '');
     buttons.appendChild(submit);
@@ -108,15 +148,15 @@ function createVoteFeature({
     return panel;
   }
 
-  function mountVotePanel(link, data) {
+  function mountVotePanel(link: Element, data: VoteInfoResponse | null): void {
     if (!link.isConnected) return;
     const vote = data?.vote;
     if (!vote || !Array.isArray(vote.items)) return;
     link.replaceWith(buildVotePanel(vote));
   }
 
-  function scheduleVoteInfo(link, voteId) {
-    const load = () => {
+  function scheduleVoteInfo(link: Element, voteId: number): void {
+    const load = (): void => {
       if (!link.isConnected) return;
       void fetchVoteInfo(voteId)
         .then((data) => mountVotePanel(link, data))
@@ -125,10 +165,10 @@ function createVoteFeature({
         });
     };
     if (typeof windowObj.IntersectionObserver === 'function') {
-      let observer;
+      let observer: IntersectionObserver | null = null;
       observer = new windowObj.IntersectionObserver((entries) => {
         if (!entries.some((entry) => entry.isIntersecting)) return;
-        observer.disconnect();
+        observer?.disconnect();
         load();
       }, { rootMargin: '600px 0px' });
       observer.observe(link);
@@ -138,16 +178,16 @@ function createVoteFeature({
     else windowObj.setTimeout(load, 0);
   }
 
-  function installPreviewVotePanels(root, options = {}) {
+  function installPreviewVotePanels(root: Element | null | undefined, options: { skipRemote?: boolean } = {}): void {
     const selector = '.xns-preview-content a[data-href^="nsapp://vote"], .xns-preview-content a[href^="nsapp://vote"]';
     const isPreviewRoot = root?.matches?.('.xns-preview-content') || root?.closest?.('.xns-preview-content');
     const relativeSelector = isPreviewRoot
       ? 'a[data-href^="nsapp://vote"], a[href^="nsapp://vote"]'
       : selector;
     const owner = root?.matches?.('.content-item') ? root : null;
-    const links = [];
-    if (root?.matches?.(selector)) links.push(root);
-    links.push(...qsa(root, relativeSelector));
+    const links: HTMLElement[] = [];
+    if (root?.matches?.(selector)) links.push(root as HTMLElement);
+    links.push(...qsa<HTMLAnchorElement>(root, relativeSelector));
     links.filter((link) => {
       if (owner && link.closest?.('.content-item') !== owner) return false;
       if (options.skipRemote && (link.matches?.('[data-xns-remote]') || link.closest?.('[data-xns-remote]'))) return false;
@@ -161,8 +201,8 @@ function createVoteFeature({
     });
   }
 
-  function getVoteStatus(panel) {
-    let status = qs(panel, '.xns-vote-status');
+  function getVoteStatus(panel: Element): HTMLElement {
+    let status: HTMLElement | null = qs(panel, '.xns-vote-status');
     if (!status) {
       status = createElement('div', 'xns-vote-status');
       panel.appendChild(status);
@@ -170,17 +210,18 @@ function createVoteFeature({
     return status;
   }
 
-  function handleVoteClick(event) {
-    const button = event.target.closest?.('.xns-vote-panel button');
+  function handleVoteClick(event: Event): void {
+    const eventTarget = event.target as Partial<Element> | null;
+    const button = (eventTarget?.closest?.('.xns-vote-panel button') as HTMLButtonElement | undefined) || null;
     if (!button || button.disabled) return;
-    const panel = button.closest('.xns-vote-panel');
+    const panel = button.closest('.xns-vote-panel') as HTMLElement | null;
     if (!panel || panel.dataset.xnsVotePending === 'true') return;
     const inPreview = Boolean(panel.closest('.xns-overlay .xns-preview-content'));
     const inRemote = Boolean(panel.closest('[data-xns-remote]'));
     if (!inPreview && !inRemote) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    const selected = qsa(panel, 'input[name="vote-item"]:checked').map((input) => input.value);
+    const selected = qsa<HTMLInputElement>(panel, 'input[name="vote-item"]:checked').map((input) => input.value);
     const status = getVoteStatus(panel);
     if (!selected.length) {
       status.textContent = '请先选择选项。';
@@ -192,7 +233,7 @@ function createVoteFeature({
     const voteId = safePositiveInt(panel.dataset.xnsVoteId || '');
     void postAction('/api/vote/voteforitem', { ids: selected.map((value) => Number(value)) }, { context: getActionContext(button) })
       .then(async () => {
-        let refreshed = null;
+        let refreshed: VoteInfoResponse | null = null;
         if (voteId !== null) {
           try { refreshed = await fetchVoteInfo(voteId); } catch { /* 保留成功提示 */ }
         }
@@ -204,8 +245,8 @@ function createVoteFeature({
           button.textContent = '已投票';
         }
       })
-      .catch((error) => {
-        status.textContent = `投票失败：${error.message || '网络错误'}`;
+      .catch((error: unknown) => {
+        status.textContent = `投票失败：${(error as Error)?.message || '网络错误'}`;
         button.removeAttribute('disabled');
         panel.dataset.xnsVotePending = '';
       });
@@ -227,8 +268,8 @@ const xnsVoteFeature = createVoteFeature({
   getActionContext,
   fetchFn: window.fetch.bind(window),
 });
-function installPreviewVotePanels(...args) { return xnsVoteFeature.installPreviewVotePanels(...args); }
-function handleVoteClick(...args) { return xnsVoteFeature.handleVoteClick(...args); }
-function fetchVoteInfo(...args) { return xnsVoteFeature.fetchVoteInfo(...args); }
+const installPreviewVotePanels = (root: Element | null | undefined, options?: { skipRemote?: boolean }): void => xnsVoteFeature.installPreviewVotePanels(root, options);
+const handleVoteClick = (event: Event): void => xnsVoteFeature.handleVoteClick(event);
 
 export { handleVoteClick, installPreviewVotePanels };
+export type { VoteInfo, VoteItem, VoteInfoResponse };

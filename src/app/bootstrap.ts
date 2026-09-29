@@ -10,6 +10,41 @@ import { handleFloorClick } from '../preview/navigation.js';
 import { registerSettingsMenu } from '../ui/settings.js';
 import { installStyle } from '../ui/style.js';
 
+/** 帖子页增强器对外使用的两个方法（实现仍在 post-page controller 里）。 */
+interface PostEnhancerLike {
+  init: () => Promise<unknown>;
+  restoreOriginal: () => void;
+}
+
+/** 启动依赖：全部由入口注入，测试可替换。 */
+interface AppBootstrapDeps {
+  documentObj: Document;
+  windowObj: Window & typeof globalThis;
+  pageInfo: typeof pageInfo;
+  state: { post: unknown };
+  installStyle: () => void;
+  registerSettingsMenu: () => void;
+  createPreviewEntryController: (options: {
+    document: Document;
+    location: Location;
+    parseSameOriginUrl: typeof parseSameOriginUrl;
+    getPostInfo: typeof getPostInfo;
+    openPreviewModal: unknown;
+  }) => { handle: (event: Event) => void };
+  createFloorNavigationController: (options: {
+    enabled: boolean;
+    handleFloorClick: (event: Event) => void;
+  }) => { handle: (event: Event) => void };
+  parseSameOriginUrl: typeof parseSameOriginUrl;
+  getPostInfo: typeof getPostInfo;
+  openPreviewModal: unknown;
+  handleFloorClick: (event: Event) => void;
+  handlePreviewActionClick: (event: Event) => void;
+  handleVoteClick: (event: Event) => void;
+  handleKeydown: (event: KeyboardEvent) => void;
+  PostEnhancer: new (options: NonNullable<typeof pageInfo>) => PostEnhancerLike;
+}
+
 // 应用启动：集中注册事件并在 DOM ready 后初始化帖子页增强。
 function createAppBootstrap({
   documentObj,
@@ -28,8 +63,8 @@ function createAppBootstrap({
   handleVoteClick,
   handleKeydown,
   PostEnhancer,
-}) {
-  function start() {
+}: AppBootstrapDeps) {
+  function start(): void {
     installStyle();
     registerSettingsMenu();
     const previewEntry = createPreviewEntryController({
@@ -49,10 +84,11 @@ function createAppBootstrap({
     documentObj.addEventListener('click', floorNavigation.handle, true);
     documentObj.addEventListener('keydown', handleKeydown, true);
 
-    const ready = () => {
+    const ready = (): void => {
       if (!pageInfo || state.post) return;
-      state.post = new PostEnhancer(pageInfo);
-      state.post.init().catch(() => state.post?.restoreOriginal());
+      const enhancer = new PostEnhancer(pageInfo);
+      state.post = enhancer;
+      void enhancer.init().catch(() => enhancer.restoreOriginal());
     };
     if (documentObj.readyState === 'loading') documentObj.addEventListener('DOMContentLoaded', ready, { once: true });
     else ready();

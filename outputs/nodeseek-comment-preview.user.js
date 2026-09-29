@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.73
+// @version      0.5.74
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -3222,10 +3222,10 @@
 				});
 			};
 			if (typeof windowObj.IntersectionObserver === "function") {
-				let observer;
+				let observer = null;
 				observer = new windowObj.IntersectionObserver((entries) => {
 					if (!entries.some((entry) => entry.isIntersecting)) return;
-					observer.disconnect();
+					observer?.disconnect();
 					load();
 				}, { rootMargin: "600px 0px" });
 				observer.observe(link);
@@ -3262,7 +3262,7 @@
 			return status;
 		}
 		function handleVoteClick(event) {
-			const button = event.target.closest?.(".xns-vote-panel button");
+			const button = event.target?.closest?.(".xns-vote-panel button") || null;
 			if (!button || button.disabled) return;
 			const panel = button.closest(".xns-vote-panel");
 			if (!panel || panel.dataset.xnsVotePending === "true") return;
@@ -3293,7 +3293,7 @@
 					button.textContent = "已投票";
 				}
 			}).catch((error) => {
-				status.textContent = `投票失败：${error.message || "网络错误"}`;
+				status.textContent = `投票失败：${error?.message || "网络错误"}`;
 				button.removeAttribute("disabled");
 				panel.dataset.xnsVotePending = "";
 			});
@@ -3317,12 +3317,8 @@
 		getActionContext,
 		fetchFn: window.fetch.bind(window)
 	});
-	function installPreviewVotePanels(...args) {
-		return xnsVoteFeature.installPreviewVotePanels(...args);
-	}
-	function handleVoteClick(...args) {
-		return xnsVoteFeature.handleVoteClick(...args);
-	}
+	var installPreviewVotePanels = (root, options) => xnsVoteFeature.installPreviewVotePanels(root, options);
+	var handleVoteClick = (event) => xnsVoteFeature.handleVoteClick(event);
 	function createPreviewLightbox({ documentObj, state, qsa, createElement, getSafeUrlAttribute }) {
 		function getPreviewImageSource(image) {
 			const link = image?.closest("a[href]");
@@ -18343,8 +18339,9 @@
 			documentObj.addEventListener("keydown", handleKeydown, true);
 			const ready = () => {
 				if (!pageInfo || state.post) return;
-				state.post = new PostEnhancer(pageInfo);
-				state.post.init().catch(() => state.post?.restoreOriginal());
+				const enhancer = new PostEnhancer(pageInfo);
+				state.post = enhancer;
+				enhancer.init().catch(() => enhancer.restoreOriginal());
 			};
 			if (documentObj.readyState === "loading") documentObj.addEventListener("DOMContentLoaded", ready, { once: true });
 			else ready();
