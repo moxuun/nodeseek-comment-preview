@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.63
+// @version      0.5.64
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -2632,7 +2632,7 @@
 		}
 		function hasOwnEditOption(item) {
 			if (!item?.querySelector) return false;
-			return qsa(item, ":scope > .comment-menu > .menu-item, :scope > .comment-actions > .menu-item").some((el) => (el.textContent || "").trim() === "编辑" && !el.dataset?.xnsAction);
+			return qsa(item, ":scope > .comment-menu > .menu-item, :scope > .comment-actions > .menu-item").some((el) => (el.textContent || "").trim() === "编辑" && !el.getAttribute("data-xns-action"));
 		}
 		function getCommentAuthorUid(item) {
 			try {
@@ -2651,7 +2651,7 @@
 			const floor = getFloor(item);
 			if (floor === null) return null;
 			const node = current ? item : sanitizeImportedNode(item, {
-				...options,
+				keepCommentMenu: options.keepCommentMenu,
 				deferImages: true
 			});
 			if (!node) return null;
@@ -2703,11 +2703,12 @@
 			if (!stateValue || typeof stateValue !== "object") return null;
 			let index = ssrCommentIndexes.get(stateValue);
 			if (!index) {
-				index = new Map();
+				const built = new Map();
 				const comments = stateValue?.postData?.comments;
 				if (Array.isArray(comments)) comments.forEach((item) => {
-					if (item?.commentId !== void 0 && item?.commentId !== null && !index.has(String(item.commentId))) index.set(String(item.commentId), item);
+					if (item?.commentId !== void 0 && item?.commentId !== null && !built.has(String(item.commentId))) built.set(String(item.commentId), item);
 				});
+				index = built;
 				ssrCommentIndexes.set(stateValue, index);
 			}
 			const comment = index.get(String(commentId));
@@ -2734,7 +2735,7 @@
 			getSsrCommentCounts
 		});
 	}
-	var xnsContentParser = createContentParser({
+	var { getCommentRecord, getSsrCommentCounts, materializeCommentNode, releaseCommentNode } = createContentParser({
 		documentObj: document,
 		qs,
 		qsa,
@@ -2747,18 +2748,6 @@
 		getPostContent,
 		getCurrentUserUid
 	});
-	function getCommentRecord(...args) {
-		return xnsContentParser.getCommentRecord(...args);
-	}
-	function materializeCommentNode(...args) {
-		return xnsContentParser.materializeCommentNode(...args);
-	}
-	function releaseCommentNode(...args) {
-		return xnsContentParser.releaseCommentNode(...args);
-	}
-	function getSsrCommentCounts(...args) {
-		return xnsContentParser.getSsrCommentCounts(...args);
-	}
 	function createHttpClient({ windowObj, fetchFn, AbortControllerCtor, DOMParserCtor, requestTimeout, maxResponseBytes, isAllowedPostRequest, parseSameOriginUrl, extractSsrState, cacheTtl, cacheMaxEntries, cacheMaxBytes, cacheItemMaxBytes }) {
 		const htmlCache = new Map();
 		let htmlCacheBytes = 0;

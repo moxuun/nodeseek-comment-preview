@@ -4,6 +4,73 @@ import { sanitizeImportedNode } from './sanitize';
 import { getPostInfo, parseSameOriginUrl } from './url.js';
 
 // NodeSeek 页面内容解析与安全克隆；输出供预览和帖子页共用的评论记录。
+
+interface ReplyMetadata {
+  targetFloor: number;
+  targetUser: string;
+}
+
+interface SsrCommentCounts {
+  like: number | null;
+  chicken: number | null;
+  dislike: number | null;
+  liked: boolean;
+  chickened: boolean;
+  disliked: boolean;
+}
+
+interface CommentRecord {
+  floor: number;
+  page: number;
+  postId: string;
+  index: number;
+  current: boolean;
+  isMine: boolean;
+  pinned: boolean;
+  author: string;
+  reply: ReplyMetadata | null;
+  counts: SsrCommentCounts | null;
+  node: Element | null;
+  html: string | null;
+  parent: CommentRecord | null;
+  children: CommentRecord[];
+}
+
+interface SsrCommentEntry {
+  commentId?: string | number | null;
+  upvoteCount?: unknown;
+  likeCount?: unknown;
+  dislikeCount?: unknown;
+  upvoted?: unknown;
+  liked?: unknown;
+  disliked?: unknown;
+}
+
+interface SsrState {
+  postData?: { comments?: SsrCommentEntry[] };
+  user?: Record<string, unknown>;
+}
+
+interface CommentRecordOptions {
+  keepCommentMenu?: boolean;
+  state?: SsrState | null;
+  getCurrentUserUid?: () => string | null;
+}
+
+interface ContentParserDeps {
+  documentObj: Document;
+  qs: (root: ParentNode | null | undefined, selector: string) => Element | null;
+  qsa: (root: ParentNode | null | undefined, selector: string) => Element[];
+  parseSameOriginUrl: (rawUrl: string, base?: string) => URL | null;
+  getPostInfo: (rawUrl: string) => { postId: string; page: number } | null;
+  safePositiveInt: (value: unknown) => number | null;
+  getFloor: (item: Element | null | undefined) => number | null;
+  getCommentId: (item: Element | null | undefined) => number | null;
+  getAuthorName: (item: Element) => string;
+  getPostContent: (item: Element) => Element | null;
+  getCurrentUserUid: () => string | null;
+}
+
 function createContentParser({
   documentObj,
   qs,
@@ -16,10 +83,10 @@ function createContentParser({
   getAuthorName,
   getPostContent,
   getCurrentUserUid,
-}) {
-const ssrCommentIndexes = new WeakMap();
+}: ContentParserDeps) {
+const ssrCommentIndexes = new WeakMap<object, Map<string, SsrCommentEntry>>();
 
-function extractReplyMetadata(item, postId) {
+function extractReplyMetadata(item: Element, postId: string): ReplyMetadata | null {
   const content = getPostContent(item);
   const firstParagraph = content?.querySelector(':scope > p:first-child');
   const firstText = firstParagraph?.textContent?.trim() || '';
@@ -36,17 +103,17 @@ function extractReplyMetadata(item, postId) {
   return { targetFloor, targetUser: match[1].slice(0, 80) };
 }
 
-function isPinnedComment(item) {
+function isPinnedComment(item: Element): boolean {
   return Boolean(qs(item, '.nsk-content-meta-info .hot-badge, .nsk-content-meta-info .pined-comment-badge, .nsk-content-meta-info [title="置顶"], .nsk-content-meta-info [title*="HOT"], .nsk-content-meta-info [class*="hot"]'));
 }
 
-function hasOwnEditOption(item) {
+function hasOwnEditOption(item: Element | null | undefined): boolean {
   if (!item?.querySelector) return false;
   return qsa(item, ':scope > .comment-menu > .menu-item, :scope > .comment-actions > .menu-item')
-    .some((el) => (el.textContent || '').trim() === '编辑' && !el.dataset?.xnsAction);
+    .some((el) => (el.textContent || '').trim() === '编辑' && !el.getAttribute('data-xns-action'));
 }
 
-function getCommentAuthorUid(item) {
+function getCommentAuthorUid(item: Element): string | null {
   try {
     const author = qs(item, '.nsk-content-meta-info a[href*="/space/"], .author-name, a[href*="/space/"]');
     const match = (author?.getAttribute('href') || '').match(/\/space\/(\d+)/);
@@ -54,16 +121,16 @@ function getCommentAuthorUid(item) {
   } catch { return null; }
 }
 
-function getStateUserUid(state) {
+function getStateUserUid(state: SsrState | null | undefined): string | null {
   const user = state?.user;
   const value = user && (user.id ?? user.uid ?? user.userId ?? user.memberId ?? user.member_id);
   return value === undefined || value === null ? null : String(value);
 }
 
-function getCommentRecord(item, postId, page, index, current, options = {}) {
+function getCommentRecord(item: Element, postId: string, page: number, index: number, current: boolean, options: CommentRecordOptions = {}): CommentRecord | null {
   const floor = getFloor(item);
   if (floor === null) return null;
-  const node = current ? item : sanitizeImportedNode(item, { ...options, deferImages: true });
+  const node = current ? item : sanitizeImportedNode(item, { keepCommentMenu: options.keepCommentMenu, deferImages: true });
   if (!node) return null;
   const commentId = getCommentId(item);
   const currentUserUid = (typeof options.getCurrentUserUid === 'function' ? options.getCurrentUserUid() : getCurrentUserUid())
@@ -83,7 +150,7 @@ function getCommentRecord(item, postId, page, index, current, options = {}) {
   };
 }
 
-function materializeCommentNode(record) {
+function materializeCommentNode(record: CommentRecord | null | undefined): Element | null {
   if (record?.node) return record.node;
   if (typeof record?.html !== 'string' || !record.html) return null;
   const template = documentObj.createElement('template');
@@ -95,8 +162,8 @@ function materializeCommentNode(record) {
 
 // 远端评论进入活动窗口时必须先恢复图片源地址，再交给图片灯箱/内容增强绑定事件。
 // 否则节点虽然已经物化，浏览器仍会把 data-xns-deferred-src 当作没有 src，显示破图占位。
-function restoreDeferredImageSources(root) {
-  const images = [];
+function restoreDeferredImageSources(root: Element | null): void {
+  const images: Element[] = [];
   if (root?.localName === 'img') images.push(root);
   images.push(...qsa(root, 'img[data-xns-deferred-src]'));
   images.forEach((image) => {
@@ -106,27 +173,28 @@ function restoreDeferredImageSources(root) {
   });
 }
 
-function releaseCommentNode(record) {
+function releaseCommentNode(record: CommentRecord | null | undefined): void {
   if (record && !record.current) record.node = null;
 }
 
-function releaseCommentHtml(record) {
+function releaseCommentHtml(record: CommentRecord | null | undefined): void {
   if (record && !record.current && record.node) record.html = null;
 }
 
-function getSsrCommentCounts(stateValue, commentId) {
+function getSsrCommentCounts(stateValue: SsrState | null | undefined, commentId: number): SsrCommentCounts | null {
   if (!stateValue || typeof stateValue !== 'object') return null;
   let index = ssrCommentIndexes.get(stateValue);
   if (!index) {
-    index = new Map();
+    const built = new Map<string, SsrCommentEntry>();
     const comments = stateValue?.postData?.comments;
     if (Array.isArray(comments)) {
       comments.forEach((item) => {
-        if (item?.commentId !== undefined && item?.commentId !== null && !index.has(String(item.commentId))) {
-          index.set(String(item.commentId), item);
+        if (item?.commentId !== undefined && item?.commentId !== null && !built.has(String(item.commentId))) {
+          built.set(String(item.commentId), item);
         }
       });
     }
+    index = built;
     ssrCommentIndexes.set(stateValue, index);
   }
   const comment = index.get(String(commentId));
@@ -164,14 +232,6 @@ const xnsContentParser = createContentParser({
   getPostContent,
   getCurrentUserUid,
 });
-function extractReplyMetadata(...args) { return xnsContentParser.extractReplyMetadata(...args); }
-function isPinnedComment(...args) { return xnsContentParser.isPinnedComment(...args); }
-function hasOwnEditOption(...args) { return xnsContentParser.hasOwnEditOption(...args); }
-function getCommentAuthorUid(...args) { return xnsContentParser.getCommentAuthorUid(...args); }
-function getCommentRecord(...args) { return xnsContentParser.getCommentRecord(...args); }
-function materializeCommentNode(...args) { return xnsContentParser.materializeCommentNode(...args); }
-function releaseCommentNode(...args) { return xnsContentParser.releaseCommentNode(...args); }
-function releaseCommentHtml(...args) { return xnsContentParser.releaseCommentHtml(...args); }
-function getSsrCommentCounts(...args) { return xnsContentParser.getSsrCommentCounts(...args); }
+const { getCommentRecord, getSsrCommentCounts, materializeCommentNode, releaseCommentNode } = xnsContentParser;
 
 export { getCommentRecord, getSsrCommentCounts, materializeCommentNode, releaseCommentNode, sanitizeImportedNode };
