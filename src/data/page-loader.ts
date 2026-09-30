@@ -4,7 +4,7 @@ import { getCommentItems } from '../core/dom.js';
 import { getMaxPage } from '../core/preferences.js';
 import { getCommentRecord } from '../nodeseek/content-parser.js';
 import type { CommentRecord, CommentRecordOptions, SsrState } from '../nodeseek/content-parser.js';
-import { fetchHtml, parseHtml } from '../nodeseek/http.js';
+import { fetchHtml, isAbortError, parseHtml } from '../nodeseek/http.js';
 import { getCurrentUserUid } from '../nodeseek/identity.js';
 import { getPageNumbers } from '../nodeseek/pagination.js';
 import { getDocState } from '../nodeseek/ssr-state.js';
@@ -164,8 +164,9 @@ function createPageLoader({
     const countedLoadedPages = (): number => Array.from(loadedPages).filter((page) => page >= 1 && page <= pageLimit).length;
     const pages = new Set<number>([info.page]);
     const discovered = getPageNumbers(firstDocument, info.postId);
-    const totalPages = discovered.size ? Math.max(...discovered, info.page) : info.page;
-    const truncated = totalPages > pageLimit;
+    let totalPages = discovered.size ? Math.max(...discovered, info.page) : info.page;
+    // 截断状态跟着后续发现的分页变：首页可能还没列出后面的页码。
+    let truncated = totalPages > pageLimit;
 
     if (onlyPages) {
       onlyPages.forEach((page) => pages.add(page));
@@ -188,10 +189,13 @@ function createPageLoader({
 
     const pending = Array.from(pages).sort((a, b) => a - b);
     const requestGate = createRequestGate(options.requestGapMs ?? requestGapMs);
+    // 取消有两个来源：AbortSignal（关窗、重新加载）与 isAborted 回调。HTTP 层只能看到 signal，
+    // 聚合层两个都要看，否则取消后 worker 会把剩下的页逐一记成“读取失败”。
+    const isCancelled = (): boolean => Boolean(options.signal?.aborted || options.isAborted?.());
     options.onPageLoaded?.(info.page, firstDocument, progressState());
     const worker = async (): Promise<void> => {
       while (pending.length) {
-        if (options.isAborted?.()) return;
+        if (isCancelled()) return;
         const page = pending.shift();
         if (page === undefined || loadedPages.has(page)) continue;
         try {
@@ -214,9 +218,16 @@ function createPageLoader({
                 pages.add(foundPage);
                 pending.push(foundPage);
               }
+              // 后面的分页可能比首页列出的更多：总数与截断状态跟着变大。
+              if (foundPage > totalPages) {
+                totalPages = foundPage;
+                truncated = totalPages > pageLimit;
+              }
             });
           }
         } catch (error) {
+          // 取消不是这一页读取失败：不记失败、不触发失败回调，也不再取后面的页。
+          if (isCancelled() || isAbortError(error)) return;
           const code = (error as { code?: unknown } | null)?.code;
           failedPages.add(page);
           if (code === 'CLOUDFLARE_CHALLENGE') challengePages.add(page);

@@ -60,6 +60,13 @@ function createHttpClient({
 }: HttpClientDeps) {
   const htmlCache = new Map<string, HtmlCacheEntry>();
   let htmlCacheBytes = 0;
+  // 每个帖子的失效代次：写操作（投票/收藏/回复/编辑）成功后 +1。
+  // 请求发出时记住代次，写缓存前再比一次，避免“失效前已经发出的旧请求”把旧 HTML 写回缓存。
+  const postCacheGenerations = new Map<string, number>();
+
+  function postCacheGeneration(postId: string): number {
+    return postCacheGenerations.get(postId) || 0;
+  }
 
   function removeCacheEntry(key: string): void {
     const entry = htmlCache.get(key);
@@ -88,6 +95,7 @@ function createHttpClient({
   function invalidatePostCacheForPost(postId: string | number): void {
     const key = String(postId ?? '');
     if (!key) return;
+    postCacheGenerations.set(key, postCacheGeneration(key) + 1);
     Array.from(htmlCache.entries()).forEach(([entryKey, entry]) => {
       if (entry.postId === key) removeCacheEntry(entryKey);
     });
@@ -179,6 +187,8 @@ function createHttpClient({
     if (!url || !isAllowedPostRequest(url)) throw new Error('只允许读取同一站点的帖子页面');
     const noStore = options.noStore === true;
     const allowCache = options.allowCache === true && !noStore;
+    const cachePostId = postIdFromUrl(url);
+    const cacheGeneration = postCacheGeneration(cachePostId);
     if (noStore) invalidatePostCache(url);
     if (allowCache) {
       const cached = readCachedHtml(url);
@@ -221,7 +231,7 @@ function createHttpClient({
         if (Number.isFinite(contentLength) && contentLength > maxResponseBytes) throw new Error('响应过大');
         const html = await response.text();
         if (!html || html.length > maxResponseBytes) throw new Error('响应过大或为空');
-        if (allowCache) writeCachedHtml(responseUrl, html);
+        if (allowCache && postCacheGeneration(cachePostId) === cacheGeneration) writeCachedHtml(responseUrl, html);
         return { html, url: responseUrl };
       } catch (error) {
         let failure = error as HttpError;
@@ -231,7 +241,8 @@ function createHttpClient({
         // 超时：换成可重试、可提示的错误，否则会被当成取消而默默丢弃。
         if (timedOut && failure.name === 'AbortError') failure = createTimeoutError();
         if (attempt < 3 && failure.name !== 'AbortError') {
-          await new Promise((resolve) => windowObj.setTimeout(resolve, 600 * attempt));
+          // 用可取消的等待：关窗/重新加载后不再占着这次加载。
+          await wait(600 * attempt, options.signal);
           continue;
         }
         throw failure;

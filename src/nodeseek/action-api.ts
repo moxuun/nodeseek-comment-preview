@@ -64,7 +64,13 @@ function createNodeSeekActionApi({ windowObj, navigatorObj, state, requestTimeou
     if (!endpoint || !allowedPaths.has(endpoint.pathname)) throw new Error('操作地址不是 NodeSeek 同源接口');
 
     const controller = new AbortControllerCtor();
-    const timer = windowObj.setTimeout(() => controller.abort(), requestTimeout);
+    // 写请求自己的超时与“调用方取消”必须分开：写操作可能已经落到服务端，
+    // 只是客户端没拿到响应，不能当成取消静静扔掉。
+    let timedOut = false;
+    const timer = windowObj.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, requestTimeout);
     const bodyText = JSON.stringify(payload);
     const requestHeaders: Record<string, string> = {
       Accept: 'application/json, text/plain, */*',
@@ -102,6 +108,15 @@ function createNodeSeekActionApi({ windowObj, navigatorObj, state, requestTimeou
         throw new Error(message || `HTTP ${response.status}`);
       }
       return data;
+    } catch (error) {
+      // 写请求超时：服务端可能已经写入成功，提示用户去确认，并且不自动重试
+      // （重复提交可能变成两条回复）。
+      if (timedOut) {
+        const timeoutError: Error = new Error(`请求超时（超过 ${Math.round(requestTimeout / 1000)} 秒），操作可能已经完成，请刷新确认`);
+        timeoutError.name = 'TimeoutError';
+        throw timeoutError;
+      }
+      throw error;
     } finally {
       windowObj.clearTimeout(timer);
     }

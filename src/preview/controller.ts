@@ -716,6 +716,13 @@ function createPreviewController({
       clearElement(modal.body);
       modal.body.appendChild(createElement('p', 'xns-loading', loadingText));
     }
+    // preserveContent 时新内容是在脱离文档的状态下渲染的：在它真正挂到 modal.body 之前，
+    // 销毁责任属于本次加载（关闭弹窗只销毁 modal.body 里的列表，碰不到这份内容）。
+    let pendingContent: Element | null = null;
+    const discardPendingContent = (): void => {
+      if (pendingContent && !pendingContent.isConnected) destroyVirtualLists(pendingContent);
+      pendingContent = null;
+    };
     try {
       const response = await fetchHtml(modal.url, { noStore: fresh, allowCache: !fresh, signal: requestController?.signal });
       const parsed = parseHtml(response.html);
@@ -730,9 +737,13 @@ function createPreviewController({
           if (currentModal() === modal && !modal.loading) void retryPreviewPages(modal);
         },
       });
+      pendingContent = preview.content;
       let hydratedPreview: LoadPreviewResult | null = null;
       if (preserveContent && preview.hydrate) hydratedPreview = await preview.hydrate;
-      if (currentModal() !== modal || modal.loadGeneration !== generation) return false;
+      if (currentModal() !== modal || modal.loadGeneration !== generation) {
+        discardPendingContent();
+        return false;
+      }
       const scrollSnapshot = preserveContent ? capturePreviewScroll(modal.body) : null;
       modal.title.textContent = preview.title || 'NodeSeek 帖子预览';
       updatePreviewHeaderMeta(modal, preview.headerMeta);
@@ -740,6 +751,8 @@ function createPreviewController({
       destroyVirtualLists(modal.body);
       clearElement(modal.body);
       modal.body.appendChild(preview.content);
+      // 已挂到 modal.body：之后由弹窗的关闭/刷新路径负责销毁。
+      pendingContent = null;
       if (modal.composer && !modal.composer.isConnected) modal.body.appendChild(modal.composer);
       const previewPost = qs(modal.body, '.xns-preview-post');
       if (previewPost) installPreviewFeatures(previewPost);
@@ -757,6 +770,8 @@ function createPreviewController({
       }
       if (preserveContent) stabilizePreviewScroll(modal, scrollSnapshot, generation);
     } catch (error) {
+      // 取消或失败时把还没被接管的新内容一并清掉，别留下没人引用的虚拟列表与 observer。
+      discardPendingContent();
       // 取消刷新不是失败，不要弹错误状态。
       if (!isAbortError(error) && currentModal() === modal && modal.loadGeneration === generation) {
         if (preserveContent) showPreviewRefreshError(modal, error);

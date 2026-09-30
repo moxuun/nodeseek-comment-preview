@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.92
+// @version      0.5.93
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -262,7 +262,11 @@
 			const endpoint = parseSameOriginUrl(apiPath, contextUrl);
 			if (!endpoint || !allowedPaths.has(endpoint.pathname)) throw new Error("操作地址不是 NodeSeek 同源接口");
 			const controller = new AbortControllerCtor();
-			const timer = windowObj.setTimeout(() => controller.abort(), requestTimeout);
+			let timedOut = false;
+			const timer = windowObj.setTimeout(() => {
+				timedOut = true;
+				controller.abort();
+			}, requestTimeout);
 			const bodyText = JSON.stringify(payload);
 			const requestHeaders = {
 				Accept: "application/json, text/plain, */*",
@@ -297,6 +301,13 @@
 					throw new Error(message || `HTTP ${response.status}`);
 				}
 				return data;
+			} catch (error) {
+				if (timedOut) {
+					const timeoutError = new Error(`请求超时（超过 ${Math.round(requestTimeout / 1e3)} 秒），操作可能已经完成，请刷新确认`);
+					timeoutError.name = "TimeoutError";
+					throw timeoutError;
+				}
+				throw error;
 			} finally {
 				windowObj.clearTimeout(timer);
 			}
@@ -375,6 +386,10 @@
 	function createHttpClient({ windowObj, fetchFn, AbortControllerCtor, DOMParserCtor, requestTimeout, maxResponseBytes, isAllowedPostRequest, parseSameOriginUrl, extractSsrState, cacheTtl, cacheMaxEntries, cacheMaxBytes, cacheItemMaxBytes }) {
 		const htmlCache = new Map();
 		let htmlCacheBytes = 0;
+		const postCacheGenerations = new Map();
+		function postCacheGeneration(postId) {
+			return postCacheGenerations.get(postId) || 0;
+		}
 		function removeCacheEntry(key) {
 			const entry = htmlCache.get(key);
 			if (!entry) return;
@@ -395,6 +410,7 @@
 		function invalidatePostCacheForPost(postId) {
 			const key = String(postId ?? "");
 			if (!key) return;
+			postCacheGenerations.set(key, postCacheGeneration(key) + 1);
 			Array.from(htmlCache.entries()).forEach(([entryKey, entry]) => {
 				if (entry.postId === key) removeCacheEntry(entryKey);
 			});
@@ -481,6 +497,8 @@
 			if (!url || !isAllowedPostRequest(url)) throw new Error("只允许读取同一站点的帖子页面");
 			const noStore = options.noStore === true;
 			const allowCache = options.allowCache === true && !noStore;
+			const cachePostId = postIdFromUrl(url);
+			const cacheGeneration = postCacheGeneration(cachePostId);
 			if (noStore) invalidatePostCache(url);
 			if (allowCache) {
 				const cached = readCachedHtml(url);
@@ -525,7 +543,7 @@
 					if (Number.isFinite(contentLength) && contentLength > maxResponseBytes) throw new Error("响应过大");
 					const html = await response.text();
 					if (!html || html.length > maxResponseBytes) throw new Error("响应过大或为空");
-					if (allowCache) writeCachedHtml(responseUrl, html);
+					if (allowCache && postCacheGeneration(cachePostId) === cacheGeneration) writeCachedHtml(responseUrl, html);
 					return {
 						html,
 						url: responseUrl
@@ -536,7 +554,7 @@
 					if (options.signal?.aborted) throw failure;
 					if (timedOut && failure.name === "AbortError") failure = createTimeoutError();
 					if (attempt < 3 && failure.name !== "AbortError") {
-						await new Promise((resolve) => windowObj.setTimeout(resolve, 600 * attempt));
+						await wait(600 * attempt, options.signal);
 						continue;
 					}
 					throw failure;
@@ -4437,8 +4455,8 @@
 			const countedLoadedPages = () => Array.from(loadedPages).filter((page) => page >= 1 && page <= pageLimit).length;
 			const pages = new Set([info.page]);
 			const discovered = getPageNumbers(firstDocument, info.postId);
-			const totalPages = discovered.size ? Math.max(...discovered, info.page) : info.page;
-			const truncated = totalPages > pageLimit;
+			let totalPages = discovered.size ? Math.max(...discovered, info.page) : info.page;
+			let truncated = totalPages > pageLimit;
 			if (onlyPages) onlyPages.forEach((page) => pages.add(page));
 			else {
 				discovered.forEach((page) => {
@@ -4458,10 +4476,11 @@
 			});
 			const pending = Array.from(pages).sort((a, b) => a - b);
 			const requestGate = createRequestGate(options.requestGapMs ?? requestGapMs);
+			const isCancelled = () => Boolean(options.signal?.aborted || options.isAborted?.());
 			options.onPageLoaded?.(info.page, firstDocument, progressState());
 			const worker = async () => {
 				while (pending.length) {
-					if (options.isAborted?.()) return;
+					if (isCancelled()) return;
 					const page = pending.shift();
 					if (page === void 0 || loadedPages.has(page)) continue;
 					try {
@@ -4483,8 +4502,13 @@
 								pages.add(foundPage);
 								pending.push(foundPage);
 							}
+							if (foundPage > totalPages) {
+								totalPages = foundPage;
+								truncated = totalPages > pageLimit;
+							}
 						});
 					} catch (error) {
+						if (isCancelled() || isAbortError(error)) return;
 						const code = error?.code;
 						failedPages.add(page);
 						if (code === "CLOUDFLARE_CHALLENGE") challengePages.add(page);
@@ -6324,6 +6348,11 @@
 				clearElement(modal.body);
 				modal.body.appendChild(createElement("p", "xns-loading", loadingText));
 			}
+			let pendingContent = null;
+			const discardPendingContent = () => {
+				if (pendingContent && !pendingContent.isConnected) destroyVirtualLists(pendingContent);
+				pendingContent = null;
+			};
 			try {
 				const parsed = parseHtml((await fetchHtml(modal.url, {
 					noStore: fresh,
@@ -6341,15 +6370,20 @@
 						if (currentModal() === modal && !modal.loading) retryPreviewPages(modal);
 					}
 				});
+				pendingContent = preview.content;
 				let hydratedPreview = null;
 				if (preserveContent && preview.hydrate) hydratedPreview = await preview.hydrate;
-				if (currentModal() !== modal || modal.loadGeneration !== generation) return false;
+				if (currentModal() !== modal || modal.loadGeneration !== generation) {
+					discardPendingContent();
+					return false;
+				}
 				const scrollSnapshot = preserveContent ? capturePreviewScroll(modal.body) : null;
 				modal.title.textContent = preview.title || "NodeSeek 帖子预览";
 				updatePreviewHeaderMeta(modal, preview.headerMeta);
 				destroyVirtualLists(modal.body);
 				clearElement(modal.body);
 				modal.body.appendChild(preview.content);
+				pendingContent = null;
 				if (modal.composer && !modal.composer.isConnected) modal.body.appendChild(modal.composer);
 				const previewPost = qs(modal.body, ".xns-preview-post");
 				if (previewPost) installPreviewFeatures(previewPost);
@@ -6367,6 +6401,7 @@
 				}
 				if (preserveContent) stabilizePreviewScroll(modal, scrollSnapshot, generation);
 			} catch (error) {
+				discardPendingContent();
 				if (!isAbortError(error) && currentModal() === modal && modal.loadGeneration === generation) {
 					if (preserveContent) showPreviewRefreshError(modal, error);
 					else showPreviewLoadError(modal, error);
