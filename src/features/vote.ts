@@ -96,15 +96,18 @@ function createVoteFeature({
       const count = typeof item.count === 'number' ? item.count : 0;
       const percent = total > 0 ? Math.round((count / total) * 100) : 0;
       const row = createElement('div', `xns-vote-result${item.voted ? ' xns-vote-mine' : ''}`);
-      row.appendChild(createElement('div', 'vote-item-text', item.text || ''));
+      // 选项描述和票数同一行（票数跟着描述，不再单独占一行），下面才是占比条。
+      const head = createElement('div', 'xns-vote-result-head');
+      head.appendChild(createElement('div', 'vote-item-text', item.text || ''));
+      head.appendChild(createElement('div', 'xns-vote-result-meta', `${count} 票${item.voted ? '（已选）' : ''}`));
+      row.appendChild(head);
       const barWrap = createElement('div', 'xns-vote-bar-wrap');
       const bar = createElement('div', `xns-vote-bar${count > 0 ? '' : ' xns-vote-bar-empty'}`) as HTMLElement;
       bar.style.width = `${percent}%`;
-      // 0 票的条不画绿色也不写“0%”（否则 0 票看起来像有人投过），票数在下面那行已经写了。
+      // 0 票的条不画绿色也不写“0%”（否则 0 票看起来像有人投过），票数在上面那行已经写了。
       if (count > 0) bar.appendChild(documentObj.createTextNode(`${percent}%`));
       barWrap.appendChild(bar);
       row.appendChild(barWrap);
-      row.appendChild(createElement('div', 'xns-vote-result-meta', `${count} 票${item.voted ? '（已选）' : ''}`));
       box.appendChild(row);
     });
     box.appendChild(createElement('div', 'xns-vote-total', `共 ${total} 票${vote.locked ? ' · 已结束' : ''}`));

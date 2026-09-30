@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.97
+// @version      0.5.98
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -1829,14 +1829,16 @@
 				const count = typeof item.count === "number" ? item.count : 0;
 				const percent = total > 0 ? Math.round(count / total * 100) : 0;
 				const row = createElement("div", `xns-vote-result${item.voted ? " xns-vote-mine" : ""}`);
-				row.appendChild(createElement("div", "vote-item-text", item.text || ""));
+				const head = createElement("div", "xns-vote-result-head");
+				head.appendChild(createElement("div", "vote-item-text", item.text || ""));
+				head.appendChild(createElement("div", "xns-vote-result-meta", `${count} 票${item.voted ? "（已选）" : ""}`));
+				row.appendChild(head);
 				const barWrap = createElement("div", "xns-vote-bar-wrap");
 				const bar = createElement("div", `xns-vote-bar${count > 0 ? "" : " xns-vote-bar-empty"}`);
 				bar.style.width = `${percent}%`;
 				if (count > 0) bar.appendChild(documentObj.createTextNode(`${percent}%`));
 				barWrap.appendChild(bar);
 				row.appendChild(barWrap);
-				row.appendChild(createElement("div", "xns-vote-result-meta", `${count} 票${item.voted ? "（已选）" : ""}`));
 				box.appendChild(row);
 			});
 			box.appendChild(createElement("div", "xns-vote-total", `共 ${total} 票${vote.locked ? " · 已结束" : ""}`));
@@ -18470,6 +18472,9 @@
       .xns-vote-status:empty { display:none; }
       .xns-vote-results { display:flex; flex-direction:column; gap:6px; margin:4px 0 6px; }
       .xns-vote-results .xns-vote-result { display:flex; flex-direction:column; gap:2px; }
+      .xns-vote-results .xns-vote-result-head { display:flex; align-items:baseline; gap:6px; }
+      .xns-vote-results .xns-vote-result-head .vote-item-text { min-width:0; }
+      .xns-vote-results .xns-vote-result-head .xns-vote-result-meta { flex:0 0 auto; }
       .xns-vote-results .vote-item-text { font-size:13px; line-height:1.3; }
       .xns-vote-results .xns-vote-bar-wrap { height:16px; border:1px solid var(--xns-border); border-radius:4px; background:var(--xns-accent-soft); overflow:hidden; }
       .xns-vote-results .xns-vote-bar { box-sizing:border-box; min-width:26px; height:100%; padding:0 6px; display:flex; align-items:center; justify-content:flex-end; color:#fff; background:var(--xns-accent-strong); font:11px/16px system-ui,sans-serif; border-radius:3px 0 0 3px; }

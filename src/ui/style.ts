@@ -146,6 +146,9 @@ function installStyle(): void {
       .xns-vote-status:empty { display:none; }
       .xns-vote-results { display:flex; flex-direction:column; gap:6px; margin:4px 0 6px; }
       .xns-vote-results .xns-vote-result { display:flex; flex-direction:column; gap:2px; }
+      .xns-vote-results .xns-vote-result-head { display:flex; align-items:baseline; gap:6px; }
+      .xns-vote-results .xns-vote-result-head .vote-item-text { min-width:0; }
+      .xns-vote-results .xns-vote-result-head .xns-vote-result-meta { flex:0 0 auto; }
       .xns-vote-results .vote-item-text { font-size:13px; line-height:1.3; }
       .xns-vote-results .xns-vote-bar-wrap { height:16px; border:1px solid var(--xns-border); border-radius:4px; background:var(--xns-accent-soft); overflow:hidden; }
       .xns-vote-results .xns-vote-bar { box-sizing:border-box; min-width:26px; height:100%; padding:0 6px; display:flex; align-items:center; justify-content:flex-end; color:#fff; background:var(--xns-accent-strong); font:11px/16px system-ui,sans-serif; border-radius:3px 0 0 3px; }
