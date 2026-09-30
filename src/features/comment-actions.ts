@@ -165,7 +165,7 @@ function createCommentActions({
   }
 
   function createPreviewMenuItem([key, label, icon, withCount]: PreviewActionDefinition): HTMLElement {
-    const item = createElement('span', 'menu-item');
+    const item = createElement('span', 'menu-item xns-preview-menu-item');
     item.dataset.xnsAction = key;
     item.title = label;
     item.setAttribute('role', 'button');
@@ -203,7 +203,8 @@ function createCommentActions({
     if (!includeFavorite) {
       menuItems = menuItems.filter((item) => {
         if (getMenuActionKey(item) === 'favorite') {
-          item.remove();
+          // 不真删：帖子页切回原版时复原的是同一个官方节点，删掉就再也拿不回来了。
+          (item as HTMLElement).dataset.xnsMenuHidden = 'true';
           return false;
         }
         return true;

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.95
+// @version      0.5.96
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -710,7 +710,7 @@
 			return "";
 		}
 		function createPreviewMenuItem([key, label, icon, withCount]) {
-			const item = createElement("span", "menu-item");
+			const item = createElement("span", "menu-item xns-preview-menu-item");
 			item.dataset.xnsAction = key;
 			item.title = label;
 			item.setAttribute("role", "button");
@@ -742,7 +742,7 @@
 			let menuItems = qsa(menu, MENU_ITEMS_SELECTOR);
 			if (!includeFavorite) menuItems = menuItems.filter((item) => {
 				if (getMenuActionKey(item) === "favorite") {
-					item.remove();
+					item.dataset.xnsMenuHidden = "true";
 					return false;
 				}
 				return true;
@@ -4928,6 +4928,15 @@
 		function stripRenderArtifacts(item) {
 			if (!item?.classList) return;
 			qsa(item, ".xns-reply-list, .xns-remote-floor-link").forEach((node) => node.remove());
+			qsa(item, ".xns-preview-menu").forEach((menu) => {
+				menu.classList.remove("xns-preview-menu");
+				qsa(menu, ".menu-item").forEach((menuItem) => {
+					menuItem.classList.remove("xns-action-done");
+					menuItem.removeAttribute("data-xns-action");
+					if (menuItem.classList.contains("xns-preview-menu-item")) menuItem.remove();
+					else menuItem.removeAttribute("data-xns-menu-hidden");
+				});
+			});
 			item.classList.remove("xns-comment-root", "xns-comment-child", "xns-comment-leaf", "xns-floor-highlight");
 			item.removeAttribute("data-xns-floor");
 			item.removeAttribute("data-xns-depth");
@@ -5056,7 +5065,7 @@
 				return;
 			}
 			if (!item) {
-				item = createElement("span", "menu-item");
+				item = createElement("span", "menu-item xns-preview-menu-item");
 				item.setAttribute("role", "button");
 				item.tabIndex = 0;
 				item.innerHTML = "<svg class=\"iconpark-icon\" aria-hidden=\"true\"><use href=\"#edit\"></use></svg><span>编辑</span>";
@@ -18439,6 +18448,8 @@
       .xns-preview-thread .comment-menu > .menu-item.xns-action-failed, .xns-preview-menu > .menu-item.xns-action-failed { color:#b91c1c; }
       /* 已操作状态：对齐官方 .comment-menu .menu-item.clicked 的红色高亮。 */
       .xns-preview-thread .comment-menu > .menu-item.xns-action-done, .xns-preview-menu > .menu-item.xns-action-done { color:#e70606; }
+      /* 预览菜单不提供“收藏”，但不真删官方那条（切回原版要用），只隐藏；复原时去掉标记。 */
+      .xns-preview-thread .comment-menu > .menu-item[data-xns-menu-hidden], .xns-preview-menu > .menu-item[data-xns-menu-hidden] { display:none; }
       .xns-action-state { font-size:11px; }
       .xns-preview-composer { margin-top:10px; padding-top:8px; border-top:1px solid rgba(100,116,139,.2); }
       .xns-preview-composer-title { margin:0 0 6px; font-size:14px; }

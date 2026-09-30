@@ -21,6 +21,17 @@ function createPreviewRenderUtils({ qs, qsa, createElement, buildPostUrl }: Prev
   function stripRenderArtifacts(item: Element | null | undefined): void {
     if (!item?.classList) return;
     qsa(item, '.xns-reply-list, .xns-remote-floor-link').forEach((node) => node.remove());
+    // 帖子页切回原版时复原的是官方节点本身，预览菜单在它身上留下的皮肤、动作标记、
+    // 被隐藏的官方菜单项和我们补出来的菜单项，都得一并撤掉，否则官方 UI 仍是预览版样式。
+    qsa(item, '.xns-preview-menu').forEach((menu) => {
+      menu.classList.remove('xns-preview-menu');
+      qsa(menu, '.menu-item').forEach((menuItem) => {
+        menuItem.classList.remove('xns-action-done');
+        menuItem.removeAttribute('data-xns-action');
+        if (menuItem.classList.contains('xns-preview-menu-item')) menuItem.remove();
+        else menuItem.removeAttribute('data-xns-menu-hidden');
+      });
+    });
     item.classList.remove('xns-comment-root', 'xns-comment-child', 'xns-comment-leaf', 'xns-floor-highlight');
     item.removeAttribute('data-xns-floor');
     item.removeAttribute('data-xns-depth');

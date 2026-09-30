@@ -124,6 +124,8 @@ function installStyle(): void {
       .xns-preview-thread .comment-menu > .menu-item.xns-action-failed, .xns-preview-menu > .menu-item.xns-action-failed { color:#b91c1c; }
       /* 已操作状态：对齐官方 .comment-menu .menu-item.clicked 的红色高亮。 */
       .xns-preview-thread .comment-menu > .menu-item.xns-action-done, .xns-preview-menu > .menu-item.xns-action-done { color:#e70606; }
+      /* 预览菜单不提供“收藏”，但不真删官方那条（切回原版要用），只隐藏；复原时去掉标记。 */
+      .xns-preview-thread .comment-menu > .menu-item[data-xns-menu-hidden], .xns-preview-menu > .menu-item[data-xns-menu-hidden] { display:none; }
       .xns-action-state { font-size:11px; }
       .xns-preview-composer { margin-top:10px; padding-top:8px; border-top:1px solid rgba(100,116,139,.2); }
       .xns-preview-composer-title { margin:0 0 6px; font-size:14px; }

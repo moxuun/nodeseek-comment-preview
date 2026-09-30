@@ -1429,8 +1429,13 @@ scenario('列表页预览弹窗结构与操作菜单', async (ctx) => {
     const postFloorLink = post.querySelector('.floor-link-wrapper > .floor-link, .nsk-content-meta-info .floor-link');
     const postActions = [...post.querySelector(':scope > .comment-menu').children].map((item) => item.dataset.xnsAction);
     const root = modal.querySelector('.xns-preview-thread .xns-comment-root');
-    const floorActions = [...root.querySelector(':scope > .comment-menu').children].map((item) => item.dataset.xnsAction);
-    const floorHints = [...root.querySelectorAll(':scope > .comment-menu > .menu-item')].map((item) => item.getAttribute('aria-label'));
+    const floorActions = [...root.querySelector(':scope > .comment-menu').children]
+      // 收藏官方那条不再真删，只标记隐藏（切回原版要复原同一个节点），断言只看可见项。
+      .filter((item) => !item.hasAttribute('data-xns-menu-hidden'))
+      .map((item) => item.dataset.xnsAction);
+    const floorHints = [...root.querySelectorAll(':scope > .comment-menu > .menu-item')]
+      .filter((item) => !item.hasAttribute('data-xns-menu-hidden'))
+      .map((item) => item.getAttribute('aria-label'));
     const remoteFloorLink = modal.querySelector('.xns-preview-thread .xns-remote-floor-link > .floor-link');
     return {
       title: modal.querySelector('.xns-modal-title')?.textContent,
@@ -1819,7 +1824,8 @@ scenario('弹窗预览自己的评论出现编辑入口（0.5.20 回归）', asy
   },15_000, '预览弹窗加载');
   const state = await page.evaluate(() => {
     const menu = document.querySelector('.xns-modal .xns-preview-thread .xns-comment-root > .comment-menu');
-    const kids = menu ? Array.from(menu.children) : [];
+    // 收藏官方那条不再真删，只标记隐藏（切回原版要复原同一个节点），计数只看可见项。
+    const kids = menu ? Array.from(menu.children).filter((el) => !el.hasAttribute('data-xns-menu-hidden')) : [];
     const items = kids.map(function (el) { return (el.textContent || '' ).trim(); });
     return { hasEdit: items.includes('编辑'), count: items.length };
   });

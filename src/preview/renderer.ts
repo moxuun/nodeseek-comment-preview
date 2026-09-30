@@ -122,7 +122,7 @@ function createPreviewRenderer({
       return;
     }
     if (!item) {
-      item = createElement('span', 'menu-item') as HTMLElement;
+      item = createElement('span', 'menu-item xns-preview-menu-item') as HTMLElement;
       item.setAttribute('role', 'button');
       item.tabIndex = 0;
       item.innerHTML = '<svg class="iconpark-icon" aria-hidden="true"><use href="#edit"></use></svg><span>编辑</span>';
