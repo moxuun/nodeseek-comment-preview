@@ -149,6 +149,8 @@ function installStyle(): void {
       .xns-vote-results .vote-item-text { font-size:13px; line-height:1.3; }
       .xns-vote-results .xns-vote-bar-wrap { height:16px; border:1px solid var(--xns-border); border-radius:4px; background:var(--xns-accent-soft); overflow:hidden; }
       .xns-vote-results .xns-vote-bar { box-sizing:border-box; min-width:26px; height:100%; padding:0 6px; display:flex; align-items:center; justify-content:flex-end; color:#fff; background:var(--xns-accent-strong); font:11px/16px system-ui,sans-serif; border-radius:3px 0 0 3px; }
+      /* min-width 是为了让极小占比也能容下百分比文字；0 票不该因此长出一条绿杠。 */
+      .xns-vote-results .xns-vote-bar-empty { min-width:0; padding:0; background:transparent; }
       .xns-vote-results .xns-vote-mine .vote-item-text { color:var(--xns-accent-strong); font-weight:600; }
       .xns-vote-results .xns-vote-result-meta { color:var(--xns-muted); font-size:12px; }
       .xns-vote-total { margin-top:4px; color:var(--xns-muted); font-size:12px; }

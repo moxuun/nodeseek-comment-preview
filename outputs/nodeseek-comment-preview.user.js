@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.96
+// @version      0.5.97
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -1831,9 +1831,9 @@
 				const row = createElement("div", `xns-vote-result${item.voted ? " xns-vote-mine" : ""}`);
 				row.appendChild(createElement("div", "vote-item-text", item.text || ""));
 				const barWrap = createElement("div", "xns-vote-bar-wrap");
-				const bar = createElement("div", "xns-vote-bar");
+				const bar = createElement("div", `xns-vote-bar${count > 0 ? "" : " xns-vote-bar-empty"}`);
 				bar.style.width = `${percent}%`;
-				bar.appendChild(documentObj.createTextNode(`${percent}%`));
+				if (count > 0) bar.appendChild(documentObj.createTextNode(`${percent}%`));
 				barWrap.appendChild(bar);
 				row.appendChild(barWrap);
 				row.appendChild(createElement("div", "xns-vote-result-meta", `${count} 票${item.voted ? "（已选）" : ""}`));
@@ -18473,6 +18473,8 @@
       .xns-vote-results .vote-item-text { font-size:13px; line-height:1.3; }
       .xns-vote-results .xns-vote-bar-wrap { height:16px; border:1px solid var(--xns-border); border-radius:4px; background:var(--xns-accent-soft); overflow:hidden; }
       .xns-vote-results .xns-vote-bar { box-sizing:border-box; min-width:26px; height:100%; padding:0 6px; display:flex; align-items:center; justify-content:flex-end; color:#fff; background:var(--xns-accent-strong); font:11px/16px system-ui,sans-serif; border-radius:3px 0 0 3px; }
+      /* min-width 是为了让极小占比也能容下百分比文字；0 票不该因此长出一条绿杠。 */
+      .xns-vote-results .xns-vote-bar-empty { min-width:0; padding:0; background:transparent; }
       .xns-vote-results .xns-vote-mine .vote-item-text { color:var(--xns-accent-strong); font-weight:600; }
       .xns-vote-results .xns-vote-result-meta { color:var(--xns-muted); font-size:12px; }
       .xns-vote-total { margin-top:4px; color:var(--xns-muted); font-size:12px; }

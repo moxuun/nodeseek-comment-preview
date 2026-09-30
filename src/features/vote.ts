@@ -98,9 +98,10 @@ function createVoteFeature({
       const row = createElement('div', `xns-vote-result${item.voted ? ' xns-vote-mine' : ''}`);
       row.appendChild(createElement('div', 'vote-item-text', item.text || ''));
       const barWrap = createElement('div', 'xns-vote-bar-wrap');
-      const bar = createElement('div', 'xns-vote-bar') as HTMLElement;
+      const bar = createElement('div', `xns-vote-bar${count > 0 ? '' : ' xns-vote-bar-empty'}`) as HTMLElement;
       bar.style.width = `${percent}%`;
-      bar.appendChild(documentObj.createTextNode(`${percent}%`));
+      // 0 票的条不画绿色也不写“0%”（否则 0 票看起来像有人投过），票数在下面那行已经写了。
+      if (count > 0) bar.appendChild(documentObj.createTextNode(`${percent}%`));
       barWrap.appendChild(bar);
       row.appendChild(barWrap);
       row.appendChild(createElement('div', 'xns-vote-result-meta', `${count} 票${item.voted ? '（已选）' : ''}`));
