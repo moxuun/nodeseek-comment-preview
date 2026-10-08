@@ -42,7 +42,7 @@ function SettingsPanel({ initialValues, onChange, onReset, onClose }: SettingsPa
       </Field>
       <Field label="自动读取页数" note="最多 50 页；修改后在下次刷新或打开帖子时生效。">
         <select value={values.maxPages} onChange={event => apply({ maxPages: Number(event.currentTarget.value) })}>
-          {[10, 20, 30, 50].map(pages => <option key={pages} value={pages}>{pages} 页</option>)}
+          {[10, 20, 25, 30, 50].map(pages => <option key={pages} value={pages}>{pages} 页</option>)}
         </select>
       </Field>
       <Field label="评论密度">

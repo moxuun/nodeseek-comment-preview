@@ -1,4 +1,4 @@
-import { DEFAULT_MODE, MAX_PAGE, state } from './config.js';
+import { DEFAULT_MAX_PAGES, DEFAULT_MODE, MAX_PAGE, state } from './config.js';
 import type { PostMode } from './config.js';
 import type { Settings } from '../ui/settings-panel';
 
@@ -10,13 +10,14 @@ interface PreferencesDeps {
   storageKey: string;
   defaultMode: Settings['mode'];
   maxPage: number;
+  defaultMaxPages: number;
 }
 
 // 用户偏好存储；只保存界面设置，不保存帖子内容、登录信息或写操作数据。
-function createPreferences({ windowObj, documentObj, state, storageKey, defaultMode, maxPage }: PreferencesDeps) {
+function createPreferences({ windowObj, documentObj, state, storageKey, defaultMode, maxPage, defaultMaxPages }: PreferencesDeps) {
   const defaults: Readonly<Settings> = Object.freeze({
     mode: defaultMode,
-    maxPages: maxPage,
+    maxPages: defaultMaxPages,
     density: 'comfortable',
     theme: 'auto',
   });
@@ -26,7 +27,7 @@ function createPreferences({ windowObj, documentObj, state, storageKey, defaultM
   function normalize(raw: Partial<Settings> = {}): Settings {
     const mode = raw.mode === 'original' ? 'original' : defaultMode;
     const requestedPages = Number(raw.maxPages);
-    const maxPages = [10, 20, 30, maxPage].includes(requestedPages) ? requestedPages : maxPage;
+    const maxPages = [10, 20, 25, 30, maxPage].includes(requestedPages) ? requestedPages : defaultMaxPages;
     const density = raw.density === 'compact' ? 'compact' : 'comfortable';
     const theme = raw.theme === 'dark' ? 'dark' : 'auto';
     return { mode, maxPages, density, theme };
@@ -92,6 +93,7 @@ const xnsPreferences = createPreferences({
   storageKey: 'xns-comment-preview-settings',
   defaultMode: DEFAULT_MODE,
   maxPage: MAX_PAGE,
+  defaultMaxPages: DEFAULT_MAX_PAGES,
 });
 
 const getSettings = (): Settings => xnsPreferences.get();

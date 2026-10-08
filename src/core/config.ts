@@ -5,6 +5,8 @@ const PREFIX = 'xns';
 const REQUEST_TIMEOUT = 8_000;
 const MAX_RESPONSE_BYTES = 2_000_000;
 const MAX_PAGE = 50;
+// 自动读取页数的默认值。默认比上限保守：长帖默认只发一半的分页请求，需要读全可在设置里调。
+const DEFAULT_MAX_PAGES = 25;
 // NodeSeek 对连续分页请求有明显的限流；保留少量并发，避免长帖读取时成批 429。
 // 实测（work/test/benchmark.mjs，50 页富内容帖子页 + 250ms 模拟延迟，各 3 次取中位数）：
 //   2 并发 + 150ms = 8.0s（旧值）／ 4 + 100ms = 5.6s ／ 4 + 80ms = 4.7s ／ 8 + 30ms = 2.8s；
@@ -101,5 +103,5 @@ const state: AppState = {
   mode: DEFAULT_MODE,
 };
 
-export { ANSI_BG_HEX, ANSI_BRIGHT_HEX, ANSI_COLORS, ANSI_FG_HEX, DEFAULT_MODE, HTML_CACHE_ITEM_MAX_BYTES, HTML_CACHE_MAX_BYTES, HTML_CACHE_MAX_ENTRIES, HTML_CACHE_TTL, MAX_PAGE, MAX_RESPONSE_BYTES, PAGE_CONCURRENCY, PAGE_REQUEST_GAP, REQUEST_TIMEOUT, SELECTORS, STYLE_ID, state };
+export { ANSI_BG_HEX, ANSI_BRIGHT_HEX, ANSI_COLORS, ANSI_FG_HEX, DEFAULT_MAX_PAGES, DEFAULT_MODE, HTML_CACHE_ITEM_MAX_BYTES, HTML_CACHE_MAX_BYTES, HTML_CACHE_MAX_ENTRIES, HTML_CACHE_TTL, MAX_PAGE, MAX_RESPONSE_BYTES, PAGE_CONCURRENCY, PAGE_REQUEST_GAP, REQUEST_TIMEOUT, SELECTORS, STYLE_ID, state };
 export type { AppState, LightboxHandle, ModalHandle, PostHandle, PostMode, SettingsPanelHandle };

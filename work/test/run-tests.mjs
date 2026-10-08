@@ -389,11 +389,11 @@ async function installPageRequestTimingCounter(page, postId) {
 scenario('长帖分页截断明示（0.5.13 回归）', async (ctx) => {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/post-456-1`, { waitUntil: 'networkidle0' });
-  // 456 帖共 52 页、每页 1 楼：MAX_PAGE 之上应截断并在状态栏明示，而不是静默丢楼层。
+  // 456 帖共 52 页、每页 1 楼：默认自动读取 25 页，超出部分应截断并在状态栏明示，而不是静默丢楼层。
   await waitFor(page, () => {
     const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
     const virtualCount = Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0);
-    return /仅读取前 50 页/.test(status) && virtualCount === 50;
+    return /仅读取前 25 页/.test(status) && virtualCount === 25;
   }, 30_000, '截断状态提示');
   const state = await page.evaluate(() => ({
     toolbar: document.querySelector('.xns-toolbar-status')?.textContent,
@@ -401,9 +401,9 @@ scenario('长帖分页截断明示（0.5.13 回归）', async (ctx) => {
     virtualCount: Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0),
     activeItems: document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length,
   }));
-  assert(/帖子共 52 页，仅读取前 50 页/.test(state.status), `状态栏应明示截断，实际 ${state.status}`);
-  assert(state.virtualCount === 50, `截断后数据模型应有前 50 楼，实际 ${state.virtualCount}`);
-  assert(state.activeItems < state.virtualCount, `截断长帖不应把 50 楼全部物化，实际 ${state.activeItems}/${state.virtualCount}`);
+  assert(/帖子共 52 页，仅读取前 25 页/.test(state.status), `状态栏应明示截断，实际 ${state.status}`);
+  assert(state.virtualCount === 25, `截断后数据模型应有前 25 楼，实际 ${state.virtualCount}`);
+  assert(state.activeItems < state.virtualCount, `截断长帖不应把 25 楼全部物化，实际 ${state.activeItems}/${state.virtualCount}`);
   const threadStyles = await page.evaluate(() => {
     const list = document.querySelector('.comment-container > ul.comments');
     const root = list?.querySelector(':scope > .xns-comment-root');
@@ -424,14 +424,14 @@ scenario('打开上限外页面时进度不计入当前页', async (ctx) => {
   await waitFor(page, () => {
     const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
     const virtualCount = Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0);
-    return /已读取 50\/50 页/.test(status) && virtualCount === 51;
+    return /已读取 25\/25 页/.test(status) && virtualCount === 26;
   }, 30_000, '上限外页面进度');
   const state = await page.evaluate(() => ({
     status: document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '',
     virtualCount: Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0),
   }));
-  assert(!/已读取 51\/50 页/.test(state.status), `当前页不应污染分页进度，实际 ${state.status}`);
-  assert(state.virtualCount === 51, `应保留当前第 52 页及前 50 页，实际 ${state.virtualCount}`);
+  assert(!/已读取 26\/25 页/.test(state.status), `当前页不应污染分页进度，实际 ${state.status}`);
+  assert(state.virtualCount === 26, `应保留当前第 52 页及前 25 页，实际 ${state.virtualCount}`);
   await page.close();
 });
 
@@ -442,7 +442,7 @@ scenario('长帖内容增强按可视远端评论执行', async (ctx) => {
   await waitFor(page, () => {
     const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
     const virtualCount = Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0);
-    return /仅读取前 50 页/.test(status) && virtualCount === 50;
+    return /仅读取前 25 页/.test(status) && virtualCount === 25;
   }, 30_000, '长帖内容增强扫描完成');
   const stats = await page.evaluate(() => window.__xnsFeatureQueryStats);
   assert(stats.count < 6 * 49, `首屏不应一次处理全部 49 个远端评论，实际执行 ${stats.count} 次：${JSON.stringify(stats.selectors)}`);
@@ -456,11 +456,11 @@ scenario('长帖分页发现优先扫描分页链接', async (ctx) => {
   await waitFor(page, () => {
     const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
     const virtualCount = Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0);
-    return /仅读取前 50 页/.test(status) && virtualCount === 50;
+    return /仅读取前 25 页/.test(status) && virtualCount === 25;
   }, 30_000, '分页发现完成');
   const stats = await page.evaluate(() => window.__xnsPaginationQueryStats);
   assert(stats.broad === 0, `标准分页页面不应执行全量 a[href] 扫描，实际 ${stats.broad} 次`);
-  assert(stats.targeted >= 50, `应对长帖分页执行定向扫描，实际 ${stats.targeted} 次`);
+  assert(stats.targeted >= 25, `应对长帖分页执行定向扫描，实际 ${stats.targeted} 次`);
   await page.close();
 });
 
@@ -484,10 +484,10 @@ scenario('长帖安全克隆只做一次全树查询', async (ctx) => {
   await waitFor(page, () => {
     const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
     const virtualCount = Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0);
-    return /仅读取前 50 页/.test(status) && virtualCount === 50;
+    return /仅读取前 25 页/.test(status) && virtualCount === 25;
   }, 30_000, '安全克隆完成');
   const stats = await page.evaluate(() => window.__xnsSanitizeQueryStats);
-  assert(stats.all >= 49, `长帖远端评论应执行全树节点查询，实际 ${stats.all} 次`);
+  assert(stats.all >= 24, `长帖远端评论应执行全树节点查询，实际 ${stats.all} 次`);
   assert(stats.dangerous === 0 && stats.menus === 0 && stats.ids === 0, `安全规则不应再重复查询树，实际 ${JSON.stringify(stats)}`);
   await page.close();
 });
@@ -733,7 +733,7 @@ scenario('设置入口迁移到油猴菜单', async (ctx) => {
       hasDone: !!document.querySelector('.xns-settings-primary'),
     }));
     assert(panel.title === '预览设置', `油猴菜单应打开原有设置面板，实际 ${panel.title}`);
-    assert(panel.maxPages === '50', `设置面板默认页数应保持原值，实际 ${panel.maxPages}`);
+    assert(panel.maxPages === '25', `设置面板默认页数应为 25，实际 ${panel.maxPages}`);
     assert(!panel.hasPromptOption, '设置面板不应保留已删除的一次性提示选项');
     assert(panel.hasDone, '原有设置面板操作按钮应保留');
 
@@ -764,8 +764,8 @@ scenario('设置入口迁移到油猴菜单', async (ctx) => {
       dark: document.documentElement.classList.contains('dark-layout'),
       stored: JSON.parse(localStorage.getItem('xns-comment-preview-settings')),
     }));
-    assert(JSON.stringify(reset.values) === JSON.stringify(['thread', '50', 'comfortable', 'auto']), '恢复默认必须同步更新受控表单');
-    assert(!reset.compact && !reset.dark && reset.stored.mode === 'thread' && reset.stored.maxPages === 50, '恢复默认应同步保存并移除脚本应用的样式');
+    assert(JSON.stringify(reset.values) === JSON.stringify(['thread', '25', 'comfortable', 'auto']), '恢复默认必须同步更新受控表单');
+    assert(!reset.compact && !reset.dark && reset.stored.mode === 'thread' && reset.stored.maxPages === 25, '恢复默认应同步保存并移除脚本应用的样式');
     await page.click('.xns-settings-primary');
     for (let attempt = 0; attempt < 3; attempt += 1) {
       await page.evaluate(() => { window.__xnsSettingsMenuCallback(); window.__xnsSettingsMenuCallback(); });
@@ -857,7 +857,7 @@ scenario('帖子页远端内容增强功能保留', async (ctx) => {
 scenario('远端评论图片进入视口后才恢复源地址（0.5.22 回归）', async (ctx) => {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/post-460-1`, { waitUntil: 'domcontentloaded' });
-  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '500 条回复', 30_000, '富内容长帖加载完成');
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '250 条回复', 30_000, '富内容长帖加载完成');
   const before = await page.evaluate(() => {
     const images = [...document.querySelectorAll('.comment-container [data-xns-remote] img')];
     return {
@@ -871,10 +871,10 @@ scenario('远端评论图片进入视口后才恢复源地址（0.5.22 回归）
   assert(before.total > 0, `远端评论应包含图片，实际 ${JSON.stringify(before)}`);
   assert(before.withSrc === before.total && before.deferred === 0 && before.activeItems < before.virtualCount,
     `评论物化后图片应恢复 src，同时不应物化全部评论：${JSON.stringify(before)}`);
-  assert(await materializeFloor(page, 500, '.comment-container > ul.comments'), '应能从虚拟列表物化底部评论 #500');
-  await page.evaluate(() => document.querySelector('.comment-container [data-xns-remote][data-xns-floor="500"]')?.scrollIntoView({ block: 'center' }));
+  assert(await materializeFloor(page, 250, '.comment-container > ul.comments'), '应能从虚拟列表物化底部评论 #250');
+  await page.evaluate(() => document.querySelector('.comment-container [data-xns-remote][data-xns-floor="250"]')?.scrollIntoView({ block: 'center' }));
   await waitFor(page, () => {
-    const image = document.querySelector('.comment-container [data-xns-remote][data-xns-floor="500"] img');
+    const image = document.querySelector('.comment-container [data-xns-remote][data-xns-floor="250"] img');
     return Boolean(image?.getAttribute('src') && image.dataset.xnsImageBound === 'true');
   }, 5_000, '远端图片进入视口后恢复');
   await page.close();
@@ -883,20 +883,20 @@ scenario('远端评论图片进入视口后才恢复源地址（0.5.22 回归）
 scenario('富内容远端评论滚动后仍能增强根节点', async (ctx) => {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/post-460-1`, { waitUntil: 'networkidle0' });
-  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '500 条回复', 30_000, '富内容长帖加载完成');
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '250 条回复', 30_000, '富内容长帖加载完成');
   const before = await page.evaluate(() => ({
     remoteCodeBlocks: document.querySelectorAll('.comment-container [data-xns-remote] pre').length,
     remoteCopyButtons: document.querySelectorAll('.comment-container [data-xns-remote] .xns-code-copy-btn').length,
   }));
   assert(before.remoteCodeBlocks > 0, `富内容长帖应包含远端代码块，实际 ${JSON.stringify(before)}`);
-  assert(await materializeFloor(page, 496, '.comment-container > ul.comments'), '应能从虚拟列表物化含代码块的远端评论 #496');
-  await page.evaluate(() => document.querySelector('.comment-container [data-xns-remote][data-xns-floor="496"]')?.scrollIntoView({ block: 'center' }));
-  await waitFor(page, () => Boolean(document.querySelector('.comment-container [data-xns-remote][data-xns-floor="496"] pre .xns-code-copy-btn')), 5_000, '滚动后增强远端根评论');
+  assert(await materializeFloor(page, 246, '.comment-container > ul.comments'), '应能从虚拟列表物化含代码块的远端评论 #246');
+  await page.evaluate(() => document.querySelector('.comment-container [data-xns-remote][data-xns-floor="246"]')?.scrollIntoView({ block: 'center' }));
+  await waitFor(page, () => Boolean(document.querySelector('.comment-container [data-xns-remote][data-xns-floor="246"] pre .xns-code-copy-btn')), 5_000, '滚动后增强远端根评论');
   const after = await page.evaluate(() => ({
     remoteCodeBlocks: document.querySelectorAll('.comment-container [data-xns-remote] pre').length,
     remoteCopyButtons: document.querySelectorAll('.comment-container [data-xns-remote] .xns-code-copy-btn').length,
     remoteImagesBound: document.querySelectorAll('.comment-container [data-xns-remote] img[data-xns-image-bound="true"]').length,
-    targetCopyButton: Boolean(document.querySelector('.comment-container [data-xns-remote][data-xns-floor="496"] pre .xns-code-copy-btn')),
+    targetCopyButton: Boolean(document.querySelector('.comment-container [data-xns-remote][data-xns-floor="246"] pre .xns-code-copy-btn')),
   }));
   assert(after.remoteCopyButtons >= before.remoteCopyButtons && after.targetCopyButton,
     `滚动后应增强远端根评论代码块：${JSON.stringify({ before, after })}`);
@@ -908,17 +908,17 @@ scenario('预览弹窗远端内容滚动后才增强', async (ctx) => {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/list-460`, { waitUntil: 'networkidle0' });
   await page.click('a[href="/post-460-1"]');
-  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '500 条回复', 30_000, '富内容预览加载完成');
+  await waitFor(page, () => document.querySelector('.xns-modal .xns-preview-comments h3')?.textContent === '250 条回复', 30_000, '富内容预览加载完成');
   const before = await page.evaluate(() => ({
     remoteCodeBlocks: document.querySelectorAll('.xns-modal [data-xns-remote] pre').length,
     remoteCopyButtons: document.querySelectorAll('.xns-modal [data-xns-remote] .xns-code-copy-btn').length,
   }));
   assert(before.remoteCodeBlocks > 0, `富内容预览应包含远端代码块，实际 ${JSON.stringify(before)}`);
   assert(before.remoteCopyButtons < before.remoteCodeBlocks, `预览首屏不应增强全部远端代码块：${JSON.stringify(before)}`);
-  assert(await materializeFloor(page, 496, '.xns-modal .xns-preview-thread'), '应能从虚拟列表物化含代码块的底部评论 #496');
-  await page.evaluate(() => document.querySelector('.xns-modal [data-xns-remote][data-xns-floor="496"]')?.scrollIntoView({ block: 'center' }));
+  assert(await materializeFloor(page, 246, '.xns-modal .xns-preview-thread'), '应能从虚拟列表物化含代码块的底部评论 #246');
+  await page.evaluate(() => document.querySelector('.xns-modal [data-xns-remote][data-xns-floor="246"]')?.scrollIntoView({ block: 'center' }));
   await waitFor(page, () => {
-    return Boolean(document.querySelector('.xns-modal [data-xns-remote][data-xns-floor="496"] pre .xns-code-copy-btn'));
+    return Boolean(document.querySelector('.xns-modal [data-xns-remote][data-xns-floor="246"] pre .xns-code-copy-btn'));
   }, 5_000, '预览滚动后增强远端评论');
   const after = await page.evaluate(() => ({
     remoteCopyButtons: document.querySelectorAll('.xns-modal [data-xns-remote] .xns-code-copy-btn').length,
@@ -1230,7 +1230,7 @@ scenario('分页请求从首个请求开始遵守基础间隔', async (ctx) => {
   await page.goto(`${ctx.base}/post-460-1`, { waitUntil: 'networkidle0' });
   await waitFor(page, () => {
     const status = document.querySelector('.xns-toolbar-status')?.title || document.querySelector('.xns-toolbar-status')?.textContent || '';
-    return /已读取 50\/50 页/.test(status);
+    return /已读取 25\/25 页/.test(status);
   }, 30_000, '分页基础间隔');
   const starts = await page.evaluate(() => window.__xnsPageRequestStarts || []);
   assert(starts.length >= 2, `应至少记录两个分页请求，实际 ${JSON.stringify(starts)}`);
@@ -1351,7 +1351,7 @@ scenario('点击楼层链接跳转并高亮', async (ctx) => {
 scenario('虚拟楼层流滚动回收并恢复远端楼层', async (ctx) => {
   const page = await ctx.newPage();
   await page.goto(`${ctx.base}/post-460-1`, { waitUntil: 'domcontentloaded' });
-  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '500 条回复', 30_000, '虚拟楼层流加载完成');
+  await waitFor(page, () => document.querySelector('.xns-toolbar-status')?.textContent === '250 条回复', 30_000, '虚拟楼层流加载完成');
   const top = await page.evaluate(() => {
     const list = document.querySelector('.comment-container > ul.comments');
     return {
@@ -1360,27 +1360,30 @@ scenario('虚拟楼层流滚动回收并恢复远端楼层', async (ctx) => {
       scrollHeight: document.documentElement.scrollHeight,
     };
   });
-  assert(top.virtualCount === 500, `虚拟数据模型应保留 500 条评论，实际 ${JSON.stringify(top)}`);
+  assert(top.virtualCount === 250, `虚拟数据模型应保留 250 条评论，实际 ${JSON.stringify(top)}`);
   assert(top.activeItems < top.virtualCount, `顶部不应物化全部评论，实际 ${JSON.stringify(top)}`);
   assert(top.scrollHeight > 2_000, `占位高度应保留长帖滚动空间，实际 ${top.scrollHeight}`);
 
-  assert(await materializeFloor(page, 500, '.comment-container > ul.comments'), '滚动到底部时应能重新物化 #500');
-  await waitFor(page, () => Boolean(document.querySelector('.comment-container > ul.comments [data-xns-floor="500"]')), 5_000, '底部楼层物化');
+  assert(await materializeFloor(page, 250, '.comment-container > ul.comments'), '滚动到底部时应能重新物化 #250');
+  await waitFor(page, () => Boolean(document.querySelector('.comment-container > ul.comments [data-xns-floor="250"]')), 5_000, '底部楼层物化');
   const bottom = await page.evaluate(() => ({
-    hasFloor500: Boolean(document.querySelector('.comment-container > ul.comments [data-xns-floor="500"]')),
+    hasFloor250: Boolean(document.querySelector('.comment-container > ul.comments [data-xns-floor="250"]')),
     activeItems: document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length,
     virtualCount: Number(document.querySelector('.comment-container > ul.comments')?.dataset.xnsVirtualCount || 0),
   }));
-  assert(bottom.hasFloor500 && bottom.activeItems < bottom.virtualCount, `底部应只保留活动窗口并包含 #500，实际 ${JSON.stringify(bottom)}`);
+  assert(bottom.hasFloor250 && bottom.activeItems < bottom.virtualCount, `底部应只保留活动窗口并包含 #250，实际 ${JSON.stringify(bottom)}`);
 
   await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'auto' }));
-  await waitFor(page, () => Boolean(document.querySelector('.comment-container > ul.comments [data-xns-floor="1"]')), 5_000, '回到顶部楼层恢复');
+  await waitFor(page, () => {
+    const list = document.querySelector('.comment-container > ul.comments');
+    return Boolean(list?.querySelector('[data-xns-floor="1"]')) && !list?.querySelector('[data-xns-floor="250"]');
+  }, 5_000, '回到顶部楼层恢复并回收底部');
   const restored = await page.evaluate(() => ({
     hasFloor1: Boolean(document.querySelector('.comment-container > ul.comments [data-xns-floor="1"]')),
-    hasFloor500: Boolean(document.querySelector('.comment-container > ul.comments [data-xns-floor="500"]')),
+    hasFloor250: Boolean(document.querySelector('.comment-container > ul.comments [data-xns-floor="250"]')),
     activeItems: document.querySelectorAll('.comment-container > ul.comments .content-item[data-xns-floor]').length,
   }));
-  assert(restored.hasFloor1 && !restored.hasFloor500, `回到顶部后应回收底部楼层，实际 ${JSON.stringify(restored)}`);
+  assert(restored.hasFloor1 && !restored.hasFloor250, `回到顶部后应回收底部楼层，实际 ${JSON.stringify(restored)}`);
   await page.close();
 });
 

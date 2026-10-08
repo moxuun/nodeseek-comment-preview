@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.99
+// @version      0.5.100
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -2072,10 +2072,10 @@
 		});
 		return Array.from(merged.values());
 	}
-	function createPreferences({ windowObj, documentObj, state, storageKey, defaultMode, maxPage }) {
+	function createPreferences({ windowObj, documentObj, state, storageKey, defaultMode, maxPage, defaultMaxPages }) {
 		const defaults = Object.freeze({
 			mode: defaultMode,
-			maxPages: maxPage,
+			maxPages: defaultMaxPages,
 			density: "comfortable",
 			theme: "auto"
 		});
@@ -2089,9 +2089,10 @@
 				maxPages: [
 					10,
 					20,
+					25,
 					30,
 					maxPage
-				].includes(requestedPages) ? requestedPages : maxPage,
+				].includes(requestedPages) ? requestedPages : defaultMaxPages,
 				density: raw.density === "compact" ? "compact" : "comfortable",
 				theme: raw.theme === "dark" ? "dark" : "auto"
 			};
@@ -2152,7 +2153,8 @@
 		state,
 		storageKey: "xns-comment-preview-settings",
 		defaultMode: DEFAULT_MODE,
-		maxPage: 50
+		maxPage: 50,
+		defaultMaxPages: 25
 	});
 	var getSettings = () => xnsPreferences.get();
 	var updateSettings = (patch) => xnsPreferences.update(patch);
@@ -18112,6 +18114,7 @@
 								children: [
 									10,
 									20,
+									25,
 									30,
 									50
 								].map((pages) => (0, import_jsx_runtime.jsxs)("option", {
