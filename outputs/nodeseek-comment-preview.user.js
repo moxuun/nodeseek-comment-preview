@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.98
+// @version      0.5.99
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -18357,9 +18357,10 @@
       ${settingsStyles}
       ${previewShellStyles}
       .xns-post-toolbar, .xns-post-toolbar * { box-sizing: border-box; }
-      /* 右边缘停靠：right 必须让开 NodeSeek 自己那列固定按钮（宽度约 48–56px，右侧内缩约 8–12px），
-         否则窄屏下会盖住设置/反馈/分享/回顶。max-width 保证窄屏时面板不会把左边挤出屏幕。 */
-      .xns-post-toolbar { position:fixed; right:78px; bottom:166px; z-index:1000; display:flex; align-items:center; flex-wrap:wrap; gap:6px; max-width:calc(100vw - 96px); margin:0; padding:7px; border:1px solid var(--xns-border); border-radius:8px; color:var(--xns-text); background:rgba(248,250,252,.96); font:13px/1.3 system-ui,sans-serif; box-shadow:0 4px 16px rgba(0,0,0,.25); }
+      /* 右侧垂直居中停靠：右下角是站点自己的上下跳转按钮列（#fast-nav-button-group 固定在
+         bottom:40px，三个按钮向上叠到约 160px），右上角是个人信息卡片，第三方插件也习惯往
+         上下两个角堆控件。居中后两头都让开，只和右侧栏中段的卡片同高。 */
+      .xns-post-toolbar { position:fixed; top:50%; right:12px; transform:translateY(-50%); z-index:1000; display:flex; align-items:center; flex-wrap:wrap; gap:6px; max-width:calc(100vw - 24px); margin:0; padding:7px; border:1px solid var(--xns-border); border-radius:8px; color:var(--xns-text); background:rgba(248,250,252,.96); font:13px/1.3 system-ui,sans-serif; box-shadow:0 4px 16px rgba(0,0,0,.25); }
       .xns-post-toolbar button { padding:5px 10px; border:1px solid var(--xns-border); border-radius:6px; color:inherit; background:transparent; cursor:pointer; font:inherit; }
       .xns-post-toolbar button:hover, .xns-post-toolbar button:focus-visible { border-color:var(--xns-accent-strong); outline:none; }
       .xns-post-toolbar button[aria-pressed="true"] { color:var(--xns-accent); border-color:var(--xns-accent-strong); background:var(--xns-accent-soft); }
