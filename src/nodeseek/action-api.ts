@@ -38,7 +38,7 @@ function createNodeSeekActionApi({ windowObj, navigatorObj, state, requestTimeou
       const digest = await windowObj.crypto.subtle.digest('SHA-1', new TextEncoder().encode(input));
       return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
     } catch {
-      return 'a'.repeat(40);
+      throw new Error('请求签名失败：浏览器不支持 WebCrypto 或计算被拒绝');
     }
   }
 
