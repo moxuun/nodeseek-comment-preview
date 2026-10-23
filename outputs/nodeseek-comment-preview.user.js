@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.101
+// @version      0.5.102
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -535,7 +535,7 @@
 						}
 						throw new Error(`HTTP ${response.status}`);
 					}
-					if (!response.ok) throw new Error(`HTTP ${response.status}`);
+					if (!response.ok) throw createHttpError(`HTTP ${response.status}`, "HTTP_DETERMINISTIC", response.status);
 					const responseUrl = parseSameOriginUrl(response.url);
 					const contentType = (response.headers.get("content-type") || "").toLowerCase();
 					const contentLength = Number(response.headers.get("content-length") || 0);
@@ -550,7 +550,7 @@
 					};
 				} catch (error) {
 					let failure = error;
-					if (failure.code === "CLOUDFLARE_CHALLENGE") throw failure;
+					if (failure.code === "CLOUDFLARE_CHALLENGE" || failure.code === "HTTP_DETERMINISTIC") throw failure;
 					if (options.signal?.aborted) throw failure;
 					if (timedOut && failure.name === "AbortError") failure = createTimeoutError();
 					if (attempt < 3 && failure.name !== "AbortError") {

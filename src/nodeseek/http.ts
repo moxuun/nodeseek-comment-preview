@@ -223,7 +223,8 @@ function createHttpClient({
           }
           throw new Error(`HTTP ${response.status}`);
         }
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        // 4xx（429 已在上面的可重试分支处理）是确定性失败：重试只会把同一个错误再发两遍。
+        if (!response.ok) throw createHttpError(`HTTP ${response.status}`, 'HTTP_DETERMINISTIC', response.status);
         const responseUrl = parseSameOriginUrl(response.url);
         const contentType = (response.headers.get('content-type') || '').toLowerCase();
         const contentLength = Number(response.headers.get('content-length') || 0);
@@ -235,7 +236,7 @@ function createHttpClient({
         return { html, url: responseUrl };
       } catch (error) {
         let failure = error as HttpError;
-        if (failure.code === 'CLOUDFLARE_CHALLENGE') throw failure;
+        if (failure.code === 'CLOUDFLARE_CHALLENGE' || failure.code === 'HTTP_DETERMINISTIC') throw failure;
         // 调用方主动取消（关窗、切楼层、重新加载）：原样抛出，由调用方静默处理。
         if (options.signal?.aborted) throw failure;
         // 超时：换成可重试、可提示的错误，否则会被当成取消而默默丢弃。
