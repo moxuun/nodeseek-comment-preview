@@ -93,4 +93,4 @@ const xnsPreviewRenderUtils = createPreviewRenderUtils({ qs, qsa, createElement,
 const stripRenderArtifacts = (item: Element | null | undefined): void => xnsPreviewRenderUtils.stripRenderArtifacts(item);
 const addRemoteNote = (record: CommentRecord, postId: string, remote?: boolean): void => xnsPreviewRenderUtils.addRemoteNote(record, postId, remote);
 
-export { addRemoteNote, stripRenderArtifacts, THREAD_LAYOUT_PROPERTIES };
+export { addRemoteNote, stripRenderArtifacts };

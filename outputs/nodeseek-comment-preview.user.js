@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.103
+// @version      0.5.104
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -1729,7 +1729,7 @@
 	var createRefreshButton = (onClick) => xnsPreviewModalUi.createRefreshButton(onClick);
 	var createShareButton = (onClick) => xnsPreviewModalUi.createShareButton(onClick);
 	var installPreviewScrollButtons = (dialog, body) => xnsPreviewModalUi.installPreviewScrollButtons(dialog, body);
-	function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPreviewAction, closeImageLightbox, closeModal }) {
+	function createAppEvents({ state, getMenuActionKey, getActionContext, runPreviewAction, closeImageLightbox, closeModal }) {
 		function handlePreviewActionClick(event) {
 			const menuItem = event.target?.closest?.(".xns-preview-menu > .menu-item") || null;
 			if (!menuItem) return;
@@ -1779,7 +1779,6 @@
 	}
 	var xnsAppEvents = createAppEvents({
 		state,
-		qsa,
 		getMenuActionKey,
 		getActionContext,
 		runPreviewAction,
@@ -2026,8 +2025,9 @@
 			return order(a) - order(b);
 		});
 	}
+	var THREAD_LEVEL_LIMIT = 8;
 	function threadLevel(depth) {
-		return Math.min(depth, 8);
+		return Math.min(depth, THREAD_LEVEL_LIMIT);
 	}
 	function threadColumn(depth) {
 		return Math.min(depth, 7);
@@ -5718,7 +5718,7 @@
 						node.classList.add("xns-preview-content");
 						installPreviewFeatures(node);
 					},
-					onUnmount: (node, entry) => {
+					onUnmount: (_node, entry) => {
 						const record = entry.record;
 						if (record && !record.current) releaseCommentNode(record);
 					},
@@ -6566,7 +6566,7 @@
 	function openPreviewModal(...args) {
 		return xnsPreviewController.openPreviewModal(...args);
 	}
-	function createPreviewEntryController({ document, location, parseSameOriginUrl, getPostInfo, openPreviewModal }) {
+	function createPreviewEntryController({ location, parseSameOriginUrl, getPostInfo, openPreviewModal }) {
 		const titleSelectors = [
 			"h3 a[href]",
 			".post-item > a[href]",
@@ -18532,7 +18532,6 @@
 			installStyle();
 			registerSettingsMenu();
 			const previewEntry = createPreviewEntryController({
-				document: documentObj,
 				location: windowObj.location,
 				parseSameOriginUrl,
 				getPostInfo,

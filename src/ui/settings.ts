@@ -1,5 +1,4 @@
 import { state } from '../core/config.js';
-import type { SettingsPanelHandle } from '../core/config.js';
 import { createElement } from '../core/dom.js';
 import { getSettings, resetSettings, updateSettings } from '../core/preferences.js';
 import { mountSettingsPanel } from './settings-panel';

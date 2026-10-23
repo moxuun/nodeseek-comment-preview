@@ -896,12 +896,6 @@ const xnsPreviewController = createPreviewController({
   createShareButton,
   openPreviewComposer,
 });
-function buildPreviewContent(...args: Parameters<typeof xnsPreviewController.buildPreviewContent>) { return xnsPreviewController.buildPreviewContent(...args); }
-function loadPreviewModal(...args: Parameters<typeof xnsPreviewController.loadPreviewModal>) { return xnsPreviewController.loadPreviewModal(...args); }
-function syncPreviewReply(modal: unknown): Promise<boolean> {
-  return xnsPreviewController.syncPreviewReply(modal as PreviewModalState | null);
-}
-function refreshPreviewModal(...args: Parameters<typeof xnsPreviewController.refreshPreviewModal>) { return xnsPreviewController.refreshPreviewModal(...args); }
 function openPreviewModal(...args: Parameters<typeof xnsPreviewController.openPreviewModal>) { return xnsPreviewController.openPreviewModal(...args); }
 
-export { openPreviewModal, refreshPreviewModal, syncPreviewReply };
+export { openPreviewModal };

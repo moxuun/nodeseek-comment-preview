@@ -2,7 +2,6 @@ import type { getPostInfo, parseSameOriginUrl } from '../nodeseek/url.js';
 
 /** 预览入口依赖；DOM、URL 解析和弹窗打开都由外部注入，便于单独验证拦截范围。 */
 interface PreviewEntryDeps {
-  document: Document;
   location: Location;
   parseSameOriginUrl: typeof parseSameOriginUrl;
   getPostInfo: typeof getPostInfo;
@@ -17,7 +16,7 @@ interface FloorNavigationControllerDeps {
 
 // 预览入口只负责识别“列表里的帖子标题”。
 // 它不处理请求、弹窗内容或任何写操作，便于单独验证拦截范围。
-function createPreviewEntryController({ document, location, parseSameOriginUrl, getPostInfo, openPreviewModal }: PreviewEntryDeps) {
+function createPreviewEntryController({ location, parseSameOriginUrl, getPostInfo, openPreviewModal }: PreviewEntryDeps) {
   const titleSelectors = [
     'h3 a[href]',
     '.post-item > a[href]',

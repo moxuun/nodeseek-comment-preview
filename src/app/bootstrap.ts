@@ -29,7 +29,6 @@ interface AppBootstrapDeps {
   installStyle: () => void;
   registerSettingsMenu: () => void;
   createPreviewEntryController: (options: {
-    document: Document;
     location: Location;
     parseSameOriginUrl: typeof parseSameOriginUrl;
     getPostInfo: typeof getPostInfo;
@@ -72,7 +71,6 @@ function createAppBootstrap({
     installStyle();
     registerSettingsMenu();
     const previewEntry = createPreviewEntryController({
-      document: documentObj,
       location: windowObj.location,
       parseSameOriginUrl,
       getPostInfo,

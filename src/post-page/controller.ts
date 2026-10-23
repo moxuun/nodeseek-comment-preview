@@ -563,7 +563,7 @@ function createPostPageController({
           node.classList.add('xns-preview-content');
           installPreviewFeatures(node);
         },
-        onUnmount: (node, entry) => {
+        onUnmount: (_node, entry) => {
           const record = entry.record;
           if (record && !record.current) releaseCommentNode(record);
         },

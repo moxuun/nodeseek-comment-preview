@@ -118,5 +118,5 @@ function mergeCommentRecords<T extends { floor: number; current?: boolean }>(
   return Array.from(merged.values());
 }
 
-export { buildReplyTree, flattenReplyTree, mergeCommentRecords, THREAD_COLUMN_LIMIT, THREAD_LEVEL_LIMIT, threadColumn, threadLevel };
+export { flattenReplyTree, mergeCommentRecords, THREAD_COLUMN_LIMIT, threadLevel };
 export type { FlatEntry, ThreadLines };

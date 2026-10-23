@@ -14,7 +14,7 @@ import { addRemoteNote, stripRenderArtifacts } from './render-utils.js';
 import { createCommentVirtualizer } from './virtualizer.js';
 import type { CommentRecord } from '../nodeseek/content-parser.js';
 import type { PageStatusOptions } from '../ui/status.js';
-import type { CommentVirtualEntry, CommentVirtualizer, VirtualizerHost, VirtualizerSetupOptions } from './virtualizer.js';
+import type { CommentVirtualEntry, VirtualizerHost, VirtualizerSetupOptions } from './virtualizer.js';
 
 /** 帖子信息中渲染需要的字段。 */
 interface RenderPostInfo {

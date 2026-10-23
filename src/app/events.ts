@@ -1,6 +1,5 @@
 import { state } from '../core/config.js';
 import type { LightboxHandle, ModalHandle, PostHandle, SettingsPanelHandle } from '../core/config.js';
-import { qsa } from '../core/dom.js';
 import { getActionContext, getMenuActionKey, runPreviewAction } from '../features/comment-actions.js';
 import type { PreviewActionContext, PreviewActionKey } from '../features/comment-actions.js';
 import { closeImageLightbox } from '../preview/lightbox.js';
@@ -14,7 +13,6 @@ interface AppEventsDeps {
     settingsPanel: SettingsPanelHandle | null;
     lightbox: LightboxHandle | null;
   };
-  qsa: typeof qsa;
   getMenuActionKey: (menuItem: Element) => PreviewActionKey | '';
   getActionContext: (menuItem: Element | null) => PreviewActionContext;
   runPreviewAction: (action: PreviewActionKey, menuItem: Element, comment: Element | null, context: PreviewActionContext | null) => unknown;
@@ -23,7 +21,7 @@ interface AppEventsDeps {
 }
 
 // 全局事件边界：把站点原生点击与脚本接管的预览动作分开。
-function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPreviewAction, closeImageLightbox, closeModal }: AppEventsDeps) {
+function createAppEvents({ state, getMenuActionKey, getActionContext, runPreviewAction, closeImageLightbox, closeModal }: AppEventsDeps) {
   function handlePreviewActionClick(event: Event): void {
     const eventTarget = event.target as Partial<Element> | null;
     const menuItem = (eventTarget?.closest?.('.xns-preview-menu > .menu-item') as HTMLElement | undefined) || null;
@@ -80,7 +78,6 @@ function createAppEvents({ state, qsa, getMenuActionKey, getActionContext, runPr
 
 const xnsAppEvents = createAppEvents({
   state,
-  qsa,
   getMenuActionKey,
   getActionContext,
   runPreviewAction,
