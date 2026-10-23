@@ -7,7 +7,7 @@ interface SanitizeOptions {
 }
 
 const forbiddenTags = ['script', 'style', 'link', 'meta', 'base', 'iframe', 'object', 'embed', 'form', 'input', 'textarea', 'select', 'option', 'button'];
-const forbiddenAttributes = ['style', 'srcdoc', 'srcset', 'formaction', 'contenteditable', 'ping', 'data-xns-deferred-src'];
+const forbiddenAttributes = ['style', 'srcdoc', 'srcset', 'formaction', 'contenteditable', 'ping'];
 
 // DOMPurify handles untrusted markup. The following pass only applies NodeSeek's
 // layout, link and image policies to the sanitized, detached copy.
@@ -25,6 +25,9 @@ export function sanitizeImportedNode(sourceNode: Element | null | undefined, opt
   const imported = fragment.firstElementChild;
   if (!imported) return null;
   for (const node of [imported, ...imported.querySelectorAll('*')]) {
+    for (const name of node.getAttributeNames()) {
+      if (name.startsWith('data-xns-')) node.removeAttribute(name);
+    }
     if (node !== imported && !options.keepCommentMenu && node.matches('.comment-menu, .comment-actions')) {
       node.remove();
       continue;
