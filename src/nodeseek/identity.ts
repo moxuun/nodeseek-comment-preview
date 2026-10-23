@@ -46,8 +46,8 @@ function createIdentityService({ documentObj, getSsrState }: IdentityDeps) {
 
   function currentUserUid(): string | null {
     if (resolved) return uid;
-    resolved = true;
     uid = fromPageState() || fromUserMenu();
+    if (uid) resolved = true;
     return uid;
   }
 
