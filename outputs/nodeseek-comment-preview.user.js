@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nodeseek楼中楼预览
 // @namespace    https://www.nodeseek.com/
-// @version      0.5.102
+// @version      0.5.103
 // @author       moxuun
 // @description  楼中楼、虚拟楼层流、原版评论布局、ANSI 代码块和标签页渲染、代码块复制、更窄灰色边缘、帖子回复、分页并发加载、图片灯箱和 V2Next 式预览刷新/滚动控制。
 // @license      MIT
@@ -240,7 +240,7 @@
 				const digest = await windowObj.crypto.subtle.digest("SHA-1", new TextEncoder().encode(input));
 				return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 			} catch {
-				return "a".repeat(40);
+				throw new Error("请求签名失败：浏览器不支持 WebCrypto 或计算被拒绝");
 			}
 		}
 		function randomCsrfToken() {
@@ -2192,8 +2192,8 @@
 		}
 		function currentUserUid() {
 			if (resolved) return uid;
-			resolved = true;
 			uid = fromPageState() || fromUserMenu();
+			if (uid) resolved = true;
 			return uid;
 		}
 		return Object.freeze({ currentUserUid });
@@ -4182,8 +4182,7 @@
 		"srcset",
 		"formaction",
 		"contenteditable",
-		"ping",
-		"data-xns-deferred-src"
+		"ping"
 	];
 	function sanitizeImportedNode(sourceNode, options = {}) {
 		if (!sourceNode || forbiddenTags.includes(sourceNode.localName.toLowerCase())) return null;
@@ -4196,6 +4195,7 @@
 		}).firstElementChild;
 		if (!imported) return null;
 		for (const node of [imported, ...imported.querySelectorAll("*")]) {
+			for (const name of node.getAttributeNames()) if (name.startsWith("data-xns-")) node.removeAttribute(name);
 			if (node !== imported && !options.keepCommentMenu && node.matches(".comment-menu, .comment-actions")) {
 				node.remove();
 				continue;
