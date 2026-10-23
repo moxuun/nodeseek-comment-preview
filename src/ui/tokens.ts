@@ -13,6 +13,8 @@ const XNS_STYLE_TOKENS = `
         --xns-accent-strong: #2ea44f;
         --xns-accent-soft: rgba(0,0,0,.05);
         --xns-border: #e5e7eb;
+        /* 卡片边框宽度：楼层关系线覆盖层要按它做左移补偿，改粗细只改这里。 */
+        --xns-card-border: 2px;
         --xns-danger: #cf222e;
         --xns-warning: #9a6700;
         --xns-success: #1a7f37;

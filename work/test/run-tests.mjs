@@ -413,7 +413,7 @@ scenario('长帖分页截断明示（0.5.13 回归）', async (ctx) => {
     };
   });
   assert(threadStyles.hasPreviewThreadClass, '帖子详情页评论列表应带预览线程作用域');
-  assert(threadStyles.rootBorderLeftWidth === '3px', `根楼层应显示 3px 蓝色左栏，实际 ${JSON.stringify(threadStyles)}`);
+  assert(threadStyles.rootBorderLeftWidth === '2px', `根楼层应显示 2px 卡片边框，实际 ${JSON.stringify(threadStyles)}`);
   assert(dataOf(page).pageErrors.length === 0, `页面出现未捕获异常：${dataOf(page).pageErrors.join('; ')}`);
   await page.close();
 });
@@ -972,23 +972,6 @@ scenario('预览正文长图加载后虚拟楼层坐标不偏移（0.5.23 回归
   await page.close();
 });
 
-scenario('预览楼层显示官方主色左侧标识（0.5.23 回归）', async (ctx) => {
-  const page = await openPreviewModal(ctx);
-  const style = await page.evaluate(() => {
-    const floor = document.querySelector('.xns-modal .xns-preview-thread > .content-item[data-xns-floor]');
-    const computed = floor && getComputedStyle(floor);
-    return computed ? {
-      width: Number.parseFloat(computed.borderLeftWidth),
-      style: computed.borderLeftStyle,
-      color: computed.borderLeftColor,
-    } : null;
-  });
-  // #2ea44f = 官方亮暗一致的主色（--main-color），亮色模式已对齐官方。
-  assert(style?.width >= 3 && style.style === 'solid' && /46,\s*164,\s*79/.test(style.color),
-    `预览楼层应显示官方主色 #2ea44f 左侧长条，实际 ${JSON.stringify(style)}`);
-  await page.close();
-});
-
 scenario('楼中楼按 linux tree 缩进：子楼层是与顶层同款的卡片且整体右移 18px，竖线画在卡片左侧空白，最后一条子楼层在横线处收口（0.5.81 回归）', async (ctx) => {
   const page = await openPreviewModal(ctx);
   const info = await page.evaluate(() => {
@@ -1047,25 +1030,25 @@ scenario('楼中楼按 linux tree 缩进：子楼层是与顶层同款的卡片�
     };
   });
   assert(info.count > 0 && info.root && info.first && info.deep && info.leaf, `楼中楼应存在多层嵌套与叶子条目，实际 ${JSON.stringify(info)}`);
-  // 顶层楼层保持原样：3px 楼层身份左栏、不缩进、没有关系线覆盖层。
-  assert(info.root.borderLeftWidth === '3px' && info.root.marginLeft === '0px' && info.root.overlayContent === 'none',
-    `顶层楼层应保留 3px 身份左栏、不缩进、不画关系线，实际 ${JSON.stringify(info.root)}`);
-  // 子楼层是与顶层同款的卡片（1px 边框 + 7px 圆角 + 同色底，但没有身份左栏），且整张卡片按层级右移 18px。
+  // 顶层楼层与子楼层同款：2px 卡片边框、不缩进、没有关系线覆盖层。
+  assert(info.root.borderLeftWidth === '2px' && info.root.marginLeft === '0px' && info.root.overlayContent === 'none',
+    `顶层楼层应是 2px 边框的同款卡片、不缩进、不画关系线，实际 ${JSON.stringify(info.root)}`);
+  // 子楼层是与顶层同款的卡片（2px 边框 + 7px 圆角 + 同色底），且整张卡片按层级右移 18px。
   [info.first, info.deep].forEach((row) => {
-    assert(row.borderLeftWidth === '1px' && row.borderRadius === '7px' && row.backgroundColor === info.root.backgroundColor,
-      `子楼层应是与顶层同款的卡片（且没有身份左栏），实际 ${JSON.stringify(row)}`);
+    assert(row.borderLeftWidth === '2px' && row.borderRadius === '7px' && row.backgroundColor === info.root.backgroundColor,
+      `子楼层应是与顶层同款的卡片，实际 ${JSON.stringify(row)}`);
     assert(row.marginLeft === `${18 * row.depth}px` && row.marginTop === '3px',
       `子楼层应整体按层级右移 18px（缩进用 margin 而非 padding），实际 ${JSON.stringify(row)}`);
     assert(Math.abs(row.paddingLeft - 10) < 0.5, `卡片内边距应保持 10px，实际 ${JSON.stringify(row)}`);
-    // 覆盖层向左越出一整段缩进（再补回卡片 1px 左边框），左边缘与列表左边缘对齐，竖线坐标才能与 JS 一致。
-    assert(Math.abs(row.overlayLeft - (-18 * row.depth - 1)) < 0.5 && row.overlayTop === -3,
+    // 覆盖层向左越出一整段缩进（再补回卡片 2px 左边框），左边缘与列表左边缘对齐，竖线坐标才能与 JS 一致。
+    assert(Math.abs(row.overlayLeft - (-18 * row.depth - 2)) < 0.5 && row.overlayTop === -3,
       `关系线覆盖层应向左越出一整段缩进并上下各溢出 3px，实际 ${JSON.stringify(row)}`);
     assert(row.layers === 3 && row.repeat === 'no-repeat, no-repeat, no-repeat' && row.columnsX === 0 && row.columnsSize === '100% 100%',
       `关系线应由三层背景图铺满覆盖层，实际 ${JSON.stringify(row)}`);
-    // 横线从父层竖线右边缘（18(d-1) + 9）起、长 9px，终点正好落在卡片左边缘（相对卡片 padding 区为 -1px）。
+    // 横线从父层竖线右边缘（18(d-1) + 9）起、长 9px，终点正好落在卡片左边缘（相对卡片 padding 区为 -2px）。
     assert(Math.abs(row.connectorX - ((row.depth - 1) * 18 + 9)) < 0.5 && row.connectorSize === '9px 3px',
       `横线应接父层竖线右边缘且长度 9px，实际 ${JSON.stringify(row)}`);
-    assert(Math.abs(row.overlayLeft + row.connectorX + 9 + 1) < 0.5,
+    assert(Math.abs(row.overlayLeft + row.connectorX + 9 + 2) < 0.5,
       `横线终点应正好落在卡片左边缘（不能伸进卡片），实际 ${JSON.stringify(row)}`);
   });
   // 树形几何的完整规则由 thread-lines.test.mjs 用小型树逐条对拍；这里只断言 CSS 侧必须成立的部分：
